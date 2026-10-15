@@ -1,0 +1,10 @@
+node_modules/
+dist/
+www/
+.stencil/
+coverage/
+*.tsbuildinfo
+.DS_Store
+apps/web/src/components.d.ts.bak
+test-results/
+playwright-report/
