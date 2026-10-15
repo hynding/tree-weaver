@@ -16,6 +16,8 @@ locally in your browser.
 
 The same words are used in the code (`Forest`, `Tree`, `Branch`, `Leaf`) and in the UI.
 
+**Try it:** https://hynding.github.io/tree-weaver/ (deployed from `main` by `.github/workflows/pages.yml`).
+
 ## What you can do
 
 - **Build layouts** by clicking or dragging branches from the palette onto the canvas or the outline:
@@ -83,6 +85,8 @@ pnpm build        # builds every package and the app (apps/web/www)
 pnpm test         # unit tests for the packages (Vitest)
 pnpm typecheck
 ```
+
+The app uses relative asset paths, so the built `apps/web/www` folder works from any subpath, including GitHub Pages.
 
 ## Defaults chosen
 
