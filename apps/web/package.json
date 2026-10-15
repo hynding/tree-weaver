@@ -1,0 +1,23 @@
+{
+  "name": "@tree-weaver/web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tree Weaver editor: a Stencil web app for weaving responsive layout trees.",
+  "scripts": {
+    "build": "stencil build",
+    "dev": "stencil build --dev --watch --serve --port 3333",
+    "start": "stencil build --dev --watch --serve --port 3333",
+    "typecheck": "stencil build --dev"
+  },
+  "dependencies": {
+    "@tree-weaver/branches": "workspace:*",
+    "@tree-weaver/core": "workspace:*",
+    "@tree-weaver/formats": "workspace:*",
+    "@tree-weaver/kits": "workspace:*",
+    "@tree-weaver/storage": "workspace:*"
+  },
+  "devDependencies": {
+    "@stencil/core": "^4.45.2",
+    "@stencil/store": "^2.2.5"
+  }
+}

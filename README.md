@@ -1,3 +1,94 @@
 # Tree Weaver
 
-Weave responsive layout trees for the web.
+Tree Weaver is a visual builder for web layouts, in the spirit of GrapesJS. You weave **trees** of
+**branches** and **leaves** into pages, tune them for every display type, style them with your own
+design kits, and move them in and out as HTML, XML, JSON, YAML or Markdown. Everything saves
+locally in your browser.
+
+## Vocabulary
+
+| Term       | Meaning                                                                                   |
+| ---------- | ----------------------------------------------------------------------------------------- |
+| **Forest** | A project. Holds trees and the design kits they share.                                    |
+| **Tree**   | One layout: a page, a screen, a reusable section.                                         |
+| **Branch** | A component: an element with a tag, classes, attributes, per-display styles and children. |
+| **Leaf**   | Content hanging off a branch: text or an image.                                           |
+
+The same words are used in the code (`Forest`, `Tree`, `Branch`, `Leaf`) and in the UI.
+
+## What you can do
+
+- **Build layouts** by clicking or dragging branches from the palette onto the canvas or the outline:
+  sections, containers, responsive grids (2/3/4 columns, sidebar layouts), flex rows and columns, tables,
+  headings, paragraphs, lists, links, buttons, images, figures, cards, a navbar, a hero, a feature grid.
+- **Edit in place**: select anything in the canvas, double-click text to rewrite it, drag branches in
+  the canvas or outline to reorder or re-parent them, and undo or redo every change.
+- **Tune every display**: desktop large (the base), desktop XL, tablet, mobile landscape and mobile
+  portrait. Styles cascade: XL and tablet inherit desktop, both mobile displays inherit tablet. The
+  inspector edits the current display and shows inherited values as placeholders.
+- **Lay out with grids, flex and tables**: one-click equal columns, track templates, gaps and alignment;
+  child placement inside a parent grid or flex; add or remove table rows and columns.
+- **Import design kits (CSS)**: upload a `.css` file, link a stylesheet URL or paste CSS. Kits apply
+  across the forest, can be toggled and reordered, and their classes are suggested in the inspector.
+  A starter kit, _Weaver Basic_, comes with every new forest.
+- **Upload and download tree data** as JSON, YAML, XML, HTML or Markdown (see below).
+- **Save locally**: forests autosave to IndexedDB (falling back to `localStorage`), and you can keep
+  several forests in one browser.
+
+## Formats
+
+| Format   | Holds            | Round trip                                                                                                          |
+| -------- | ---------------- | ------------------------------------------------------------------------------------------------------------------- |
+| JSON     | tree or forest   | Lossless.                                                                                                           |
+| YAML     | tree or forest   | Lossless.                                                                                                           |
+| XML      | tree or forest   | Lossless (`<tree-weaver>` → `<forest>` → `<tree>` → `<branch>` / `<leaf>`).                                         |
+| HTML     | one tree         | A standalone page with kits and responsive CSS inlined. Branch ids, names and every display's styles import back. |
+| Markdown | one tree         | Readable content (headings, lists, tables, links, images, code). Layout branches and styles ride along in front matter and HTML comments, so they import back. |
+
+Imports also accept HTML and Markdown that Tree Weaver did not write: elements become branches,
+text and images become leaves, inline `style` attributes become desktop styles, and `<style>` /
+`<link rel="stylesheet">` become design kits. Scripts and event handler attributes are dropped.
+
+JSON and YAML files use an envelope:
+
+```json
+{ "format": "tree-weaver", "version": 1, "forest": { "name": "My site", "trees": [], "kits": [] } }
+```
+
+Bare forests (`{ "trees": [...] }`), bare trees (`{ "root": {...} }`) and bare branches are accepted too.
+
+## Workspace layout
+
+```
+apps/
+  web/                 Stencil editor app (@tree-weaver/web)
+packages/
+  core/                Tree model, immutable operations, displays, CSS/HTML rendering, validation
+  formats/             JSON, YAML, XML, HTML and Markdown import/export
+  storage/             IndexedDB / localStorage / memory forest stores and preferences
+  kits/                Design kit analysis (classes, tokens, imports) and the starter kit
+  branches/            The branch library (palette blueprints) and tree templates
+```
+
+The packages are plain TypeScript with no DOM dependency, so they can run in Node as well as the browser.
+
+## Development
+
+Requires Node 20+ and pnpm 10.
+
+```sh
+pnpm install
+pnpm dev          # builds the packages, then serves the editor at http://localhost:3333
+pnpm build        # builds every package and the app (apps/web/www)
+pnpm test         # unit tests for the packages (Vitest)
+pnpm typecheck
+```
+
+## Defaults chosen
+
+- **Local save** uses IndexedDB, with `localStorage` and then memory as fallbacks.
+- **Display types** are desktop large (1280, base), desktop XL (≥1440px), tablet (≤1024px), mobile
+  landscape (≤932px, landscape) and mobile portrait (≤600px, portrait). Generated CSS targets
+  branches with `[data-tw="<id>"]` selectors.
+- **Forest imports** open as a new forest (with a fresh id if it would clash); tree imports join the
+  current forest.

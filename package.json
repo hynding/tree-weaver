@@ -1,0 +1,23 @@
+{
+  "name": "tree-weaver",
+  "private": true,
+  "type": "module",
+  "description": "Weave layout trees for the web: forests of trees, made of branches and leaves.",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "pnpm -r --workspace-concurrency=1 build",
+    "build:packages": "pnpm -r --filter \"./packages/**\" build",
+    "dev": "pnpm build:packages && pnpm --filter @tree-weaver/web dev",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "^6.2.5",
+    "typescript": "~5.9.3",
+    "vitest": "^4.1.12"
+  }
+}
