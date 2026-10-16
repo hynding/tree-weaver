@@ -1,17 +1,20 @@
 import { Component, Prop, State, h } from '@stencil/core';
 import { detectFormat, FORMATS, type FormatId } from '@tree-weaver/formats';
-import { currentTree, download, exportCurrent, importText, toast, type ExportOutput } from '../../store/actions';
+import { currentTree, download, exportCurrent, exportStorybookCurrent, importText, toast, type ExportOutput } from '../../store/actions';
 import { state } from '../../store/editor';
 import { Icon } from '../../utils/icons';
 
 const ACCEPT = FORMATS.flatMap((f) => f.extensions.map((e) => `.${e}`)).join(',');
 
-/** Upload and download trees and forests in JSON, YAML, XML, HTML and Markdown. */
+/** Export targets: every data format, plus a Storybook project. */
+type ExportTarget = FormatId | 'storybook';
+
+/** Upload and download trees and forests in JSON, YAML, XML, HTML and Markdown, or download them as a Storybook project. */
 @Component({ tag: 'tw-io-dialog' })
 export class TwIoDialog {
   @Prop() mode: 'import' | 'export' = 'export';
 
-  @State() format: FormatId = 'json';
+  @State() format: ExportTarget = 'json';
   @State() scope: 'tree' | 'forest' = 'tree';
   @State() pasted = '';
   @State() pasteFormat: FormatId | 'auto' = 'auto';
@@ -32,7 +35,7 @@ export class TwIoDialog {
 
   private output(): ExportOutput | null {
     try {
-      return exportCurrent(this.format, this.scope);
+      return this.format === 'storybook' ? exportStorybookCurrent(this.scope) : exportCurrent(this.format, this.scope);
     } catch (err) {
       return { text: `Error: ${(err as Error).message}`, fileName: '', mime: 'text/plain' };
     }
@@ -62,8 +65,9 @@ export class TwIoDialog {
   }
 
   private renderExport() {
-    const forestOnly = (id: FormatId) => this.scope === 'forest' && !FORMATS.find((f) => f.id === id)!.forest;
+    const forestOnly = (id: ExportTarget) => id !== 'storybook' && this.scope === 'forest' && !FORMATS.find((f) => f.id === id)!.forest;
     if (forestOnly(this.format)) this.format = 'json';
+    const storybook = this.format === 'storybook';
     const out = this.output();
     const tree = currentTree();
     return [
@@ -94,22 +98,28 @@ export class TwIoDialog {
               <small>{f.id === 'html' ? 'Web page' : f.id === 'markdown' ? 'Readable, layout kept' : f.forest ? 'Tree or forest' : 'Single tree'}</small>
             </button>
           ))}
+          <button class="format-option" aria-pressed={String(storybook)} onClick={() => (this.format = 'storybook')}>
+            <strong>Storybook</strong>
+            <small>Stories project (zip)</small>
+          </button>
         </div>
         <textarea class="preview" readOnly aria-label="Export preview">
           {out?.text}
         </textarea>
         <p class="hint" style={{ margin: '0' }}>
-          {this.format === 'html'
-            ? 'A standalone page with your kits and responsive CSS inlined. It imports back with every branch and style.'
-            : this.format === 'markdown'
-              ? 'Content as Markdown. Layout branches and responsive styles ride along in front matter and HTML comments, so it imports back intact.'
-              : 'Lossless: imports back exactly, including ids, kits and every display’s styles.'}
+          {storybook
+            ? 'A Storybook project: a story for each tree, each display type and each named branch, with text and images editable as controls. Unzip it, then run npm install and npm run storybook.'
+            : this.format === 'html'
+              ? 'A standalone page with your kits and responsive CSS inlined. It imports back with every branch and style.'
+              : this.format === 'markdown'
+                ? 'Content as Markdown. Layout branches and responsive styles ride along in front matter and HTML comments, so it imports back intact.'
+                : 'Lossless: imports back exactly, including ids, kits and every display’s styles.'}
         </p>
       </div>,
       <footer>
         <button
           class="btn"
-          disabled={!out?.fileName}
+          disabled={!out?.fileName || storybook}
           onClick={async () => {
             await navigator.clipboard.writeText(out!.text);
             toast('Copied to the clipboard', 'success');
