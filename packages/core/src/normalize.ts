@@ -114,6 +114,7 @@ export function normalizeKit(value: unknown, path = 'kit'): DesignKit {
     enabled: value.enabled === undefined ? true : value.enabled === true || value.enabled === 'true',
   };
   if (value.source) kit.source = str(value.source);
+  if (isStylesheetUrl(str(value.href))) kit.href = str(value.href).trim();
   return kit;
 }
 
@@ -140,4 +141,9 @@ export function normalizeForest(value: unknown, path = 'forest'): Forest {
     seen.add(tree.id);
   }
   return forest;
+}
+
+/** True for an absolute http(s) URL, the only kind a linked kit may load from. */
+export function isStylesheetUrl(value: string): boolean {
+  return /^https?:\/\/[^\s"'<>]+$/i.test(value.trim());
 }

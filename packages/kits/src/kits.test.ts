@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { analyzeKit, createStarterKit, kitClasses, kitFromFile, kitFromUrl } from './index';
+import { analyzeKit, createEnvKits, createStarterKit, kitClasses, kitFromFile, kitFromUrl, parseCssUrls } from './index';
 
 describe('analyzeKit', () => {
   it('extracts classes, tokens, imports and media queries', () => {
@@ -46,13 +46,34 @@ describe('kitFromUrl', () => {
     expect(kit.name).toBe('kit');
     expect(kit.css).toBe('.from-url {}');
     expect(kit.source).toBe('https://cdn.example.com/kit.css?v=2');
+    expect(kit.href).toBe('https://cdn.example.com/kit.css?v=2');
   });
 
-  it('falls back to @import when fetching fails', async () => {
+  it('still links the stylesheet when fetching fails', async () => {
     const fetchImpl = vi.fn(async () => {
       throw new TypeError('CORS');
     });
     const kit = await kitFromUrl('https://cdn.example.com/kit.css', fetchImpl as unknown as typeof fetch);
-    expect(kit.css).toBe('@import url("https://cdn.example.com/kit.css");');
+    expect(kit.href).toBe('https://cdn.example.com/kit.css');
+    expect(kit.css).toBe('');
+  });
+});
+
+describe('stylesheet URLs from the environment', () => {
+  it('splits on commas, spaces and new lines, keeping order and dropping bad or repeated entries', () => {
+    expect(parseCssUrls(' https://a.example/one.css,https://b.example/two.css\n  ftp://x/y.css javascript:alert(1)  https://a.example/one.css ')).toEqual([
+      'https://a.example/one.css',
+      'https://b.example/two.css',
+    ]);
+    expect(parseCssUrls(undefined)).toEqual([]);
+    expect(parseCssUrls('')).toEqual([]);
+  });
+
+  it('makes linked env kits in the given order', () => {
+    const kits = createEnvKits(['https://a.example/reset.css', 'https://b.example/theme.css']);
+    expect(kits.map((k) => [k.id, k.name, k.href, k.source, k.enabled])).toEqual([
+      ['env-1', 'reset', 'https://a.example/reset.css', 'env', true],
+      ['env-2', 'theme', 'https://b.example/theme.css', 'env', true],
+    ]);
   });
 });

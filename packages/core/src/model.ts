@@ -60,8 +60,14 @@ export interface DesignKit {
   /** Raw CSS of the kit. */
   css: string;
   enabled: boolean;
-  /** Where the kit came from: a file name, a URL, or `builtin`. */
+  /** Where the kit came from: a file name, a URL, `builtin`, or `env` for stylesheets set by the deployment. */
   source?: string;
+  /**
+   * Stylesheet URL for a linked kit. A linked kit loads from this URL, in its place in
+   * the kit order, instead of inlining `css`; `css` then only holds a snapshot used to
+   * list the kit's classes and tokens (empty when the server doesn't share it).
+   */
+  href?: string;
 }
 
 export interface Forest {

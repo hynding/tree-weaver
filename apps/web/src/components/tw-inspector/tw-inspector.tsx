@@ -15,6 +15,7 @@ import {
 } from '@tree-weaver/core';
 import { kitClasses } from '@tree-weaver/kits';
 import {
+  allKits,
   currentTree,
   duplicateSelected,
   parentOf,
@@ -143,7 +144,7 @@ export class TwInspector {
           ))}
         </datalist>
         <datalist id="tw-dl-classes">
-          {kitClasses(state.forest?.kits ?? []).map((c) => (
+          {kitClasses(allKits()).map((c) => (
             <option value={c} />
           ))}
         </datalist>

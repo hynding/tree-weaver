@@ -27,6 +27,11 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Build packages and the Stencil app
         run: pnpm build
+        # Deployment settings (see "Deployment settings" in the README). Set them as
+        # repository variables under Settings → Secrets and variables → Actions → Variables.
+        env:
+          TW_CSS_URLS: ${{ vars.TW_CSS_URLS }}
+          TW_DISABLE_CSS_URLS: ${{ vars.TW_DISABLE_CSS_URLS }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

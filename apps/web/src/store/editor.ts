@@ -1,5 +1,5 @@
 import { createStore } from '@stencil/store';
-import type { DisplayId, Forest, ForestSummary } from '@tree-weaver/core';
+import type { DesignKit, DisplayId, Forest, ForestSummary } from '@tree-weaver/core';
 
 export type SidebarTab = 'branches' | 'outline' | 'kits' | 'forest';
 export type SaveState = 'saved' | 'saving' | 'unsaved' | 'error';
@@ -14,6 +14,8 @@ export interface Toast {
 export interface EditorState {
   ready: boolean;
   forest: Forest | null;
+  /** Stylesheets set by the deployment (`TW_CSS_URLS`). They load before every forest's kits and are never saved. */
+  envKits: DesignKit[];
   treeId: string;
   selectedId: string | null;
   hoverId: string | null;
@@ -33,6 +35,7 @@ export interface EditorState {
 export const { state, onChange, reset } = createStore<EditorState>({
   ready: false,
   forest: null,
+  envKits: [],
   treeId: '',
   selectedId: null,
   hoverId: null,

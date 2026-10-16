@@ -149,7 +149,11 @@ export interface DocumentOptions extends HtmlOptions {
 export function renderDocument(tree: Tree, opts: DocumentOptions = {}): string {
   const kits = (opts.kits ?? []).filter((k) => k.enabled);
   const kitStyles = kits
-    .map((k) => `<style data-tw-kit="${escapeAttr(k.id)}" data-tw-kit-name="${escapeAttr(k.name)}">\n${k.css.replace(/<\/style/gi, '<\\/style')}\n</style>`)
+    .map((k) => {
+      const attrs = `data-tw-kit="${escapeAttr(k.id)}" data-tw-kit-name="${escapeAttr(k.name)}"${k.source === 'env' ? ' data-tw-env' : ''}`;
+      if (k.href) return `<link rel="stylesheet" href="${escapeAttr(k.href)}" ${attrs}>`;
+      return `<style ${attrs}>\n${k.css.replace(/<\/style/gi, '<\\/style')}\n</style>`;
+    })
     .join('\n');
   const body = renderTreeBody(tree.root, { ...opts, pretty: opts.pretty ?? true });
   return `<!doctype html>
