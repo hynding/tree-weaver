@@ -4,14 +4,24 @@ import {
   DISPLAYS,
   equalColumns,
   findNode,
+  formatAutoColumns,
+  formatSpan,
+  formatTracks,
   getDisplay,
   inheritedStyles,
   isBranch,
+  parseAutoColumns,
+  parseSpan,
+  parseTracks,
   resolveStyles,
   tableSize,
+  trackLabel,
   type Branch,
   type DisplayId,
+  type GridSpan,
+  type GridTrack,
   type Leaf,
+  type StyleMap,
 } from '@tree-weaver/core';
 import { kitClasses } from '@tree-weaver/kits';
 import {
@@ -299,7 +309,6 @@ export class TwInspector {
     const mode = effective.display ?? '';
     const isGrid = mode.includes('grid');
     const isFlex = mode.includes('flex');
-    const columns = countTracks(effective['grid-template-columns']);
     return (
       <details class="group" open>
         <summary>Layout</summary>
@@ -320,23 +329,16 @@ export class TwInspector {
           </div>
           {this.styleField(branch, 'display', 'Display')}
           {isGrid && [
-            <div class="field">
-              <label>Columns</label>
-              <div class="segmented" role="group" aria-label="Equal columns">
-                {[1, 2, 3, 4, 6].map((n) => (
-                  <button aria-pressed={String(columns === n)} onClick={() => setStyleValue(branch.id, 'grid-template-columns', n === 1 ? '1fr' : equalColumns(n))}>
-                    {n}
-                  </button>
-                ))}
-              </div>
-              <span />
-            </div>,
-            this.styleField(branch, 'grid-template-columns', 'Columns'),
-            this.styleField(branch, 'grid-template-rows', 'Rows'),
+            this.renderColumns(branch, effective),
             this.styleField(branch, 'gap', 'Gap'),
-            this.styleField(branch, 'grid-auto-flow', 'Flow'),
             this.styleField(branch, 'justify-items', 'Justify items'),
             this.styleField(branch, 'align-items', 'Align items'),
+            <details class="advanced">
+              <summary>Advanced grid CSS</summary>
+              {this.styleField(branch, 'grid-template-columns', 'Columns')}
+              {this.styleField(branch, 'grid-template-rows', 'Rows')}
+              {this.styleField(branch, 'grid-auto-flow', 'Flow')}
+            </details>,
           ]}
           {isFlex && [
             this.styleField(branch, 'flex-direction', 'Direction', { options: SUGGEST['flex-direction'] }),
@@ -360,12 +362,7 @@ export class TwInspector {
         <summary>In parent {mode.includes('grid') ? 'grid' : 'flex'}</summary>
         <div class="group-body">
           {mode.includes('grid')
-            ? [
-                this.styleField(branch, 'grid-column', 'Column'),
-                this.styleField(branch, 'grid-row', 'Row'),
-                this.styleField(branch, 'justify-self', 'Justify self'),
-                this.styleField(branch, 'align-self', 'Align self'),
-              ]
+            ? this.renderGridPlacement(branch, parent)
             : [
                 this.styleField(branch, 'flex', 'Flex', { placeholder: '0 1 auto' }),
                 this.styleField(branch, 'align-self', 'Align self'),
@@ -374,6 +371,260 @@ export class TwInspector {
         </div>
       </details>
     );
+  }
+
+  /** Write a grid value; the default (`null`) still overrides an inherited value with `auto`. */
+  private setGridValue(branch: Branch, prop: string, value: string | null) {
+    const inherited = inheritedStyles(branch.styles, state.display as DisplayId)[prop];
+    setStyleValue(branch.id, prop, value ?? (inherited && inherited !== 'auto' ? 'auto' : null));
+  }
+
+  /** Columns as a list of plain choices, with a proportional preview. */
+  private renderColumns(branch: Branch, effective: StyleMap) {
+    const display = state.display as DisplayId;
+    const template = effective['grid-template-columns'];
+    const own = branch.styles[display]?.['grid-template-columns'];
+    const inherited = inheritedStyles(branch.styles, display)['grid-template-columns'];
+    const auto = parseAutoColumns(template);
+    const tracks = auto ? null : parseTracks(template);
+    const set = (value: string) => setStyleValue(branch.id, 'grid-template-columns', value);
+    const setTracks = (next: GridTrack[]) => set(formatTracks(next));
+    const count = tracks ? tracks.length : countTracks(template);
+    const equal = tracks?.every((t) => t.kind === 'share' && t.value === 1) ?? false;
+    return (
+      <div class="grid-columns" key={`${branch.id}:${display}:columns`}>
+        <div class="grid-columns-head">
+          <span class={{ 'grid-label': true, overridden: !!own }}>Columns</span>
+          <div class="segmented" role="group" aria-label="How columns are set">
+            <button aria-pressed={String(!auto)} title="A set number of columns" onClick={() => auto && setTracks([1, 2, 3].map(() => ({ kind: 'share', value: 1 })))}>
+              Set number
+            </button>
+            <button aria-pressed={String(!!auto)} title="As many columns as fit; they wrap onto new rows on smaller screens" onClick={() => !auto && set(formatAutoColumns({ minWidth: '220px' }))}>
+              Wrap to fit
+            </button>
+          </div>
+        </div>
+        {auto ? (
+          [
+            <div class="field">
+              <label htmlFor="grid-min-width">Min width</label>
+              <input
+                id="grid-min-width"
+                class="input mono"
+                value={auto.minWidth}
+                onChange={(e) => {
+                  const minWidth = (e.target as HTMLInputElement).value.trim();
+                  if (minWidth) set(formatAutoColumns({ minWidth }));
+                }}
+              />
+              <span />
+            </div>,
+            <p class="hint">Fits as many columns as it can, each at least this wide. Extra boxes wrap onto new rows as the screen narrows.</p>,
+          ]
+        ) : (
+          [
+            <div class="row wrap grid-quick">
+              <span class="grid-sub">Equal</span>
+              <div class="segmented" role="group" aria-label="Equal columns">
+                {[1, 2, 3, 4, 6].map((n) => (
+                  <button aria-pressed={String(equal && count === n)} onClick={() => set(n === 1 ? 'minmax(0, 1fr)' : equalColumns(n))}>
+                    {n}
+                  </button>
+                ))}
+              </div>
+            </div>,
+            tracks ? (
+              [
+                tracks.length ? this.renderColumnPreview(tracks, getDisplay(display).width) : null,
+                <ol class="tracks">
+                  {tracks.map((track, i) => this.renderTrack(track, i, tracks, setTracks))}
+                </ol>,
+                <div class="row">
+                  <button class="btn small" onClick={() => setTracks([...tracks, { kind: 'share', value: 1 }])}>
+                    <Icon name="plus" /> Add column
+                  </button>
+                </div>,
+              ]
+            ) : (
+              <p class="hint">These columns use a custom CSS pattern. Edit it under Advanced, or pick a number above to start over.</p>
+            ),
+          ]
+        )}
+        {own && inherited && display !== 'lg' ? (
+          <button class="link-btn" onClick={() => setStyleValue(branch.id, 'grid-template-columns', null)}>
+            Use the same columns as {getDisplay(getDisplay(display).inherits.slice(-1)[0] ?? 'lg').label}
+          </button>
+        ) : !own && inherited ? (
+          <p class="hint">Same as {getDisplay(getDisplay(display).inherits.slice(-1)[0] ?? 'lg').label}. Changes here apply to {getDisplay(display).label} only.</p>
+        ) : null}
+      </div>
+    );
+  }
+
+  private renderTrack(track: GridTrack, index: number, tracks: GridTrack[], setTracks: (next: GridTrack[]) => void) {
+    const replace = (next: GridTrack) => setTracks(tracks.map((t, i) => (i === index ? next : t)));
+    const changeKind = (kind: GridTrack['kind']) => {
+      if (kind === 'share') replace({ kind, value: 1 });
+      else if (kind === 'fixed') replace({ kind, value: '240px' });
+      else if (kind === 'fit') replace({ kind });
+      else replace({ kind, value: track.kind === 'custom' ? track.value : formatTracks([track]) });
+    };
+    return (
+      <li class="track" key={`track-${index}`}>
+        <span class="track-num" aria-hidden="true">
+          {index + 1}
+        </span>
+        <select class="select" aria-label={`Column ${index + 1} sizing`} onChange={(e) => changeKind((e.target as HTMLSelectElement).value as GridTrack['kind'])}>
+          {(
+            [
+              ['share', 'Share of space'],
+              ['fixed', 'Fixed width'],
+              ['fit', 'Fit content'],
+              ['custom', 'Custom CSS'],
+            ] as const
+          ).map(([kind, label]) => (
+            <option value={kind} selected={track.kind === kind}>
+              {label}
+            </option>
+          ))}
+        </select>
+        {track.kind === 'share' ? (
+          <input
+            class="input"
+            type="number"
+            min="0.25"
+            step="0.25"
+            value={String(track.value)}
+            aria-label={`Column ${index + 1} shares`}
+            title="How many shares of the free space this column gets"
+            onChange={(e) => {
+              const value = Number((e.target as HTMLInputElement).value);
+              if (value > 0) replace({ kind: 'share', value });
+            }}
+          />
+        ) : track.kind === 'fit' ? (
+          <span class="track-fit">auto</span>
+        ) : (
+          <input
+            class="input mono"
+            value={track.value}
+            aria-label={`Column ${index + 1} width`}
+            onChange={(e) => {
+              const value = (e.target as HTMLInputElement).value.trim();
+              if (value) replace({ kind: track.kind, value });
+            }}
+          />
+        )}
+        <button class="icon-btn" title="Remove column" aria-label={`Remove column ${index + 1}`} disabled={tracks.length <= 1} onClick={() => setTracks(tracks.filter((_, i) => i !== index))}>
+          <Icon name="x" />
+        </button>
+      </li>
+    );
+  }
+
+  /** A bar showing how wide each column is on the current display. */
+  private renderColumnPreview(tracks: GridTrack[], width: number) {
+    const px = (len: string): number | null => {
+      const m = /^([\d.]+)(px|rem|em|%|vw)$/.exec(len);
+      if (!m) return null;
+      const n = Number(m[1]);
+      return m[2] === 'px' ? n : m[2] === '%' || m[2] === 'vw' ? (n / 100) * width : n * 16;
+    };
+    const fixed = tracks.map((t) => (t.kind === 'fixed' ? px(t.value) : t.kind === 'fit' ? 120 : null));
+    const shares = tracks.map((t, i) => (fixed[i] !== null ? 0 : t.kind === 'share' ? t.value : 1));
+    const free = Math.max(0, width - fixed.reduce<number>((a, b) => a + (b ?? 0), 0));
+    const totalShares = shares.reduce((a, b) => a + b, 0) || 1;
+    const sizes = tracks.map((_, i) => fixed[i] ?? (shares[i] / totalShares) * free);
+    const total = sizes.reduce((a, b) => a + b, 0) || 1;
+    return (
+      <div class="grid-preview" aria-hidden="true">
+        {tracks.map((t, i) => (
+          <span style={{ flexGrow: String(sizes[i] / total), flexBasis: '0' }} title={trackLabel(t)}>
+            {trackLabel(t)}
+          </span>
+        ))}
+      </div>
+    );
+  }
+
+  /** Span and start controls for a branch inside a grid. */
+  private renderGridPlacement(branch: Branch, parent: Branch) {
+    const display = state.display as DisplayId;
+    const parentStyles = resolveStyles(parent.styles, display);
+    const own = resolveStyles(branch.styles, display);
+    const tracks = parseTracks(parentStyles['grid-template-columns']);
+    const count = tracks?.length ?? 0;
+    const col = parseSpan(own['grid-column']);
+    const row = parseSpan(own['grid-row']);
+    const setCol = (next: GridSpan) => this.setGridValue(branch, 'grid-column', formatSpan(next));
+    const setRow = (next: GridSpan) => this.setGridValue(branch, 'grid-row', formatSpan(next));
+    const spans = Array.from({ length: Math.min(Math.max(count, 3), 6) }, (_, i) => i + 1);
+    return [
+      col ? (
+        [
+          <div class="field" key={`${branch.id}:${display}:wide`}>
+            <label title="grid-column">Width</label>
+            <div class="segmented" role="group" aria-label="Columns wide">
+              {spans.map((n) => (
+                <button aria-pressed={String(!col.full && col.span === n)} title={`${n} ${n === 1 ? 'column' : 'columns'} wide`} onClick={() => setCol({ start: col.start, span: n, full: false })}>
+                  {n}
+                </button>
+              ))}
+              <button aria-pressed={String(col.full)} title="Stretch across the whole row" onClick={() => setCol({ start: 1, span: 1, full: true })}>
+                Full
+              </button>
+            </div>
+            <span />
+          </div>,
+          count > 1 && !col.full ? (
+            <div class="field" key={`${branch.id}:${display}:start`}>
+              <label htmlFor="grid-start">Start in</label>
+              <select
+                id="grid-start"
+                class="select"
+                onChange={(e) => {
+                  const v = (e.target as HTMLSelectElement).value;
+                  setCol({ start: v ? Number(v) : null, span: col.span, full: false });
+                }}
+              >
+                <option value="" selected={col.start === null}>
+                  Next free spot
+                </option>
+                {Array.from({ length: count }, (_, i) => (
+                  <option value={String(i + 1)} selected={col.start === i + 1}>
+                    Column {i + 1}
+                  </option>
+                ))}
+              </select>
+              <span />
+            </div>
+          ) : null,
+        ]
+      ) : (
+        <p class="hint">Placed with custom CSS ({own['grid-column']}). Change it under Advanced.</p>
+      ),
+      row ? (
+        <div class="field" key={`${branch.id}:${display}:tall`}>
+          <label title="grid-row">Height</label>
+          <div class="segmented" role="group" aria-label="Rows tall">
+            {[1, 2, 3].map((n) => (
+              <button aria-pressed={String(!row.full && row.span === n)} title={`${n} ${n === 1 ? 'row' : 'rows'} tall`} onClick={() => setRow({ start: row.start, span: n, full: false })}>
+                {n} {n === 1 ? 'row' : 'rows'}
+              </button>
+            ))}
+          </div>
+          <span />
+        </div>
+      ) : null,
+      this.styleField(branch, 'justify-self', 'Justify self'),
+      this.styleField(branch, 'align-self', 'Align self'),
+      <p class="hint">Tip: drag the handle on the right edge of the selected box in the canvas to change how many columns it covers.</p>,
+      <details class="advanced">
+        <summary>Advanced grid CSS</summary>
+        {this.styleField(branch, 'grid-column', 'Column')}
+        {this.styleField(branch, 'grid-row', 'Row')}
+      </details>,
+    ];
   }
 
   private renderTable(branch: Branch) {
