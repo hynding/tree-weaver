@@ -2,6 +2,7 @@ import type { DesignKit, Forest, Tree } from '@tree-weaver/core';
 import { exportJson, exportYaml, importJson, importYaml } from './data';
 import { exportHtml, importHtml } from './html';
 import { exportMarkdown, importMarkdown } from './markdown';
+import { slugify } from './slug';
 import { FORMATS, FormatError, getFormat, type FormatId, type TreeDocument } from './types';
 import { exportXml, importXml } from './xml';
 
@@ -10,6 +11,9 @@ export { exportJson, exportYaml, importJson, importYaml, toEnvelope, fromData } 
 export { exportHtml, importHtml } from './html';
 export { exportMarkdown, importMarkdown, splitFrontMatter, escapeMarkdown } from './markdown';
 export { exportXml, importXml, XML_NAMESPACE } from './xml';
+export { exportStorybook, zipStorybook, STORYBOOK_VERSION, type StorybookExport, type StorybookFile, type StorybookOptions } from './storybook';
+export { zip, crc32, type ZipEntry } from './zip';
+export { slugify } from './slug';
 
 /** Format for a file name, from its extension. */
 export function formatFromFileName(fileName: string): FormatId | null {
@@ -85,14 +89,7 @@ export function exportTree(tree: Tree, format: FormatId, kits: DesignKit[] = [])
 
 /** A file name such as `home-page.tree.json` or `my-site.forest.yaml`. */
 export function suggestFileName(name: string, scope: 'tree' | 'forest', format: FormatId): string {
-  const slug =
-    name
-      .toLowerCase()
-      .normalize('NFKD')
-      .replace(/[^\w\s-]/g, '')
-      .trim()
-      .replace(/[\s_]+/g, '-')
-      .replace(/-+/g, '-') || scope;
+  const slug = slugify(name, scope);
   const ext = getFormat(format).extensions[0];
   return format === 'html' || format === 'markdown' ? `${slug}.${ext}` : `${slug}.${scope}.${ext}`;
 }

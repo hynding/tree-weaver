@@ -30,7 +30,7 @@ import {
   type Tree,
   type TreeNode,
 } from '@tree-weaver/core';
-import { exportForest, exportTree, getFormat, importDocument, suggestFileName, type FormatId } from '@tree-weaver/formats';
+import { exportForest, exportStorybook, exportTree, getFormat, importDocument, suggestFileName, zipStorybook, type FormatId } from '@tree-weaver/formats';
 import { createStarterKit } from '@tree-weaver/kits';
 import { createForestStore, Preferences, type ForestStore } from '@tree-weaver/storage';
 import { state, type SidebarTab, type Toast } from './editor';
@@ -480,9 +480,12 @@ export async function importText(text: string, format?: FormatId, fileName?: str
 }
 
 export interface ExportOutput {
+  /** The file's text, or a preview of it when the download is binary. */
   text: string;
   fileName: string;
   mime: string;
+  /** Binary content to download instead of `text`, e.g. a zip. */
+  bytes?: Uint8Array;
 }
 
 export function exportCurrent(format: FormatId, scope: 'tree' | 'forest'): ExportOutput {
@@ -495,8 +498,21 @@ export function exportCurrent(format: FormatId, scope: 'tree' | 'forest'): Expor
   return { text: exportTree(tree, format, forest.kits), fileName: suggestFileName(tree.name, 'tree', format), mime: info.mime };
 }
 
+/** A Storybook project (zipped) for the current tree or the whole forest. */
+export function exportStorybookCurrent(scope: 'tree' | 'forest'): ExportOutput {
+  const forest = state.forest!;
+  const tree = currentTree()!;
+  const project = exportStorybook(forest, scope === 'tree' ? { treeIds: [tree.id] } : {});
+  const stories = project.files.find((f) => f.path.endsWith('.stories.js'));
+  const listing = project.files.map((f) => `  ${f.path}`).join('\n');
+  const text = `${project.name}/\n${listing}\n${stories ? `\n// ${stories.path}\n${stories.content}` : ''}`;
+  return { text, fileName: `${project.name}.zip`, mime: 'application/zip', bytes: zipStorybook(project) };
+}
+
 export function download(output: ExportOutput): void {
-  const blob = new Blob([output.text], { type: `${output.mime};charset=utf-8` });
+  const blob = output.bytes
+    ? new Blob([output.bytes as BlobPart], { type: output.mime })
+    : new Blob([output.text], { type: `${output.mime};charset=utf-8` });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

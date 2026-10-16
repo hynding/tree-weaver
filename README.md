@@ -34,6 +34,7 @@ The same words are used in the code (`Forest`, `Tree`, `Branch`, `Leaf`) and in 
   across the forest, can be toggled and reordered, and their classes are suggested in the inspector.
   A starter kit, _Weaver Basic_, comes with every new forest.
 - **Upload and download tree data** as JSON, YAML, XML, HTML or Markdown (see below).
+- **Download a Storybook project** for a tree or the whole forest (see [Storybook](#storybook)).
 - **Save locally**: forests autosave to IndexedDB (falling back to `localStorage`), and you can keep
   several forests in one browser.
 
@@ -59,6 +60,19 @@ JSON and YAML files use an envelope:
 
 Bare forests (`{ "trees": [...] }`), bare trees (`{ "root": {...} }`) and bare branches are accepted too.
 
+### Storybook
+
+Download → **Storybook** writes a zipped Storybook project (`@storybook/html-vite`, no framework) for
+the current tree or the whole forest. Each tree becomes a stories file with:
+
+- a **Whole tree** story, plus one per display type (desktop large, desktop XL, tablet, mobile
+  landscape, mobile portrait), and the display types in the viewport toolbar;
+- a story for every **named branch**;
+- every text and image leaf as an **arg**, editable from the Controls panel.
+
+Enabled design kits load globally in `.storybook/preview.js`. Unzip, then `npm install` and
+`npm run storybook`. The export is one way: change layouts in Tree Weaver and export again.
+
 ## Workspace layout
 
 ```
@@ -66,7 +80,7 @@ apps/
   web/                 Stencil editor app (@tree-weaver/web)
 packages/
   core/                Tree model, immutable operations, displays, CSS/HTML rendering, validation
-  formats/             JSON, YAML, XML, HTML and Markdown import/export
+  formats/             JSON, YAML, XML, HTML and Markdown import/export, Storybook export
   storage/             IndexedDB / localStorage / memory forest stores and preferences
   kits/                Design kit analysis (classes, tokens, imports) and the starter kit
   branches/            The branch library (palette blueprints) and tree templates

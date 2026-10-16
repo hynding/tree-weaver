@@ -21,7 +21,7 @@ export namespace Components {
     interface TwInspector {
     }
     /**
-     * Upload and download trees and forests in JSON, YAML, XML, HTML and Markdown.
+     * Upload and download trees and forests in JSON, YAML, XML, HTML and Markdown, or download them as a Storybook project.
      */
     interface TwIoDialog {
         /**
@@ -82,7 +82,7 @@ declare global {
         new (): HTMLTwInspectorElement;
     };
     /**
-     * Upload and download trees and forests in JSON, YAML, XML, HTML and Markdown.
+     * Upload and download trees and forests in JSON, YAML, XML, HTML and Markdown, or download them as a Storybook project.
      */
     interface HTMLTwIoDialogElement extends Components.TwIoDialog, HTMLStencilElement {
     }
@@ -166,7 +166,7 @@ declare namespace LocalJSX {
     interface TwInspector {
     }
     /**
-     * Upload and download trees and forests in JSON, YAML, XML, HTML and Markdown.
+     * Upload and download trees and forests in JSON, YAML, XML, HTML and Markdown, or download them as a Storybook project.
      */
     interface TwIoDialog {
         /**
@@ -224,7 +224,7 @@ declare module "@stencil/core" {
              */
             "tw-inspector": LocalJSX.IntrinsicElements["tw-inspector"] & JSXBase.HTMLAttributes<HTMLTwInspectorElement>;
             /**
-             * Upload and download trees and forests in JSON, YAML, XML, HTML and Markdown.
+             * Upload and download trees and forests in JSON, YAML, XML, HTML and Markdown, or download them as a Storybook project.
              */
             "tw-io-dialog": LocalJSX.IntrinsicElements["tw-io-dialog"] & JSXBase.HTMLAttributes<HTMLTwIoDialogElement>;
             /**
