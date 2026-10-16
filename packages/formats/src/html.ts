@@ -3,6 +3,7 @@ import {
   createId,
   DISPLAYS,
   INLINE_TAGS,
+  isStylesheetUrl,
   LEAF_ATTR,
   parseCss,
   parseDeclarations,
@@ -239,7 +240,14 @@ export function importHtml(text: string): TreeDocument {
         kits.push({ id: el.attribs['data-tw-kit'] || createId('k'), name: el.attribs['data-tw-kit-name'] || 'Design kit', css: css.trim(), enabled: true });
       } else if (css.trim()) looseCss.push(css.trim());
     } else if (el.name === 'link' && /\bstylesheet\b/i.test(el.attribs.rel ?? '') && el.attribs.href) {
-      kits.push({ id: createId('k'), name: fileName(el.attribs.href), css: `@import url("${el.attribs.href.replace(/"/g, '%22')}");`, enabled: true, source: el.attribs.href });
+      const href = el.attribs.href.trim();
+      // A deployment's own stylesheet (`data-tw-env`) becomes an ordinary kit with a fresh id.
+      const id = el.attribs['data-tw-env'] === undefined ? el.attribs['data-tw-kit'] : '';
+      const kit: DesignKit = { id: id || createId('k'), name: el.attribs['data-tw-kit-name'] || fileName(href), css: '', enabled: true, source: href };
+      // Absolute stylesheets stay linked; relative ones can't load from here, so keep them as an @import.
+      if (isStylesheetUrl(href)) kit.href = href;
+      else kit.css = `@import url("${href.replace(/"/g, '%22')}");`;
+      kits.push(kit);
     }
   }
   if (looseCss.length) kits.push({ id: createId('k'), name: title ? `${title} styles` : 'Imported styles', css: looseCss.join('\n\n'), enabled: true, source: 'html' });

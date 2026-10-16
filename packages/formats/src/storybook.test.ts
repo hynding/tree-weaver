@@ -47,6 +47,15 @@ describe('Storybook export', () => {
     expect(file(files, '.storybook/preview.js')).toContain("import '../styles/kits/brand-kit.css';");
   });
 
+  it('keeps linked kits linked, in kit order', () => {
+    const forest = sampleForest();
+    forest.kits = [{ id: 'k-theme', name: 'Theme', css: '.snapshot {}', enabled: true, href: 'https://cdn.example.com/theme.css' }, ...forest.kits];
+    const { files } = exportStorybook(forest);
+    expect(file(files, 'styles/kits/theme.css')).toBe('/* Theme */\n@import url("https://cdn.example.com/theme.css");\n');
+    const preview = file(files, '.storybook/preview.js');
+    expect(preview.indexOf('kits/theme.css')).toBeLessThan(preview.indexOf('kits/brand-kit.css'));
+  });
+
   it('maps display types to viewports and adds a story per display', () => {
     const { files } = exportStorybook(sampleForest());
     const preview = file(files, '.storybook/preview.js');

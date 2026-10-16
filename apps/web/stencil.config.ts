@@ -5,6 +5,11 @@ export const config: Config = {
   globalStyle: 'src/global/app.css',
   taskQueue: 'async',
   sourceMap: true,
+  // Build-time settings, read in src/config.ts. See "Deployment settings" in the README.
+  env: {
+    TW_CSS_URLS: process.env.TW_CSS_URLS ?? '',
+    TW_DISABLE_CSS_URLS: process.env.TW_DISABLE_CSS_URLS ?? '',
+  },
   outputTargets: [
     {
       type: 'www',

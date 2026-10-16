@@ -13,7 +13,7 @@ import {
   type DesignKit,
   type DisplayId,
 } from '@tree-weaver/core';
-import { currentTree, insertBlueprint, moveTo, pathTo, select, selectedNode, updateLeaf, type DropPosition } from '../../store/actions';
+import { allKits, currentTree, insertBlueprint, moveTo, pathTo, select, selectedNode, updateLeaf, type DropPosition } from '../../store/actions';
 import { onChange, state } from '../../store/editor';
 import { nodeKind, nodeLabel } from '../../utils/describe';
 import { BLUEPRINT_MIME, NODE_MIME, dropPosition, hasType, isTreeDrag } from '../../utils/dnd';
@@ -35,8 +35,12 @@ body { min-height: 100vh; }
 `;
 
 const SKELETON = `<!doctype html><html><head><meta charset="utf-8">
-<style id="tw-base">${BASE_CSS}</style><style id="tw-kits"></style><style id="tw-tree"></style><style id="tw-editor">${EDITOR_CSS}</style>
+<style id="tw-base">${BASE_CSS}</style><style id="tw-tree"></style><style id="tw-editor">${EDITOR_CSS}</style>
 </head><body></body></html>`;
+
+/** Whether two kit lists load the same stylesheets in the same order. */
+const sameKits = (a: DesignKit[], b: DesignKit[]) =>
+  a.length === b.length && a.every((k, i) => k.id === b[i].id && k.href === b[i].href && (k.href ? true : k.css === b[i].css));
 
 @Component({ tag: 'tw-canvas' })
 export class TwCanvas {
@@ -51,7 +55,7 @@ export class TwCanvas {
   private editing: HTMLElement | null = null;
   // What the frame currently shows, so updates only touch what changed.
   private shownRoot: Branch | null = null;
-  private shownKits: DesignKit[] | null = null;
+  private shownKits: DesignKit[] = [];
   private dropMark: { el: Element; position: DropPosition; id: string } | null = null;
   private unsubscribe: (() => void)[] = [];
 
@@ -87,7 +91,7 @@ export class TwCanvas {
     if (!doc) return;
     this.loaded = true;
     this.shownRoot = null;
-    this.shownKits = null;
+    this.shownKits = [];
     doc.addEventListener('click', (e) => this.onClick(e), true);
     doc.addEventListener('dblclick', (e) => this.onDblClick(e), true);
     doc.addEventListener('mouseover', (e) => this.onHover(e));
@@ -107,18 +111,40 @@ export class TwCanvas {
     this.sync();
   }
 
+  /**
+   * One element per kit, in load order, between the base styles and the tree's styles:
+   * `<link>` for linked kits, `<style>` for the rest. Separate elements keep each kit's
+   * `@import` rules valid and let linked stylesheets load from their URLs.
+   */
+  private showKits(doc: Document, kits: DesignKit[]) {
+    doc.head.querySelectorAll('[data-tw-kit]').forEach((el) => el.remove());
+    const before = doc.getElementById('tw-tree');
+    for (const kit of kits) {
+      let el: HTMLElement;
+      if (kit.href) {
+        const link = doc.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = kit.href;
+        el = link;
+      } else {
+        el = doc.createElement('style');
+        el.textContent = kit.css;
+      }
+      el.setAttribute('data-tw-kit', kit.id);
+      doc.head.insertBefore(el, before);
+    }
+  }
+
   /** Bring the frame in line with the store: kits, styles, markup, selection. */
   private sync() {
     const doc = this.doc;
     const tree = currentTree();
     const forest = state.forest;
     if (!doc || !tree || !forest) return;
-    if (this.shownKits !== forest.kits) {
-      doc.getElementById('tw-kits')!.textContent = forest.kits
-        .filter((k) => k.enabled)
-        .map((k) => `/* ${k.name.replace(/\*\//g, '')} */\n${k.css}`)
-        .join('\n\n');
-      this.shownKits = forest.kits;
+    const kits = allKits().filter((k) => k.enabled);
+    if (!sameKits(this.shownKits, kits)) {
+      this.showKits(doc, kits);
+      this.shownKits = kits;
     }
     if (this.shownRoot !== tree.root && !this.editing) {
       const root = tree.root;

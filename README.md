@@ -30,9 +30,11 @@ The same words are used in the code (`Forest`, `Tree`, `Branch`, `Leaf`) and in 
   inspector edits the current display and shows inherited values as placeholders.
 - **Lay out with grids, flex and tables**: one-click equal columns, track templates, gaps and alignment;
   child placement inside a parent grid or flex; add or remove table rows and columns.
-- **Import design kits (CSS)**: upload a `.css` file, link a stylesheet URL or paste CSS. Kits apply
-  across the forest, can be toggled and reordered, and their classes are suggested in the inspector.
-  A starter kit, _Weaver Basic_, comes with every new forest.
+- **Import design kits (CSS)**: upload a `.css` file, link one or more stylesheet URLs or paste CSS. Kits
+  apply across the forest, load top to bottom (later kits override earlier ones), can be toggled and
+  moved up or down, and their classes are suggested in the inspector. Linked stylesheets load from their
+  URL in their place in that order; their CSS is also fetched, when the server allows it, so their
+  classes can be listed. A starter kit, _Weaver Basic_, comes with every new forest.
 - **Upload and download tree data** as JSON, YAML, XML, HTML or Markdown (see below).
 - **Download a Storybook project** for a tree or the whole forest (see [Storybook](#storybook)).
 - **Save locally**: forests autosave to IndexedDB (falling back to `localStorage`), and you can keep
@@ -72,6 +74,21 @@ the current tree or the whole forest. Each tree becomes a stories file with:
 
 Enabled design kits load globally in `.storybook/preview.js`. Unzip, then `npm install` and
 `npm run storybook`. The export is one way: change layouts in Tree Weaver and export again.
+
+## Deployment settings
+
+These environment variables are read when the app is built (`pnpm build`), so changing one needs a
+rebuild. The GitHub Pages workflow passes them from repository variables of the same name
+(Settings → Secrets and variables → Actions → Variables).
+
+| Variable              | Effect                                                                                                                                                                                              |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TW_CSS_URLS`         | Stylesheet URLs, separated by commas, spaces or new lines. Every forest loads them first, in the given order, before its own kits. They are listed under _Always loaded first_ in the Kits tab, can't be removed or reordered there, are not saved into forests, and are linked first in HTML exports. |
+| `TW_DISABLE_CSS_URLS` | `true` (or `1`, `yes`, `on`) hides the field for linking stylesheet URLs in the Kits tab. Stylesheets from `TW_CSS_URLS`, and linked kits a forest already has, still load.                             |
+
+```sh
+TW_CSS_URLS="https://cdn.example.com/reset.css,https://cdn.example.com/theme.css" TW_DISABLE_CSS_URLS=true pnpm build
+```
 
 ## Workspace layout
 

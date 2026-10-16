@@ -133,6 +133,26 @@ describe('html', () => {
     expect(doc.kits).toEqual([{ id: kit.id, name: kit.name, css: kit.css, enabled: true }]);
   });
 
+  it('links linked kits in kit order and imports them back as linked kits', () => {
+    const tree = sampleTree();
+    const env = { id: 'env-1', name: 'reset', css: '', enabled: true, source: 'env', href: 'https://cdn.example.com/reset.css' };
+    const linked = { id: 'k-linked', name: 'Theme', css: '.snapshot {}', enabled: true, source: 'https://cdn.example.com/theme.css', href: 'https://cdn.example.com/theme.css' };
+    const html = exportTree(tree, 'html', [env, kit, linked]);
+    const order = ['reset.css', `data-tw-kit="${kit.id}"`, 'theme.css'].map((needle) => html.indexOf(needle));
+    expect(order.every((at) => at > 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(html).toContain('<link rel="stylesheet" href="https://cdn.example.com/reset.css" data-tw-kit="env-1" data-tw-kit-name="reset" data-tw-env>');
+    expect(html).not.toContain('.snapshot');
+    const doc = importDocument(html, 'html');
+    if (doc.kind !== 'tree') throw new Error('expected a tree');
+    expect(doc.kits[0].id).not.toBe('env-1');
+    expect(doc.kits.slice(1).map((k) => [k.id, k.name, k.href ?? null])).toEqual([
+      [kit.id, kit.name, null],
+      ['k-linked', 'Theme', 'https://cdn.example.com/theme.css'],
+    ]);
+    expect(doc.kits[0]).toMatchObject({ name: 'reset', href: 'https://cdn.example.com/reset.css' });
+  });
+
   it('imports arbitrary HTML: inline styles, stylesheets, images and unsafe content', () => {
     const doc = importHtml(`<!doctype html><html><head><title>Hi</title>
       <link rel="stylesheet" href="https://cdn.example.com/kit.min.css">
@@ -150,7 +170,7 @@ describe('html', () => {
     expect(p.children.map((c) => (isBranch(c) ? c.tag : c.value))).toEqual(['Hello ', 'em', ' ', 'b']);
     expect(div.children[1]).toMatchObject({ kind: 'leaf', type: 'image', value: 'a.png', attrs: { alt: 'A' } });
     expect(doc.kits.map((k) => k.name)).toEqual(['kit.min.css', 'Hi styles']);
-    expect(doc.kits[0].css).toContain('@import url("https://cdn.example.com/kit.min.css")');
+    expect(doc.kits[0].href).toBe('https://cdn.example.com/kit.min.css');
     let scripts = 0;
     walk(doc.tree.root, (n) => {
       if (isBranch(n) && n.tag === 'script') scripts++;

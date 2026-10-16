@@ -286,7 +286,11 @@ export function exportStorybook(forest: Forest, opts: StorybookOptions = {}): St
     { path: '.storybook/preview.js', content: previewFile(kits.map((k) => k.file)) },
     { path: '.storybook/tree-weaver.js', content: RENDER_HELPER },
     { path: 'styles/base.css', content: `${BASE_CSS}\n` },
-    ...kits.map(({ file, kit }) => ({ path: `styles/kits/${file}`, content: `/* ${kit.name.replace(/\*\//g, '* /')} */\n${kit.css}\n` })),
+    // A linked kit stays linked: its file imports the stylesheet URL, keeping its place in the load order.
+    ...kits.map(({ file, kit }) => ({
+      path: `styles/kits/${file}`,
+      content: `/* ${kit.name.replace(/\*\//g, '* /')} */\n${kit.href ? `@import url("${kit.href.replace(/"/g, '%22')}");` : kit.css}\n`,
+    })),
   ];
   for (const tree of trees) {
     const slug = treeName(slugify(tree.name, 'tree'));

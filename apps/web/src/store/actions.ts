@@ -31,11 +31,15 @@ import {
   type TreeNode,
 } from '@tree-weaver/core';
 import { exportForest, exportStorybook, exportTree, getFormat, importDocument, suggestFileName, zipStorybook, type FormatId } from '@tree-weaver/formats';
-import { createStarterKit } from '@tree-weaver/kits';
+import { createEnvKits, createStarterKit, fetchKitCss } from '@tree-weaver/kits';
+import { ENV_CSS_URLS } from '../config';
 import { createForestStore, Preferences, type ForestStore } from '@tree-weaver/storage';
 import { state, type SidebarTab, type Toast } from './editor';
 
 /* ------------------------------------------------------------- selectors */
+
+/** Every kit the trees load, in load order: the deployment's stylesheets first, then the forest's kits. */
+export const allKits = (): DesignKit[] => [...state.envKits, ...(state.forest?.kits ?? [])];
 
 export const currentTree = (): Tree | undefined => state.forest?.trees.find((t) => t.id === state.treeId);
 
@@ -121,6 +125,8 @@ function freshForest(name = 'My forest'): Forest {
 }
 
 export async function init(): Promise<void> {
+  state.envKits = createEnvKits(ENV_CSS_URLS);
+  void Promise.all(state.envKits.map((k) => refreshKit(k.id, true)));
   store = await createForestStore();
   state.storageKind = store.kind;
   const saved = prefs.read();
@@ -436,6 +442,22 @@ export function removeKit(id: string): void {
   commit({ ...forest, kits: forest.kits.filter((k) => k.id !== id) });
 }
 
+/**
+ * Fetch a linked kit's CSS again so its classes and tokens are current. The stylesheet
+ * itself always loads from its URL; this only refreshes what the editor can list.
+ */
+export async function refreshKit(id: string, quiet = false): Promise<void> {
+  const kit = allKits().find((k) => k.id === id);
+  if (!kit?.href) return;
+  const css = await fetchKitCss(kit.href);
+  if (state.envKits.some((k) => k.id === id)) {
+    state.envKits = state.envKits.map((k) => (k.id === id ? { ...k, css } : k));
+  } else if (css !== kit.css) {
+    updateKit(id, { css });
+  }
+  if (!quiet) toast(css ? `Reloaded “${kit.name}”` : `“${kit.name}” still loads, but its server does not share the CSS, so its classes are not listed`, css ? 'success' : 'info');
+}
+
 export function moveKit(id: string, delta: -1 | 1): void {
   const forest = state.forest;
   if (!forest) return;
@@ -471,8 +493,9 @@ export async function importText(text: string, format?: FormatId, fileName?: str
   let tree = doc.tree;
   if (forest.trees.some((t) => t.id === tree.id)) tree = { ...tree, id: createId('t') };
   tree = { ...tree, name: uniqueName(tree.name, forest.trees.map((t) => t.name)) };
-  const known = new Set(forest.kits.flatMap((k) => [k.id, k.css]));
-  const newKits = doc.kits.filter((k) => !known.has(k.id) && !known.has(k.css));
+  // Skip kits the forest already has, and the deployment's own stylesheets.
+  const known = new Set(allKits().flatMap((k) => (k.href ? [k.id, k.href] : [k.id, k.css])));
+  const newKits = doc.kits.filter((k) => !known.has(k.id) && !known.has(k.href ?? k.css));
   commit({ ...forest, trees: [...forest.trees, tree], kits: [...forest.kits, ...newKits] });
   switchTree(tree.id);
   const kitNote = newKits.length ? ` and ${newKits.length} design kit${newKits.length === 1 ? '' : 's'}` : '';
@@ -495,14 +518,17 @@ export function exportCurrent(format: FormatId, scope: 'tree' | 'forest'): Expor
     return { text: exportForest(forest, format), fileName: suggestFileName(forest.name, 'forest', format), mime: info.mime };
   }
   const tree = currentTree()!;
-  return { text: exportTree(tree, format, forest.kits), fileName: suggestFileName(tree.name, 'tree', format), mime: info.mime };
+  // A standalone page loads the deployment's stylesheets too; data formats carry only the forest's kits.
+  const kits = format === 'html' ? allKits() : forest.kits;
+  return { text: exportTree(tree, format, kits), fileName: suggestFileName(tree.name, 'tree', format), mime: info.mime };
 }
 
 /** A Storybook project (zipped) for the current tree or the whole forest. */
 export function exportStorybookCurrent(scope: 'tree' | 'forest'): ExportOutput {
   const forest = state.forest!;
   const tree = currentTree()!;
-  const project = exportStorybook(forest, scope === 'tree' ? { treeIds: [tree.id] } : {});
+  // The deployment's stylesheets load first in the Storybook preview too.
+  const project = exportStorybook({ ...forest, kits: allKits() }, scope === 'tree' ? { treeIds: [tree.id] } : {});
   const stories = project.files.find((f) => f.path.endsWith('.stories.js'));
   const listing = project.files.map((f) => `  ${f.path}`).join('\n');
   const text = `${project.name}/\n${listing}\n${stories ? `\n// ${stories.path}\n${stories.content}` : ''}`;

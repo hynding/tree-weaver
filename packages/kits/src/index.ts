@@ -1,4 +1,4 @@
-import { createKit, parseCss, type CssNode, type DesignKit } from '@tree-weaver/core';
+import { createKit, isStylesheetUrl, parseCss, type CssNode, type DesignKit } from '@tree-weaver/core';
 
 export interface KitToken {
   name: string;
@@ -71,21 +71,46 @@ export function kitFromFile(fileName: string, css: string): DesignKit {
   return createKit(baseName(fileName) || 'Design kit', css, fileName);
 }
 
-/**
- * A kit from a stylesheet URL. The CSS is fetched so its classes and tokens can be
- * listed; when the server doesn't allow that (CORS), the kit falls back to an
- * `@import` that the preview and exports still load.
- */
-export async function kitFromUrl(url: string, fetchImpl: typeof fetch = globalThis.fetch): Promise<DesignKit> {
-  const name = baseName(url) || 'Remote kit';
+/** Fetch a stylesheet's CSS so its classes and tokens can be listed; empty when the server doesn't allow it (CORS). */
+export async function fetchKitCss(url: string, fetchImpl: typeof fetch = globalThis.fetch): Promise<string> {
   try {
     const res = await fetchImpl(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return createKit(name, await res.text(), url);
+    return await res.text();
   } catch {
-    return createKit(name, `@import url("${url.replace(/"/g, '%22')}");`, url);
+    return '';
   }
 }
+
+/** A linked kit for a stylesheet URL, without fetching anything yet. */
+export function linkedKit(url: string, name = baseName(url) || 'Linked stylesheet'): DesignKit {
+  return { ...createKit(name, '', url), href: url };
+}
+
+/**
+ * A linked kit from a stylesheet URL. The stylesheet loads from the URL in its place in
+ * the kit order; its CSS is fetched once so its classes and tokens can be listed.
+ */
+export async function kitFromUrl(url: string, fetchImpl: typeof fetch = globalThis.fetch): Promise<DesignKit> {
+  return { ...linkedKit(url), css: await fetchKitCss(url, fetchImpl) };
+}
+
+/**
+ * Stylesheet URLs from a setting such as `TW_CSS_URLS`: separated by commas, spaces or
+ * new lines, kept in their given order, with duplicates and non-http(s) entries dropped.
+ */
+export function parseCssUrls(value: string | undefined | null): string[] {
+  const urls: string[] = [];
+  for (const part of (value ?? '').split(/[\s,]+/)) if (part && isStylesheetUrl(part) && !urls.includes(part)) urls.push(part);
+  return urls;
+}
+
+/** Kits for stylesheets the deployment always loads first. They are not part of any forest. */
+export function createEnvKits(urls: string[]): DesignKit[] {
+  return urls.map((url, i) => ({ ...linkedKit(url), id: `env-${i + 1}`, source: 'env' }));
+}
+
+export const isEnvKit = (kit: DesignKit): boolean => kit.source === 'env';
 
 /** A small starter kit so new forests have tokens and classes to work with. */
 export const WEAVER_BASIC_CSS = `/* Weaver Basic: a starter design kit for Tree Weaver */

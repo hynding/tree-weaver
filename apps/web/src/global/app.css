@@ -732,6 +732,17 @@ details.group > .group-body {
   color: var(--faint);
   font-size: 11px;
 }
+.kit-badge {
+  display: inline-flex;
+  flex: none;
+  margin-right: 4px;
+  color: var(--faint);
+  vertical-align: -2px;
+}
+.kit-badge svg {
+  width: 13px;
+  height: 13px;
+}
 .kit-details {
   margin: -2px 0 8px;
   padding: 8px;
