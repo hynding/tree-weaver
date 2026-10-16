@@ -1094,3 +1094,94 @@ tw-canvas {
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
+
+/* ------------------------------------------------------------ grid editing */
+
+.grid-columns {
+  margin-bottom: 10px;
+}
+.grid-columns-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.grid-label {
+  color: var(--muted);
+  font-size: 12px;
+}
+.grid-label.overridden {
+  color: var(--select);
+  font-weight: 600;
+}
+.grid-sub {
+  color: var(--faint);
+  font-size: 12px;
+}
+.grid-quick {
+  margin-bottom: 8px;
+}
+.grid-preview {
+  display: flex;
+  gap: 3px;
+  margin-bottom: 8px;
+}
+.grid-preview span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+  font-size: 10px;
+  padding: 6px 2px;
+  border-radius: 4px;
+  background: var(--select-soft);
+  color: var(--select);
+  border: 1px solid rgba(37, 99, 235, 0.25);
+}
+.tracks {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+}
+.track {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 70px 22px;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.track-num {
+  color: var(--faint);
+  font-size: 11px;
+  text-align: center;
+}
+.track-fit {
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding-left: 7px;
+}
+.link-btn {
+  border: 0;
+  background: none;
+  padding: 0;
+  margin-top: 6px;
+  color: var(--select);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+.link-btn:hover {
+  text-decoration: underline;
+}
+details.advanced {
+  margin-top: 6px;
+}
+details.advanced > summary {
+  cursor: pointer;
+  color: var(--faint);
+  font-size: 12px;
+  margin-bottom: 6px;
+}

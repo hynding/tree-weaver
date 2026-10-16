@@ -3,6 +3,7 @@ export * from './displays';
 export * from './create';
 export * from './ops';
 export * from './layout';
+export * from './grid';
 export * from './render';
 export * from './normalize';
 export * from './history';
