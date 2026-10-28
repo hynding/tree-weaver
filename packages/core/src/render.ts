@@ -1,5 +1,5 @@
 import { DISPLAYS } from './displays';
-import type { Branch, DesignKit, Leaf, StyleMap, Tree, TreeNode } from './model';
+import type { Branch, DesignKit, DisplayStyles, Leaf, StyleMap, Tree, TreeNode } from './model';
 import { isBranch } from './model';
 import { VOID_TAGS, walk } from './ops';
 
@@ -58,23 +58,37 @@ export function declarations(styles: StyleMap, indent = '  '): string {
 
 export const branchSelector = (id: string): string => `[${BRANCH_ATTR}="${id.replace(/["\\]/g, '')}"]`;
 
-/** CSS for every branch style in a tree, grouped per display under its media query. */
-export function renderTreeCss(root: Branch): string {
+/** Anything with a selector and per-display styles: a branch (by id) or a custom rule. */
+export interface DisplayRule {
+  selector: string;
+  styles: DisplayStyles;
+}
+
+/** CSS for a list of rules, grouped per display under its media query, base display first. */
+export function renderDisplayCss(rules: DisplayRule[]): string {
   const blocks: string[] = [];
   for (const display of DISPLAYS) {
-    const rules: string[] = [];
-    walk(root, (node) => {
-      if (!isBranch(node)) return;
-      const styles = node.styles[display.id];
-      if (!styles) return;
+    const out: string[] = [];
+    for (const rule of rules) {
+      const styles = rule.styles[display.id];
+      if (!styles || !rule.selector) continue;
       const body = declarations(styles, display.media ? '    ' : '  ');
-      if (!body) return;
-      rules.push(display.media ? `  ${branchSelector(node.id)} {\n${body}\n  }` : `${branchSelector(node.id)} {\n${body}\n}`);
-    });
-    if (!rules.length) continue;
-    blocks.push(display.media ? `/* ${display.label} */\n@media ${display.media} {\n${rules.join('\n')}\n}` : `/* ${display.label} (base) */\n${rules.join('\n')}`);
+      if (!body) continue;
+      out.push(display.media ? `  ${rule.selector} {\n${body}\n  }` : `${rule.selector} {\n${body}\n}`);
+    }
+    if (!out.length) continue;
+    blocks.push(display.media ? `/* ${display.label} */\n@media ${display.media} {\n${out.join('\n')}\n}` : `/* ${display.label} (base) */\n${out.join('\n')}`);
   }
   return blocks.join('\n\n');
+}
+
+/** CSS for every branch style in a tree, grouped per display under its media query. */
+export function renderTreeCss(root: Branch): string {
+  const rules: DisplayRule[] = [];
+  walk(root, (node) => {
+    if (isBranch(node)) rules.push({ selector: branchSelector(node.id), styles: node.styles });
+  });
+  return renderDisplayCss(rules);
 }
 
 export interface HtmlOptions {
@@ -150,7 +164,7 @@ export function renderDocument(tree: Tree, opts: DocumentOptions = {}): string {
   const kits = (opts.kits ?? []).filter((k) => k.enabled);
   const kitStyles = kits
     .map((k) => {
-      const attrs = `data-tw-kit="${escapeAttr(k.id)}" data-tw-kit-name="${escapeAttr(k.name)}"${k.source === 'env' ? ' data-tw-env' : ''}`;
+      const attrs = `data-tw-kit="${escapeAttr(k.id)}" data-tw-kit-name="${escapeAttr(k.name)}"${k.source === 'env' ? ' data-tw-env' : ''}${k.rules ? ' data-tw-kit-editable' : ''}`;
       if (k.href) return `<link rel="stylesheet" href="${escapeAttr(k.href)}" ${attrs}>`;
       return `<style ${attrs}>\n${k.css.replace(/<\/style/gi, '<\\/style')}\n</style>`;
     })

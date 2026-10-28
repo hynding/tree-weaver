@@ -68,6 +68,19 @@ export interface DesignKit {
    * list the kit's classes and tokens (empty when the server doesn't share it).
    */
   href?: string;
+  /**
+   * Rules of an editable kit, such as the forest's custom classes and selectors. When
+   * present, the rules are the kit's source and `css` is generated from them.
+   */
+  rules?: StyleRule[];
+}
+
+/** A custom CSS rule: a selector with per-display declarations, like a branch's styles. */
+export interface StyleRule {
+  id: string;
+  /** Any CSS selector, e.g. `.card`, `.card:hover` or `nav > a`. */
+  selector: string;
+  styles: DisplayStyles;
 }
 
 export interface Forest {

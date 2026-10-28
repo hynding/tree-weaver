@@ -35,6 +35,12 @@ The same words are used in the code (`Forest`, `Tree`, `Branch`, `Leaf`) and in 
   moved up or down, and their classes are suggested in the inspector. Linked stylesheets load from their
   URL in their place in that order; their CSS is also fetched, when the server allows it, so their
   classes can be listed. A starter kit, _Weaver Basic_, comes with every new forest.
+- **Write custom classes and selectors** in the _Classes_ tab: add a class (`.promo`) or any selector
+  (`nav a:hover`), then set its declarations per display, just like branch styles (other displays
+  inherit from desktop large). Custom rules live in an editable kit, _Custom styles_, which loads after
+  your other kits, saves with the forest and travels with every export. Give the selected branch a class
+  from the rule, or use _Save styles as class_ in the inspector to move a branch's styles into a new
+  class. Rules can also be edited as CSS, and a pasted or uploaded kit can be turned into editable rules.
 - **See where styles come from**: the inspector's _Matched styles_ section lists every rule that styles
   the selected branch or leaf on the current display, strongest first, with overridden values struck
   out and inherited rules grouped by ancestor. Each rule names its source: the kit (with line number,

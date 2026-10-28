@@ -2,7 +2,7 @@ import { Component, Element, State, h } from '@stencil/core';
 import { createKit, isStylesheetUrl, type DesignKit } from '@tree-weaver/core';
 import { analyzeKit, createStarterKit, kitFromFile, kitFromUrl, parseCssUrls } from '@tree-weaver/kits';
 import { CSS_URL_INPUT_ENABLED } from '../../config';
-import { addKit, moveKit, refreshKit, removeKit, toast, updateKit } from '../../store/actions';
+import { addKit, makeKitEditable, moveKit, refreshKit, removeKit, setTab, toast, updateKit } from '../../store/actions';
 import { state } from '../../store/editor';
 import { Icon } from '../../utils/icons';
 
@@ -67,6 +67,12 @@ export class TwKitsPanel {
     if (!this.pasted.trim()) return;
     addKit(createKit(`Pasted kit ${(state.forest?.kits.length ?? 0) + 1}`, this.pasted, 'pasted'));
     this.pasted = '';
+  }
+
+  private makeEditable(kit: DesignKit) {
+    const skipped = makeKitEditable(kit.id);
+    if (skipped.length) toast(`“${kit.name}” uses ${skipped.join(', ')}, which the Classes tab can’t edit. Keep editing it as CSS.`, 'error');
+    else setTab('classes');
   }
 
   private toggle(id: string) {
@@ -187,12 +193,21 @@ export class TwKitsPanel {
                 </div>
               ) : null}
               {this.renderInfo(kit)}
-              {kit.href ? null : (
+              {kit.rules ? (
+                <div class="row">
+                  <button class="btn small" onClick={() => setTab('classes')}>
+                    <Icon name="edit" /> Edit in Classes tab
+                  </button>
+                </div>
+              ) : kit.href ? null : (
                 <details>
                   <summary class="hint">Edit CSS</summary>
                   <textarea class="textarea" rows={10} aria-label={`${kit.name} CSS`} onChange={(e) => updateKit(kit.id, { css: (e.target as HTMLTextAreaElement).value })}>
                     {kit.css}
                   </textarea>
+                  <button class="btn small" title="Edit this kit's rules one by one, per display, in the Classes tab" onClick={() => this.makeEditable(kit)}>
+                    Edit as classes
+                  </button>
                 </details>
               )}
             </div>

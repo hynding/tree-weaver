@@ -11,6 +11,11 @@ export namespace Components {
     interface TwCanvas {
     }
     /**
+     * Custom classes and selectors: CSS rules written in the editor, styled per display.
+     */
+    interface TwClassesPanel {
+    }
+    /**
      * Trees in the open forest, and every forest saved in this browser.
      */
     interface TwForestPanel {
@@ -62,6 +67,15 @@ declare global {
     var HTMLTwCanvasElement: {
         prototype: HTMLTwCanvasElement;
         new (): HTMLTwCanvasElement;
+    };
+    /**
+     * Custom classes and selectors: CSS rules written in the editor, styled per display.
+     */
+    interface HTMLTwClassesPanelElement extends Components.TwClassesPanel, HTMLStencilElement {
+    }
+    var HTMLTwClassesPanelElement: {
+        prototype: HTMLTwClassesPanelElement;
+        new (): HTMLTwClassesPanelElement;
     };
     /**
      * Trees in the open forest, and every forest saved in this browser.
@@ -140,6 +154,7 @@ declare global {
     interface HTMLElementTagNameMap {
         "tw-app": HTMLTwAppElement;
         "tw-canvas": HTMLTwCanvasElement;
+        "tw-classes-panel": HTMLTwClassesPanelElement;
         "tw-forest-panel": HTMLTwForestPanelElement;
         "tw-inspector": HTMLTwInspectorElement;
         "tw-io-dialog": HTMLTwIoDialogElement;
@@ -154,6 +169,11 @@ declare namespace LocalJSX {
     interface TwApp {
     }
     interface TwCanvas {
+    }
+    /**
+     * Custom classes and selectors: CSS rules written in the editor, styled per display.
+     */
+    interface TwClassesPanel {
     }
     /**
      * Trees in the open forest, and every forest saved in this browser.
@@ -199,6 +219,7 @@ declare namespace LocalJSX {
     interface IntrinsicElements {
         "tw-app": TwApp;
         "tw-canvas": TwCanvas;
+        "tw-classes-panel": TwClassesPanel;
         "tw-forest-panel": TwForestPanel;
         "tw-inspector": TwInspector;
         "tw-io-dialog": Omit<TwIoDialog, keyof TwIoDialogAttributes> & { [K in keyof TwIoDialog & keyof TwIoDialogAttributes]?: TwIoDialog[K] } & { [K in keyof TwIoDialog & keyof TwIoDialogAttributes as `attr:${K}`]?: TwIoDialogAttributes[K] } & { [K in keyof TwIoDialog & keyof TwIoDialogAttributes as `prop:${K}`]?: TwIoDialog[K] };
@@ -215,6 +236,10 @@ declare module "@stencil/core" {
         interface IntrinsicElements {
             "tw-app": LocalJSX.IntrinsicElements["tw-app"] & JSXBase.HTMLAttributes<HTMLTwAppElement>;
             "tw-canvas": LocalJSX.IntrinsicElements["tw-canvas"] & JSXBase.HTMLAttributes<HTMLTwCanvasElement>;
+            /**
+             * Custom classes and selectors: CSS rules written in the editor, styled per display.
+             */
+            "tw-classes-panel": LocalJSX.IntrinsicElements["tw-classes-panel"] & JSXBase.HTMLAttributes<HTMLTwClassesPanelElement>;
             /**
              * Trees in the open forest, and every forest saved in this browser.
              */

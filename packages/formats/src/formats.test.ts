@@ -1,5 +1,7 @@
 import {
   createBranch,
+  createCustomKit,
+  createRule,
   createForest,
   createKit,
   createLeaf,
@@ -244,5 +246,30 @@ describe('detection and helpers', () => {
     expect(suggestFileName('Site', 'forest', 'yaml')).toBe('site.forest.yaml');
     expect(suggestFileName('Site', 'tree', 'markdown')).toBe('site.md');
     expect(FORMATS.map((f) => f.id)).toEqual(['json', 'yaml', 'xml', 'html', 'markdown']);
+  });
+});
+
+describe('custom classes and selectors', () => {
+  const custom = createCustomKit('Custom styles', [
+    createRule('.card', { lg: { padding: '2rem' }, tablet: { padding: '1rem' } }),
+    createRule('nav a:hover', { lg: { color: 'red' } }),
+  ]);
+  const tree = createTree('Home');
+
+  it.each(['json', 'yaml', 'xml', 'html', 'markdown'] as FormatId[])('round-trips an editable kit through %s', (format) => {
+    const doc = importDocument(exportTree(tree, format, [custom]), format);
+    if (doc.kind !== 'tree') throw new Error('expected a tree');
+    const kit = doc.kits.find((k) => k.id === custom.id);
+    expect(kit?.rules?.map((r) => [r.selector, r.styles])).toEqual(custom.rules!.map((r) => [r.selector, r.styles]));
+    expect(kit?.css).toBe(custom.css);
+  });
+
+  it('keeps editable kits in forest exports', () => {
+    const forest = { ...createForest('Site', [tree]), kits: [custom] };
+    for (const format of ['json', 'yaml', 'xml'] as FormatId[]) {
+      const doc = importDocument(exportForest(forest, format), format);
+      if (doc.kind !== 'forest') throw new Error('expected a forest');
+      expect(doc.forest.kits[0].rules?.map((r) => r.selector)).toEqual(['.card', 'nav a:hover']);
+    }
   });
 });

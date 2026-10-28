@@ -1,5 +1,6 @@
 import {
   BRANCH_ATTR,
+  CUSTOM_KIT_SOURCE,
   createId,
   DISPLAYS,
   INLINE_TAGS,
@@ -222,7 +223,7 @@ const fileName = (href: string): string => href.split(/[?#]/)[0].split('/').pop(
 export function importHtml(text: string): TreeDocument {
   const dom = parseDocument(text, { lowerCaseTags: true, lowerCaseAttributeNames: true, decodeEntities: true });
   const styles = new Map<string, DisplayStyles>();
-  const kits: DesignKit[] = [];
+  const kits: (DesignKit | Record<string, unknown>)[] = [];
   const looseCss: string[] = [];
   let title = '';
   let treeId = '';
@@ -237,7 +238,10 @@ export function importHtml(text: string): TreeDocument {
       if (el.attribs['data-tw-styles'] !== undefined) readTreeCss(css, styles);
       else if (el.attribs['data-tw-base'] !== undefined) continue;
       else if (el.attribs['data-tw-kit'] !== undefined) {
-        kits.push({ id: el.attribs['data-tw-kit'] || createId('k'), name: el.attribs['data-tw-kit-name'] || 'Design kit', css: css.trim(), enabled: true });
+        const kit: Record<string, unknown> = { id: el.attribs['data-tw-kit'] || createId('k'), name: el.attribs['data-tw-kit-name'] || 'Design kit', css: css.trim(), enabled: true };
+        // Custom classes and selectors come back as an editable kit.
+        if (el.attribs['data-tw-kit-editable'] !== undefined) Object.assign(kit, { editable: true, source: CUSTOM_KIT_SOURCE });
+        kits.push(kit);
       } else if (css.trim()) looseCss.push(css.trim());
     } else if (el.name === 'link' && /\bstylesheet\b/i.test(el.attribs.rel ?? '') && el.attribs.href) {
       const href = el.attribs.href.trim();

@@ -1,7 +1,7 @@
 import { createStore } from '@stencil/store';
 import type { DesignKit, DisplayId, Forest, ForestSummary } from '@tree-weaver/core';
 
-export type SidebarTab = 'branches' | 'outline' | 'kits' | 'forest';
+export type SidebarTab = 'branches' | 'outline' | 'classes' | 'kits' | 'forest';
 export type SaveState = 'saved' | 'saving' | 'unsaved' | 'error';
 export type DialogKind = null | 'export' | 'import';
 
@@ -32,6 +32,8 @@ export interface EditorState {
   dragNodeId: string | null;
   /** Kit shown expanded in the Kits tab. */
   openKitId: string | null;
+  /** Custom rule shown expanded in the Classes tab. */
+  openRuleId: string | null;
   /** Bumped when the canvas's stylesheets, markup or width change, so views that read the canvas refresh. */
   canvasVersion: number;
 }
@@ -54,5 +56,6 @@ export const { state, onChange, reset } = createStore<EditorState>({
   toasts: [],
   dragNodeId: null,
   openKitId: null,
+  openRuleId: null,
   canvasVersion: 0,
 });
