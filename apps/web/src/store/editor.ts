@@ -30,6 +30,10 @@ export interface EditorState {
   toasts: Toast[];
   /** Id of a node being dragged from the outline or canvas, so drop targets can validate. */
   dragNodeId: string | null;
+  /** Kit shown expanded in the Kits tab. */
+  openKitId: string | null;
+  /** Bumped when the canvas's stylesheets, markup or width change, so views that read the canvas refresh. */
+  canvasVersion: number;
 }
 
 export const { state, onChange, reset } = createStore<EditorState>({
@@ -49,4 +53,6 @@ export const { state, onChange, reset } = createStore<EditorState>({
   dialog: null,
   toasts: [],
   dragNodeId: null,
+  openKitId: null,
+  canvasVersion: 0,
 });

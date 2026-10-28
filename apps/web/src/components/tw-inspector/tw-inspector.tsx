@@ -33,6 +33,7 @@ import {
   select,
   selectParent,
   setStyleValue,
+  showKit,
   tableEdit,
   updateBranch,
   updateLeaf,
@@ -40,7 +41,9 @@ import {
 } from '../../store/actions';
 import { state } from '../../store/editor';
 import { nodeKind, nodeLabel } from '../../utils/describe';
+import { canvasElement } from '../../utils/frame';
 import { Icon } from '../../utils/icons';
+import { describeHref, matchStyles, type MatchedRule, type StyleGroup } from '../../utils/matched-styles';
 
 interface FieldOpts {
   options?: string[];
@@ -98,6 +101,8 @@ export class TwInspector {
   @State() newClass = '';
   @State() newAttr = { name: '', value: '' };
   @State() newDecl = { prop: '', value: '' };
+  @State() stylesOpen = false;
+  @State() styleFilter = '';
 
   private styleField(branch: Branch, prop: string, label: string, opts: FieldOpts = {}) {
     const display = state.display as DisplayId;
@@ -697,6 +702,133 @@ export class TwInspector {
     );
   }
 
+  /** Where a matched rule comes from: its kit (with line), imported file, or Tree Weaver itself. */
+  private renderSource(rule: MatchedRule) {
+    const { source } = rule;
+    const line = rule.line ? <span class="style-line">:{rule.line}</span> : null;
+    const external = source.href ? (
+      <a class="style-href" href={source.href} target="_blank" rel="noopener noreferrer" title={source.href} aria-label={`Open ${describeHref(source.href)}`}>
+        <Icon name="link" />
+      </a>
+    ) : null;
+    const kit = (label: string) =>
+      source.kitId ? (
+        <button class="style-kit" title="Show this kit in the Kits tab" onClick={() => showKit(source.kitId!)}>
+          {label}
+        </button>
+      ) : (
+        <span>{label}</span>
+      );
+    if (source.kind === 'import') {
+      return (
+        <span class="style-source" title={source.href}>
+          {source.label}
+          {line}
+          {external} <span class="style-via">via</span> {kit(source.via?.[0] ?? '')}
+        </span>
+      );
+    }
+    if (source.kind === 'kit') {
+      return (
+        <span class="style-source" title={source.href ?? undefined}>
+          {kit(source.label)}
+          {line}
+          {external}
+        </span>
+      );
+    }
+    return <span class="style-source">{source.kind === 'tree' ? 'Set in Tree Weaver' : source.label}</span>;
+  }
+
+  private renderStyleGroup(group: StyleGroup, index: number, filter: string) {
+    const tree = currentTree();
+    const rules = group.rules
+      .map((rule) => ({ rule, decls: rule.declarations.filter((d) => !filter || d.property.includes(filter) || d.value.toLowerCase().includes(filter)) }))
+      .filter(({ decls }) => decls.length);
+    if (!rules.length) return index === 0 && !filter ? <p class="hint">No stylesheet rules match this element.</p> : null;
+    let heading: string | null = null;
+    if (index > 0) {
+      const id = group.element.getAttribute('data-tw');
+      const node = id && tree ? findNode(tree.root, id) : null;
+      heading = `Inherited from ${node ? nodeLabel(node) : group.element.tagName.toLowerCase()}`;
+    }
+    return [
+      heading ? <div class="style-inherited">{heading}</div> : null,
+      rules.map(({ rule, decls }) => (
+        <div class="style-rule">
+          <div class="style-rule-head">
+            {rule.source.kind === 'tree' ? <span class="style-selector">Inspector styles</span> : <code class="style-selector">{rule.selector}</code>}
+            {this.renderSource(rule)}
+          </div>
+          {rule.conditions.length ? <div class="style-cond">{rule.conditions.join(' · ')}</div> : null}
+          <ul class="style-decls">
+            {decls.map((d) => (
+              <li class={{ overridden: !!d.overridden }} title={d.overridden ? 'Overridden by a stronger rule' : undefined}>
+                <span class="style-prop">{d.property}</span>: <span class="style-value">{d.value}</span>
+                {d.important ? <span class="style-important"> !important</span> : null};
+              </li>
+            ))}
+          </ul>
+        </div>
+      )),
+    ];
+  }
+
+  /** Every stylesheet rule that styles the node in the canvas, with where it came from. Only read while open. */
+  private renderMatchedStyles(node: Branch | Leaf) {
+    const el = this.stylesOpen ? canvasElement(node.id) : null;
+    const matched = el ? matchStyles(el, allKits()) : null;
+    const filter = this.styleFilter.trim().toLowerCase();
+    const own = matched?.groups[0]?.rules.length ?? 0;
+    return (
+      // Reading canvasVersion refreshes the section when the canvas's stylesheets, markup or width change.
+      <details class="group" data-canvas-version={state.canvasVersion} open={this.stylesOpen} onToggle={(e) => (this.stylesOpen = (e.target as HTMLDetailsElement).open)}>
+        <summary>
+          Matched styles
+          {own ? <span class="count">{own}</span> : null}
+        </summary>
+        {this.stylesOpen ? (
+          <div class="group-body">
+            <p class="hint">
+              Rules from your kits and stylesheets that style this {isBranch(node) ? 'branch' : 'leaf'} on {getDisplay(state.display as DisplayId).label}, strongest first. Struck-out values
+              are overridden.
+            </p>
+            <input
+              class="input"
+              type="search"
+              placeholder="Filter properties"
+              aria-label="Filter matched styles"
+              value={this.styleFilter}
+              onInput={(e) => (this.styleFilter = (e.target as HTMLInputElement).value)}
+            />
+            {matched ? (
+              <div class="style-rules">
+                {matched.groups.map((g, i) => this.renderStyleGroup(g, i, filter))}
+                {matched.unreadable.length ? (
+                  <div class="style-unreadable">
+                    <p class="hint">These stylesheets still apply, but their servers don’t let the editor read their rules:</p>
+                    <ul>
+                      {matched.unreadable.map((u) => (
+                        <li>
+                          <a href={u.href} target="_blank" rel="noopener noreferrer" title={u.href}>
+                            {describeHref(u.href)}
+                          </a>
+                          {u.source.kind === 'import' && u.source.via?.length ? <span class="style-via"> via {u.source.via[0]}</span> : null}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <p class="hint">The canvas is still loading.</p>
+            )}
+          </div>
+        ) : null}
+      </details>
+    );
+  }
+
   private renderAttributes(branch: Branch) {
     const entries = Object.entries(branch.attrs);
     const set = (name: string, value: string | null) => {
@@ -791,10 +923,11 @@ export class TwInspector {
                 );
               }),
               this.renderDeclarations(node),
+              this.renderMatchedStyles(node),
               this.renderAttributes(node),
               !isRoot && this.renderActions(),
             ]
-          : [this.renderLeaf(node), this.renderActions()]}
+          : [this.renderLeaf(node), this.renderMatchedStyles(node), this.renderActions()]}
         {isRoot && tree.root.children.length === 0 ? <p class="hint" style={{ padding: '0 12px' }}>Select a branch in the canvas or outline to edit it.</p> : null}
         {this.renderDatalists()}
       </div>,

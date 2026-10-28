@@ -26,6 +26,7 @@ import { allKits, currentTree, insertBlueprint, moveTo, pathTo, select, selected
 import { onChange, state } from '../../store/editor';
 import { nodeKind, nodeLabel } from '../../utils/describe';
 import { BLUEPRINT_MIME, NODE_MIME, dropPosition, hasType, isTreeDrag } from '../../utils/dnd';
+import { canvasElement, setCanvasDocument } from '../../utils/frame';
 import { handleShortcut } from '../../utils/shortcuts';
 
 /** Outlines for hover, selection and drop targets, plus room to drop into empty branches. */
@@ -63,9 +64,12 @@ const SKELETON = `<!doctype html><html><head><meta charset="utf-8">
 <style id="tw-base">${BASE_CSS}</style><style id="tw-tree"></style><style id="tw-editor">${EDITOR_CSS}</style>
 </head><body></body></html>`;
 
-/** Whether two kit lists load the same stylesheets in the same order. */
+/**
+ * Whether two kit lists load the same stylesheets in the same order. A linked kit counts
+ * as changed once its CSS is fetched, since that switches its link to CORS mode.
+ */
 const sameKits = (a: DesignKit[], b: DesignKit[]) =>
-  a.length === b.length && a.every((k, i) => k.id === b[i].id && k.href === b[i].href && (k.href ? true : k.css === b[i].css));
+  a.length === b.length && a.every((k, i) => k.id === b[i].id && k.href === b[i].href && (k.href ? !k.css === !b[i].css : k.css === b[i].css));
 
 @Component({ tag: 'tw-canvas' })
 export class TwCanvas {
@@ -82,6 +86,7 @@ export class TwCanvas {
   // What the frame currently shows, so updates only touch what changed.
   private shownRoot: Branch | null = null;
   private shownKits: DesignKit[] = [];
+  private shownDisplay: DisplayId | null = null;
   private dropMark: { el: Element; position: DropPosition; id: string } | null = null;
   private unsubscribe: (() => void)[] = [];
   /** Set while a grid handle is dragged, so redraws and clicks leave it alone. */
@@ -110,6 +115,7 @@ export class TwCanvas {
     this.observer?.disconnect();
     this.frameObserver?.disconnect();
     this.unsubscribe.forEach((off) => off());
+    setCanvasDocument(null);
   }
 
   componentDidRender() {
@@ -126,6 +132,8 @@ export class TwCanvas {
     this.loaded = true;
     this.shownRoot = null;
     this.shownKits = [];
+    this.shownDisplay = null;
+    setCanvasDocument(doc);
     doc.addEventListener('click', (e) => this.onClick(e), true);
     doc.addEventListener('dblclick', (e) => this.onDblClick(e), true);
     doc.addEventListener('mouseover', (e) => this.onHover(e));
@@ -156,7 +164,9 @@ export class TwCanvas {
   /**
    * One element per kit, in load order, between the base styles and the tree's styles:
    * `<link>` for linked kits, `<style>` for the rest. Separate elements keep each kit's
-   * `@import` rules valid and let linked stylesheets load from their URLs.
+   * `@import` rules valid and let linked stylesheets load from their URLs. A linked kit
+   * whose CSS the editor could fetch loads in CORS mode, so the inspector can read its
+   * rules; the rest load as before, since CORS mode would block them from loading at all.
    */
   private showKits(doc: Document, kits: DesignKit[]) {
     doc.head.querySelectorAll('[data-tw-kit]').forEach((el) => el.remove());
@@ -166,7 +176,10 @@ export class TwCanvas {
       if (kit.href) {
         const link = doc.createElement('link');
         link.rel = 'stylesheet';
+        if (kit.css) link.crossOrigin = 'anonymous';
         link.href = kit.href;
+        // Rules become readable once the sheet (and its imports) load.
+        link.addEventListener('load', () => state.canvasVersion++);
         el = link;
       } else {
         el = doc.createElement('style');
@@ -184,9 +197,11 @@ export class TwCanvas {
     const forest = state.forest;
     if (!doc || !tree || !forest) return;
     const kits = allKits().filter((k) => k.enabled);
+    let changed = false;
     if (!sameKits(this.shownKits, kits)) {
       this.showKits(doc, kits);
       this.shownKits = kits;
+      changed = true;
     }
     if (this.shownRoot !== tree.root && !this.editing) {
       const root = tree.root;
@@ -205,17 +220,20 @@ export class TwCanvas {
       body.innerHTML = renderTreeBody(root, { designer: true });
       body.querySelectorAll(`[${BRANCH_ATTR}]`).forEach((el) => el.setAttribute('draggable', 'true'));
       this.shownRoot = root;
+      changed = true;
     }
+    if (this.shownDisplay !== state.display) {
+      this.shownDisplay = state.display;
+      changed = true;
+    }
+    if (changed) state.canvasVersion++;
     this.mark('data-tw-selected', state.selectedId);
     this.mark('data-tw-hover', state.hoverId && state.hoverId !== state.selectedId ? state.hoverId : null);
     this.drawGrid();
   }
 
   private find(id: string | null): Element | null {
-    const doc = this.doc;
-    if (!doc || !id) return null;
-    const esc = (window.CSS?.escape ?? ((s: string) => s))(id);
-    return doc.querySelector(`[${BRANCH_ATTR}="${esc}"], [${LEAF_ATTR}="${esc}"]`);
+    return this.doc ? canvasElement(id) : null;
   }
 
   private mark(attr: string, id: string | null) {

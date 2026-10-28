@@ -575,6 +575,109 @@ details.group > .group-body {
   padding: 0 12px 12px;
 }
 
+/* --------------------------------------------------------- matched styles */
+
+.style-rules {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.style-rule {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-2);
+  padding: 6px 8px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  min-width: 0;
+}
+.style-rule-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 8px;
+}
+.style-selector {
+  color: var(--text);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.style-source {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  margin-left: auto;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 11px;
+  color: var(--muted);
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.style-kit {
+  border: 0;
+  padding: 0;
+  background: none;
+  font: inherit;
+  color: var(--select);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.style-line,
+.style-via {
+  color: var(--faint);
+}
+.style-href {
+  color: var(--muted);
+  display: inline-flex;
+  align-self: center;
+}
+.style-href svg {
+  width: 12px;
+  height: 12px;
+}
+.style-cond {
+  color: var(--accent-strong);
+  font-size: 11px;
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+.style-decls {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0 0 0 12px;
+}
+.style-decls li {
+  overflow-wrap: anywhere;
+}
+.style-prop {
+  color: var(--accent-strong);
+}
+.style-important {
+  color: var(--danger);
+}
+.style-decls li.overridden {
+  text-decoration: line-through;
+  color: var(--faint);
+}
+.style-decls li.overridden .style-prop {
+  color: inherit;
+}
+.style-inherited {
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--muted);
+}
+.style-unreadable ul {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+
 /* --------------------------------------------------------------- palette */
 
 .palette-search {

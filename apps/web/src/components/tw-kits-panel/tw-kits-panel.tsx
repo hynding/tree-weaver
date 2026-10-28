@@ -1,4 +1,4 @@
-import { Component, State, h } from '@stencil/core';
+import { Component, Element, State, h } from '@stencil/core';
 import { createKit, isStylesheetUrl, type DesignKit } from '@tree-weaver/core';
 import { analyzeKit, createStarterKit, kitFromFile, kitFromUrl, parseCssUrls } from '@tree-weaver/kits';
 import { CSS_URL_INPUT_ENABLED } from '../../config';
@@ -17,11 +17,16 @@ const host = (url: string) => {
 /** Design kits: imported CSS that styles every tree in the forest. */
 @Component({ tag: 'tw-kits-panel' })
 export class TwKitsPanel {
-  @State() open: string | null = null;
+  @Element() host!: HTMLElement;
   @State() url = '';
   @State() pasted = '';
   @State() busy = false;
   private fileInput?: HTMLInputElement;
+
+  componentDidLoad() {
+    // Opened from elsewhere (the inspector's style sources): bring that kit into view.
+    if (state.openKitId) this.host.querySelector('.kit-details')?.scrollIntoView({ block: 'nearest' });
+  }
 
   private async onFiles(files: FileList | null) {
     for (const file of Array.from(files ?? [])) addKit(kitFromFile(file.name, await file.text()));
@@ -65,7 +70,7 @@ export class TwKitsPanel {
   }
 
   private toggle(id: string) {
-    this.open = this.open === id ? null : id;
+    state.openKitId = state.openKitId === id ? null : id;
   }
 
   private renderInfo(kit: DesignKit) {
@@ -104,11 +109,11 @@ export class TwKitsPanel {
             <button class="icon-btn" title="Reload classes" onClick={() => refreshKit(kit.id)}>
               <Icon name="refresh" />
             </button>
-            <button class="icon-btn" title="Details" aria-expanded={String(this.open === kit.id)} onClick={() => this.toggle(kit.id)}>
+            <button class="icon-btn" title="Details" aria-expanded={String(state.openKitId === kit.id)} onClick={() => this.toggle(kit.id)}>
               <Icon name="eye" />
             </button>
           </div>,
-          this.open === kit.id ? (
+          state.openKitId === kit.id ? (
             <div class="kit-details">
               <p class="hint">
                 <a href={kit.href} target="_blank" rel="noopener noreferrer">
@@ -150,14 +155,14 @@ export class TwKitsPanel {
             <button class="icon-btn" title="Load later" disabled={i === kits.length - 1} onClick={() => moveKit(kit.id, 1)}>
               <Icon name="down" />
             </button>
-            <button class="icon-btn" title="Details" aria-expanded={String(this.open === kit.id)} onClick={() => this.toggle(kit.id)}>
+            <button class="icon-btn" title="Details" aria-expanded={String(state.openKitId === kit.id)} onClick={() => this.toggle(kit.id)}>
               <Icon name="eye" />
             </button>
             <button class="icon-btn danger" title="Remove kit" onClick={() => removeKit(kit.id)}>
               <Icon name="trash" />
             </button>
           </div>,
-          this.open === kit.id ? (
+          state.openKitId === kit.id ? (
             <div class="kit-details">
               <div class="field">
                 <label htmlFor={`kit-name-${kit.id}`}>Name</label>
