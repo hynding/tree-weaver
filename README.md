@@ -35,6 +35,11 @@ The same words are used in the code (`Forest`, `Tree`, `Branch`, `Leaf`) and in 
   moved up or down, and their classes are suggested in the inspector. Linked stylesheets load from their
   URL in their place in that order; their CSS is also fetched, when the server allows it, so their
   classes can be listed. A starter kit, _Weaver Basic_, comes with every new forest.
+- **See where styles come from**: the inspector's _Matched styles_ section lists every rule that styles
+  the selected branch or leaf on the current display, strongest first, with overridden values struck
+  out and inherited rules grouped by ancestor. Each rule names its source: the kit (with line number,
+  linking to the kit), a stylesheet it `@import`s, or the styles set in the inspector. Rules from a
+  linked stylesheet can be read when its server allows CORS; others are listed as unreadable.
 - **Upload and download tree data** as JSON, YAML, XML, HTML or Markdown (see below).
 - **Download a Storybook project** for a tree or the whole forest (see [Storybook](#storybook)).
 - **Save locally**: forests autosave to IndexedDB (falling back to `localStorage`), and you can keep

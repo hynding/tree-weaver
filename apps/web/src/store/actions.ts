@@ -193,6 +193,12 @@ export function setTab(tab: SidebarTab): void {
   prefs.write({ tab });
 }
 
+/** Open the Kits tab with one kit's details showing. */
+export function showKit(id: string): void {
+  state.openKitId = id;
+  setTab('kits');
+}
+
 /* ------------------------------------------------------- tree editing */
 
 export type DropPosition = 'before' | 'after' | 'inside';
