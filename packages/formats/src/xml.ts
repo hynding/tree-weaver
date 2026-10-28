@@ -10,7 +10,7 @@ import { DOCUMENT_VERSION, FormatError, type TreeDocument } from './types';
  *
  * <tree-weaver version="1">
  *   <forest id name created-at updated-at>
- *     <kits><kit id name enabled source>css</kit></kits>
+ *     <kits><kit id name enabled source href editable>css</kit></kits>
  *     <tree id name created-at updated-at>
  *       <branch id tag type name class="a b">
  *         <attr name="href" value="/"/>
@@ -74,7 +74,7 @@ function kitsXml(kits: DesignKit[], pad: string): string[] {
   if (!kits.length) return [];
   return [
     `${pad}<kits>`,
-    ...kits.map((k) => `${pad}  <kit${attrs({ id: k.id, name: k.name, enabled: String(k.enabled), source: k.source })}>${escText(k.css)}</kit>`),
+    ...kits.map((k) => `${pad}  <kit${attrs({ id: k.id, name: k.name, enabled: String(k.enabled), source: k.source, href: k.href, editable: k.rules ? 'true' : undefined })}>${escText(k.css)}</kit>`),
     `${pad}</kits>`,
   ];
 }

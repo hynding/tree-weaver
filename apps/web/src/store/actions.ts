@@ -6,7 +6,9 @@ import {
   canHaveChildren,
   cloneTree,
   createBranch,
+  createCustomKit,
   createForest,
+  createRule,
   createId,
   duplicateNode,
   findNode,
@@ -14,19 +16,24 @@ import {
   History,
   insertNode,
   isBranch,
+  isEditableKit,
   moveNode,
   removeNode,
   removeTableColumn,
   removeTableRow,
+  parseRulesCss,
+  setRuleStyle as setRuleDeclaration,
   setStyle,
   updateNode,
   updateTreeRoot,
+  withRules,
   wrapNode,
   type Branch,
   type DesignKit,
   type DisplayId,
   type Forest,
   type Leaf,
+  type StyleRule,
   type Tree,
   type TreeNode,
 } from '@tree-weaver/core';
@@ -473,6 +480,138 @@ export function moveKit(id: string, delta: -1 | 1): void {
   const kits = [...forest.kits];
   [kits[i], kits[j]] = [kits[j], kits[i]];
   commit({ ...forest, kits });
+}
+
+/* ------------------------------------------------ custom classes and selectors */
+
+/** The forest's editable kits, which hold its custom classes and selectors. */
+export const customKits = (): (DesignKit & { rules: StyleRule[] })[] => (state.forest?.kits ?? []).filter(isEditableKit);
+
+/** Find a custom rule by id, or by selector. */
+export function findRule(match: { id?: string; selector?: string }, kitId?: string): { kit: DesignKit & { rules: StyleRule[] }; rule: StyleRule } | null {
+  for (const kit of customKits()) {
+    if (kitId && kit.id !== kitId) continue;
+    const rule = kit.rules.find((r) => (match.id ? r.id === match.id : r.selector === match.selector));
+    if (rule) return { kit, rule };
+  }
+  return null;
+}
+
+/** Open a rule in the Classes tab. */
+export function showRule(id: string): void {
+  state.openRuleId = id;
+  setTab('classes');
+}
+
+function editRules(forest: Forest, kitId: string, fn: (rules: StyleRule[]) => StyleRule[]): Forest {
+  return {
+    ...forest,
+    kits: forest.kits.map((k) => (k.id === kitId && isEditableKit(k) ? withRules(k, fn(k.rules)) : k)),
+  };
+}
+
+/** The forest with an editable kit to add rules to, created (last, so it wins over other kits) when missing. */
+function withCustomKit(forest: Forest): { forest: Forest; kitId: string } {
+  const existing = forest.kits.find(isEditableKit);
+  if (existing) return { forest, kitId: existing.id };
+  const kit = createCustomKit();
+  return { forest: { ...forest, kits: [...forest.kits, kit] }, kitId: kit.id };
+}
+
+/** Add a custom rule and open it. A selector that already has a rule opens that rule instead. */
+export function addRule(selector: string): string | null {
+  const forest = state.forest;
+  if (!forest) return null;
+  const existing = findRule({ selector: createRule(selector).selector });
+  if (existing) {
+    showRule(existing.rule.id);
+    return existing.rule.id;
+  }
+  const rule = createRule(selector);
+  if (!rule.selector) return null;
+  const { forest: withKit, kitId } = withCustomKit(forest);
+  commit(editRules(withKit, kitId, (rules) => [...rules, rule]));
+  showRule(rule.id);
+  return rule.id;
+}
+
+export function renameRule(kitId: string, ruleId: string, selector: string): void {
+  const forest = state.forest;
+  if (forest) commit(editRules(forest, kitId, (rules) => rules.map((r) => (r.id === ruleId ? { ...r, selector: createRule(selector).selector || r.selector } : r))));
+}
+
+export function setRuleStyle(kitId: string, ruleId: string, prop: string, value: string | null, display: DisplayId = state.display): void {
+  const forest = state.forest;
+  if (forest) commit(editRules(forest, kitId, (rules) => rules.map((r) => (r.id === ruleId ? setRuleDeclaration(r, display, prop, value) : r))));
+}
+
+export function removeRule(kitId: string, ruleId: string): void {
+  const forest = state.forest;
+  if (forest) commit(editRules(forest, kitId, (rules) => rules.filter((r) => r.id !== ruleId)));
+}
+
+/** Move a rule earlier or later; later rules win over earlier ones of equal specificity. */
+export function moveRule(kitId: string, ruleId: string, delta: -1 | 1): void {
+  const forest = state.forest;
+  if (!forest) return;
+  commit(
+    editRules(forest, kitId, (rules) => {
+      const i = rules.findIndex((r) => r.id === ruleId);
+      const j = i + delta;
+      if (i < 0 || j < 0 || j >= rules.length) return rules;
+      const next = [...rules];
+      [next[i], next[j]] = [next[j], next[i]];
+      return next;
+    }),
+  );
+}
+
+/** Replace an editable kit's rules from CSS text. Returns what had to be left out. */
+export function setRulesCss(kitId: string, css: string): string[] {
+  const forest = state.forest;
+  const kit = customKits().find((k) => k.id === kitId);
+  if (!forest || !kit) return [];
+  const { rules, skipped } = parseRulesCss(css, kit.rules);
+  commit(editRules(forest, kitId, () => rules));
+  return skipped;
+}
+
+/**
+ * Turn a pasted or uploaded kit into an editable one, so its rules can be edited one by one.
+ * Kits with at-rules an editable kit can't hold stay as they are; returns those at-rules.
+ */
+export function makeKitEditable(kitId: string): string[] {
+  const forest = state.forest;
+  const kit = forest?.kits.find((k) => k.id === kitId);
+  if (!forest || !kit || kit.href || isEditableKit(kit)) return [];
+  const { rules, skipped } = parseRulesCss(kit.css);
+  // Only convert when nothing would be lost.
+  if (skipped.length) return skipped;
+  commit({ ...forest, kits: forest.kits.map((k) => (k.id === kitId ? withRules(k, rules) : k)) });
+  return skipped;
+}
+
+/**
+ * Move a branch's own styles (every display) into a new class, put the class on the
+ * branch, and clear its inspector styles. One undo step.
+ */
+export function extractClass(branchId: string, className: string): void {
+  const forest = state.forest;
+  const tree = currentTree();
+  const node = tree ? findNode(tree.root, branchId) : null;
+  if (!forest || !tree || !isBranch(node)) return;
+  const selector = `.${className}`;
+  if (findRule({ selector })) {
+    toast(`“${selector}” already exists. Pick another name, or add the class from the list.`, 'error');
+    return;
+  }
+  const rule = createRule(selector, node.styles);
+  const { forest: withKit, kitId } = withCustomKit(forest);
+  const next = updateTreeRoot(editRules(withKit, kitId, (rules) => [...rules, rule]), tree.id, (root) =>
+    updateNode(root, branchId, (n) => (isBranch(n) ? { ...n, classes: [...new Set([...n.classes, className])], styles: {} } : n)),
+  );
+  commit(next);
+  toast(`Moved the styles into “${selector}”`, 'success');
 }
 
 /* ------------------------------------------------------- import / export */

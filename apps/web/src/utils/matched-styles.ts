@@ -278,9 +278,9 @@ class Collector {
     }
   }
 
-  /** Branch styles are written per display; name the display instead of its query. */
+  /** Branch styles and custom rules are written per display; name the display instead of its query. */
   private describeMedia(media: string, source: StyleSource): string {
-    if (source.kind === 'tree') {
+    if (source.kind === 'tree' || (source.kind === 'kit' && this.kits.find((k) => k.id === source.kitId)?.rules)) {
       const display = DISPLAYS.find((d) => d.media && d.media.replace(/\s/g, '') === media.replace(/\s/g, ''));
       if (display) return display.label;
     }

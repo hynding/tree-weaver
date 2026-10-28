@@ -1,7 +1,8 @@
 import { createId, now } from './create';
 import { isDisplayId } from './displays';
-import type { Branch, DesignKit, DisplayStyles, Forest, Leaf, StyleMap, Tree, TreeNode } from './model';
+import type { Branch, DesignKit, DisplayStyles, Forest, Leaf, StyleMap, StyleRule, Tree, TreeNode } from './model';
 import { SCHEMA_VERSION } from './model';
+import { parseRulesCss, sanitizeSelector, withRules } from './rules';
 
 /**
  * Turn loosely shaped data (parsed JSON, YAML or XML) into valid model objects.
@@ -115,7 +116,22 @@ export function normalizeKit(value: unknown, path = 'kit'): DesignKit {
   };
   if (value.source) kit.source = str(value.source);
   if (isStylesheetUrl(str(value.href))) kit.href = str(value.href).trim();
+  // Editable kits: their rules are the source of their CSS. Formats that only carry CSS
+  // (XML, HTML) mark the kit `editable` and the rules are read back from the CSS.
+  if (!kit.href && Array.isArray(value.rules)) return withRules(kit, normalizeRules(value.rules, `${path}.rules`));
+  if (!kit.href && (value.editable === true || value.editable === 'true')) return withRules(kit, parseRulesCss(kit.css).rules);
   return kit;
+}
+
+function normalizeRules(value: unknown[], path: string): StyleRule[] {
+  const seen = new Set<string>();
+  return value.map((r, i) => {
+    if (!isObj(r)) throw new TreeDataError('Expected a style rule object', `${path}[${i}]`);
+    let id = str(r.id);
+    if (!id || seen.has(id)) id = createId('r');
+    seen.add(id);
+    return { id, selector: sanitizeSelector(str(r.selector)), styles: normalizeStyles(r.styles) };
+  });
 }
 
 export function normalizeForest(value: unknown, path = 'forest'): Forest {

@@ -10,6 +10,7 @@ import {
   getDisplay,
   inheritedStyles,
   isBranch,
+  isClassName,
   parseAutoColumns,
   parseSpan,
   parseTracks,
@@ -25,8 +26,11 @@ import {
 } from '@tree-weaver/core';
 import { kitClasses } from '@tree-weaver/kits';
 import {
+  addRule,
   allKits,
   currentTree,
+  extractClass,
+  findRule,
   duplicateSelected,
   parentOf,
   removeSelected,
@@ -34,7 +38,9 @@ import {
   selectParent,
   setStyleValue,
   showKit,
+  showRule,
   tableEdit,
+  toast,
   updateBranch,
   updateLeaf,
   wrapSelected,
@@ -99,6 +105,7 @@ const GROUPS: { title: string; fields: [string, string][] }[] = [
 @Component({ tag: 'tw-inspector' })
 export class TwInspector {
   @State() newClass = '';
+  @State() extractName = '';
   @State() newAttr = { name: '', value: '' };
   @State() newDecl = { prop: '', value: '' };
   @State() stylesOpen = false;
@@ -271,29 +278,54 @@ export class TwInspector {
 
   private renderClasses(branch: Branch) {
     const add = () => {
-      const names = this.newClass.split(/\s+/).filter(Boolean);
+      const names = this.newClass.split(/\s+/).map((c) => c.replace(/^\./, '')).filter(Boolean);
       if (names.length) updateBranch(branch.id, { classes: [...new Set([...branch.classes, ...names])] });
       this.newClass = '';
     };
+    const extract = () => {
+      const name = this.extractName.trim().replace(/^\./, '');
+      if (!isClassName(name)) {
+        toast('Class names start with a letter, and use letters, digits, - and _', 'error');
+        return;
+      }
+      extractClass(branch.id, name);
+      this.extractName = '';
+    };
+    const defined = new Set(kitClasses(allKits()));
+    const hasStyles = Object.keys(branch.styles).length > 0;
     return (
       <section class="panel-section">
         <h3 class="panel-title">Classes</h3>
         {branch.classes.length ? (
           <div class="chips">
-            {branch.classes.map((c) => (
-              <span class="chip">
-                {c}
-                <button aria-label={`Remove class ${c}`} onClick={() => updateBranch(branch.id, { classes: branch.classes.filter((x) => x !== c) })}>
-                  ×
-                </button>
-              </span>
-            ))}
+            {branch.classes.map((c) => {
+              const custom = findRule({ selector: `.${c}` });
+              const known = defined.has(c);
+              return (
+                <span class={{ chip: true, undefined: !known }} title={known ? undefined : `No kit defines .${c} yet`}>
+                  {custom ? (
+                    <button class="chip-link" title={`Edit .${c} in the Classes tab`} onClick={() => showRule(custom.rule.id)}>
+                      {c}
+                    </button>
+                  ) : known ? (
+                    c
+                  ) : (
+                    <button class="chip-link" title={`Create .${c} in the Classes tab`} onClick={() => addRule(`.${c}`)}>
+                      {c}
+                    </button>
+                  )}
+                  <button aria-label={`Remove class ${c}`} onClick={() => updateBranch(branch.id, { classes: branch.classes.filter((x) => x !== c) })}>
+                    ×
+                  </button>
+                </span>
+              );
+            })}
           </div>
         ) : null}
         <div class="row">
           <input
             class="input mono grow"
-            placeholder="Add a class from your kits…"
+            placeholder="Add a class…"
             aria-label="Add class"
             list="tw-dl-classes"
             value={this.newClass}
@@ -304,6 +336,26 @@ export class TwInspector {
             Add
           </button>
         </div>
+        {hasStyles ? (
+          <details class="advanced">
+            <summary class="hint">Save styles as class</summary>
+            <div class="row">
+              <input
+                class="input mono grow"
+                placeholder="class-name"
+                aria-label="New class name"
+                value={this.extractName}
+                onInput={(e) => (this.extractName = (e.target as HTMLInputElement).value)}
+                onKeyDown={(e) => e.key === 'Enter' && extract()}
+              />
+              <button class="btn small" onClick={extract} disabled={!this.extractName.trim()}>
+                Save
+              </button>
+            </div>
+            <p class="hint">Moves this branch’s styles, on every display, into a new class you can reuse, and gives the branch that class.</p>
+          </details>
+        ) : null}
+        {branch.classes.some((c) => !defined.has(c)) ? <p class="hint">Dashed classes aren’t defined by any kit yet: click one to create it.</p> : null}
       </section>
     );
   }
@@ -711,9 +763,14 @@ export class TwInspector {
         <Icon name="link" />
       </a>
     ) : null;
+    const custom = source.kind === 'kit' && source.kitId ? findRule({ selector: rule.selector }, source.kitId) : null;
     const kit = (label: string) =>
       source.kitId ? (
-        <button class="style-kit" title="Show this kit in the Kits tab" onClick={() => showKit(source.kitId!)}>
+        <button
+          class="style-kit"
+          title={custom ? 'Edit this rule in the Classes tab' : 'Show this kit in the Kits tab'}
+          onClick={() => (custom ? showRule(custom.rule.id) : showKit(source.kitId!))}
+        >
           {label}
         </button>
       ) : (
