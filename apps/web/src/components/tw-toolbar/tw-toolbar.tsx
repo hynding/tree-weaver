@@ -61,6 +61,10 @@ export class TwToolbar {
         <span class={{ 'save-state': true, 'hide-narrow': true, error: state.saveState === 'error' }} title={`Storage: ${state.storageKind}`}>
           {SAVE_LABEL[state.saveState]}
         </span>
+        <button class="bar-btn" title="See the tree as it ships, without the editor" onClick={() => (state.preview = true)}>
+          <Icon name="eye" />
+          <span class="hide-narrow">Preview</span>
+        </button>
         <button class="bar-btn" onClick={() => (state.dialog = 'import')}>
           <Icon name="upload" />
           <span class="hide-narrow">Import</span>

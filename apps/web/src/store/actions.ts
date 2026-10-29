@@ -22,6 +22,8 @@ import {
   removeTableColumn,
   removeTableRow,
   parseRulesCss,
+  renderDocument,
+  renderForestIndex,
   setRuleStyle as setRuleDeclaration,
   setStyle,
   updateNode,
@@ -692,4 +694,42 @@ export function download(output: ExportOutput): void {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/* ---------------------------------------------------------------- preview */
+
+/** A tree as it ships: its kits and responsive CSS, with none of the editor's outlines or handles. */
+export function treePage(tree: Tree): string {
+  return renderDocument(tree, { kits: allKits() });
+}
+
+/**
+ * Open a page in a new browser tab. Blob pages have no base URL, so linked kits get absolute
+ * hrefs first. The URL is kept alive so the tab can be reloaded.
+ */
+function openPage(html: string): boolean {
+  const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
+  const tab = window.open(url, '_blank');
+  if (!tab) toast('The browser blocked the new tab. Allow pop-ups for this site and try again.', 'error');
+  return !!tab;
+}
+
+const absoluteKits = (): DesignKit[] => allKits().map((k) => (k.href ? { ...k, href: new URL(k.href, document.baseURI).href } : k));
+
+/** Open one tree in a new tab, as a snapshot of how it looks now. */
+export function openTreeInTab(treeId: string): void {
+  const tree = state.forest?.trees.find((t) => t.id === treeId);
+  if (tree) openPage(renderDocument(tree, { kits: absoluteKits() }));
+}
+
+/** Open the whole forest in a new tab: an index page that links to a page per tree. */
+export function openForestInTab(): void {
+  const forest = state.forest;
+  if (!forest) return;
+  const kits = absoluteKits();
+  const entries = forest.trees.map((t) => ({
+    name: t.name,
+    href: URL.createObjectURL(new Blob([renderDocument(t, { kits })], { type: 'text/html;charset=utf-8' })),
+  }));
+  openPage(renderForestIndex(forest.name, entries));
 }
