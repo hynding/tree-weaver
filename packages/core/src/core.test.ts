@@ -20,6 +20,7 @@ import {
   removeTableColumn,
   removeTableRow,
   renderDocument,
+  renderForestIndex,
   renderTreeCss,
   resolveStyles,
   setStyle,
@@ -158,6 +159,18 @@ describe('rendering', () => {
     expect(lg).toBeGreaterThan(-1);
     expect(xl).toBeGreaterThan(lg);
     expect(mp).toBeGreaterThan(xl);
+  });
+
+  it('renders a forest index that links each tree', () => {
+    const html = renderForestIndex('My <forest>', [
+      { name: 'Home', href: 'blob:https://x/1' },
+      { name: 'About "us"', href: 'blob:https://x/2' },
+    ]);
+    expect(html).toContain('<title>My &lt;forest&gt;</title>');
+    expect(html).toContain('<a href="blob:https://x/1">Home</a>');
+    expect(html).toContain('About "us"');
+    expect(html).toContain('2 trees');
+    expect(html).not.toContain('<script');
   });
 
   it('renders a safe standalone document', () => {

@@ -27,6 +27,8 @@ export interface EditorState {
   canRedo: boolean;
   tab: SidebarTab;
   dialog: DialogKind;
+  /** Showing the full-window preview instead of the editor. */
+  preview: boolean;
   toasts: Toast[];
   /** Id of a node being dragged from the outline or canvas, so drop targets can validate. */
   dragNodeId: string | null;
@@ -53,6 +55,7 @@ export const { state, onChange, reset } = createStore<EditorState>({
   canRedo: false,
   tab: 'branches',
   dialog: null,
+  preview: false,
   toasts: [],
   dragNodeId: null,
   openKitId: null,

@@ -191,3 +191,40 @@ ${renderTreeCss(tree.root)}
 </html>
 `;
 }
+
+/** A tree page linked from a forest index. */
+export interface IndexEntry {
+  name: string;
+  href: string;
+}
+
+/** A plain standalone page listing a forest's trees, each linking to its own page. */
+export function renderForestIndex(forestName: string, entries: IndexEntry[]): string {
+  const items = entries.map((e) => `  <li><a href="${escapeAttr(e.href)}">${escapeHtml(e.name)}</a></li>`).join('\n');
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="Tree Weaver">
+<title>${escapeHtml(forestName)}</title>
+<style>
+${BASE_CSS}
+body { max-width: 640px; margin: 0 auto; padding: 48px 20px; color: #1c2420; }
+h1 { font-size: 1.6rem; margin: 0 0 4px; }
+p { margin: 0 0 24px; color: #5e6b65; }
+ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+a { display: block; padding: 12px 16px; border: 1px solid #dfe5e2; border-radius: 8px; color: inherit; text-decoration: none; }
+a:hover { border-color: #2f6f4f; background: #e3f1e9; }
+</style>
+</head>
+<body>
+<h1>${escapeHtml(forestName)}</h1>
+<p>${entries.length} ${entries.length === 1 ? 'tree' : 'trees'}</p>
+<ul>
+${items}
+</ul>
+</body>
+</html>
+`;
+}

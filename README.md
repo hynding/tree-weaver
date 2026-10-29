@@ -46,6 +46,12 @@ The same words are used in the code (`Forest`, `Tree`, `Branch`, `Leaf`) and in 
   out and inherited rules grouped by ancestor. Each rule names its source: the kit (with line number,
   linking to the kit), a stylesheet it `@import`s, or the styles set in the inspector. Rules from a
   linked stylesheet can be read when its server allows CORS; others are listed as unreadable.
+- **Preview without the editor**: _Preview_ in the toolbar shows a tree as it ships, with its kits,
+  custom classes and responsive styles but no outlines, handles or panels. _Fit window_ sizes it to the
+  window, so the display media queries follow the real width; or pick a display to see it at that size.
+  Switch trees from the preview, and press Esc to go back. _New tab_ opens the tree as a standalone page
+  in a browser tab, and _Forest in new tab_ opens a list of every tree linking to its page. New tabs are
+  snapshots: open them again after more edits.
 - **Upload and download tree data** as JSON, YAML, XML, HTML or Markdown (see below).
 - **Download a Storybook project** for a tree or the whole forest (see [Storybook](#storybook)).
 - **Save locally**: forests autosave to IndexedDB (falling back to `localStorage`), and you can keep

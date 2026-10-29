@@ -1052,6 +1052,75 @@ tw-canvas {
   color: var(--select);
 }
 
+/* --------------------------------------------------------------- preview */
+
+.preview-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+.preview-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 52px;
+  flex: none;
+  padding: 0 12px;
+  background: var(--bar);
+  color: var(--bar-text);
+  min-width: 0;
+}
+.preview-bar .bar-actions {
+  margin-left: auto;
+}
+.preview-bar .bar-select {
+  flex: 0 1 auto;
+  min-width: 96px;
+}
+.preview-bar .displays {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+}
+.preview-title,
+.preview-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.preview-title svg {
+  width: 16px;
+  height: 16px;
+}
+.preview-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.preview-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.preview-fit {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+@media (max-width: 860px) {
+  .preview-bar .displays .label {
+    display: none;
+  }
+}
+
 /* --------------------------------------------------------------- dialog */
 
 .dialog-backdrop {

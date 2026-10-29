@@ -46,6 +46,11 @@ export namespace Components {
     }
     interface TwPalette {
     }
+    /**
+     * A full-window view of a tree as it ships: no outlines, handles or panels.
+     */
+    interface TwPreview {
+    }
     interface TwSidebar {
     }
     interface TwToolbar {
@@ -128,6 +133,15 @@ declare global {
         prototype: HTMLTwPaletteElement;
         new (): HTMLTwPaletteElement;
     };
+    /**
+     * A full-window view of a tree as it ships: no outlines, handles or panels.
+     */
+    interface HTMLTwPreviewElement extends Components.TwPreview, HTMLStencilElement {
+    }
+    var HTMLTwPreviewElement: {
+        prototype: HTMLTwPreviewElement;
+        new (): HTMLTwPreviewElement;
+    };
     interface HTMLTwSidebarElement extends Components.TwSidebar, HTMLStencilElement {
     }
     var HTMLTwSidebarElement: {
@@ -161,6 +175,7 @@ declare global {
         "tw-kits-panel": HTMLTwKitsPanelElement;
         "tw-outline": HTMLTwOutlineElement;
         "tw-palette": HTMLTwPaletteElement;
+        "tw-preview": HTMLTwPreviewElement;
         "tw-sidebar": HTMLTwSidebarElement;
         "tw-toolbar": HTMLTwToolbarElement;
     }
@@ -206,6 +221,11 @@ declare namespace LocalJSX {
     }
     interface TwPalette {
     }
+    /**
+     * A full-window view of a tree as it ships: no outlines, handles or panels.
+     */
+    interface TwPreview {
+    }
     interface TwSidebar {
     }
     interface TwToolbar {
@@ -226,6 +246,7 @@ declare namespace LocalJSX {
         "tw-kits-panel": TwKitsPanel;
         "tw-outline": TwOutline;
         "tw-palette": TwPalette;
+        "tw-preview": TwPreview;
         "tw-sidebar": TwSidebar;
         "tw-toolbar": TwToolbar;
     }
@@ -261,6 +282,10 @@ declare module "@stencil/core" {
              */
             "tw-outline": LocalJSX.IntrinsicElements["tw-outline"] & JSXBase.HTMLAttributes<HTMLTwOutlineElement>;
             "tw-palette": LocalJSX.IntrinsicElements["tw-palette"] & JSXBase.HTMLAttributes<HTMLTwPaletteElement>;
+            /**
+             * A full-window view of a tree as it ships: no outlines, handles or panels.
+             */
+            "tw-preview": LocalJSX.IntrinsicElements["tw-preview"] & JSXBase.HTMLAttributes<HTMLTwPreviewElement>;
             "tw-sidebar": LocalJSX.IntrinsicElements["tw-sidebar"] & JSXBase.HTMLAttributes<HTMLTwSidebarElement>;
             "tw-toolbar": LocalJSX.IntrinsicElements["tw-toolbar"] & JSXBase.HTMLAttributes<HTMLTwToolbarElement>;
         }

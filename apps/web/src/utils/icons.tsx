@@ -22,6 +22,7 @@ const paths: Record<string, string> = {
   sliders: 'M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6',
   edit: 'M4 20h4L19 9l-4-4L4 16v4z',
   eye: 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zm10 3a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+  external: 'M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5',
   tree: 'M12 3v18M12 9 7 6m5 3 5-3M12 15l-6-3m6 3 6-3M8 21h8',
 };
 

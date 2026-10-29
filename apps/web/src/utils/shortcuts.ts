@@ -10,7 +10,7 @@ export function isTypingTarget(target: EventTarget | null): boolean {
 
 /** Keyboard shortcuts shared by the app window and the canvas frame. */
 export function handleShortcut(ev: KeyboardEvent): void {
-  if (isTypingTarget(ev.target) || state.dialog) return;
+  if (isTypingTarget(ev.target) || state.dialog || state.preview) return;
   const mod = ev.metaKey || ev.ctrlKey;
   const key = ev.key.toLowerCase();
   if (mod && key === 'z') {
