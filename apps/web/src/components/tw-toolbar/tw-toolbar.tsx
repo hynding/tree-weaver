@@ -12,6 +12,7 @@ export class TwToolbar {
 
   render() {
     const forest = state.forest!;
+    void state.displaysVersion;
     return [
       <button class="bar-btn only-narrow" aria-label="Show panels" onClick={() => this.twTogglePanel.emit('left')}>
         <Icon name="menu" />
@@ -50,6 +51,9 @@ export class TwToolbar {
             <span class="label">{d.label}</span>
           </button>
         ))}
+        <button class="displays-settings" title="Display settings: sizes and breakpoints" aria-label="Display settings" onClick={() => (state.dialog = 'displays')}>
+          <Icon name="settings" />
+        </button>
       </div>,
       <div class="bar-actions">
         <button class="bar-btn" title="Undo (Ctrl+Z)" aria-label="Undo" disabled={!state.canUndo} onClick={undo}>

@@ -9,6 +9,8 @@ export const config: Config = {
   env: {
     TW_CSS_URLS: process.env.TW_CSS_URLS ?? '',
     TW_DISABLE_CSS_URLS: process.env.TW_DISABLE_CSS_URLS ?? '',
+    TW_DISPLAYS: process.env.TW_DISPLAYS ?? '',
+    TW_LOCK_DISPLAYS: process.env.TW_LOCK_DISPLAYS ?? '',
   },
   outputTargets: [
     {

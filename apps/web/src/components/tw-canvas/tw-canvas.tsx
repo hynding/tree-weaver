@@ -599,6 +599,7 @@ export class TwCanvas {
   }
 
   render() {
+    void state.displaysVersion;
     const display = getDisplay(state.display as DisplayId);
     const pad = 40;
     const scale = this.stageWidth ? Math.min(1, (this.stageWidth - pad) / display.width) : 1;
@@ -610,10 +611,14 @@ export class TwCanvas {
     return [
       <div class="canvas-head">
         {this.renderCrumbs()}
-        <span class="canvas-size" title={display.media ?? 'Base styles apply to every display'}>
+        <button
+          class="canvas-size"
+          title={`${display.media ?? 'Base styles apply to every display'}. Change sizes and breakpoints in Display settings.`}
+          onClick={() => (state.dialog = 'displays')}
+        >
           {display.label} · {display.width}×{display.height}
           {scale < 1 ? ` · ${Math.round(scale * 100)}%` : ''}
-        </span>
+        </button>
       </div>,
       <div class="stage" ref={(el) => (this.stage = el)}>
         <div

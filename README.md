@@ -102,10 +102,46 @@ rebuild. The GitHub Pages workflow passes them from repository variables of the 
 | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `TW_CSS_URLS`         | Stylesheet URLs, separated by commas, spaces or new lines. Every forest loads them first, in the given order, before its own kits. They are listed under _Always loaded first_ in the Kits tab, can't be removed or reordered there, are not saved into forests, and are linked first in HTML exports. |
 | `TW_DISABLE_CSS_URLS` | `true` (or `1`, `yes`, `on`) hides the field for linking stylesheet URLs in the Kits tab. Stylesheets from `TW_CSS_URLS`, and linked kits a forest already has, still load.                             |
+| `TW_DISPLAYS`         | Display sizes and breakpoints, as `display.field=pixels` pairs separated by commas (or JSON, see below). Values set here apply to everyone and are locked in **Display settings**; the rest can still be changed there. |
+| `TW_LOCK_DISPLAYS`    | `true` (or `1`, `yes`, `on`) locks every display setting in the app, so only the defaults and `TW_DISPLAYS` apply.                                                                                          |
 
 ```sh
 TW_CSS_URLS="https://cdn.example.com/reset.css,https://cdn.example.com/theme.css" TW_DISABLE_CSS_URLS=true pnpm build
 ```
+
+### Display sizes and breakpoints
+
+Each display type has a preview **width** and **height** (the canvas and preview size) and, apart
+from the base display, a **breakpoint**: the screen width its styles start to apply at in exported
+CSS (`min-width` for Desktop XL, `max-width` for the others).
+
+| Display (`id`)                        | Width × height | Breakpoint | Media query                                      |
+| ------------------------------------- | -------------- | ---------- | ------------------------------------------------ |
+| Desktop large (`lg`, base)            | 1280 × 800     | none       | none, applies everywhere                         |
+| Desktop XL (`xl`)                     | 1920 × 1080    | 1440       | `(min-width: 1440px)`                            |
+| Tablet (`tablet`)                     | 820 × 1180     | 1024       | `(max-width: 1024px)`                            |
+| Mobile landscape (`mobile-landscape`) | 844 × 390      | 932        | `(max-width: 932px) and (orientation: landscape)` |
+| Mobile portrait (`mobile-portrait`)   | 390 × 844      | 600        | `(max-width: 600px) and (orientation: portrait)`  |
+
+There are two ways to change them:
+
+1. **In the app:** the gear at the end of the display buttons (or the size label above the canvas)
+   opens **Display settings**. Changes are saved in that browser only.
+2. **With `TW_DISPLAYS` at build time:** fixes values for everyone using the deployment and locks
+   them in the app. Display settings shows the exact `TW_DISPLAYS` value for whatever you've set
+   there, ready to copy.
+
+Fields are `width`, `height`, `size` (`WIDTHxHEIGHT`) and `breakpoint`, in whole CSS pixels from
+100 to 10000. Anything not understood is skipped, and Display settings lists what was skipped.
+
+```sh
+TW_DISPLAYS="xl.breakpoint=1600,tablet.size=768x1024,mobile-portrait.width=375" pnpm build
+# or as JSON
+TW_DISPLAYS='{"tablet":{"width":768,"height":1024,"breakpoint":900}}' pnpm build
+```
+
+Changing a breakpoint changes the media queries in exports and in custom classes' CSS. Imported
+HTML and CSS written with the default breakpoints still maps back to the right display.
 
 ## Workspace layout
 

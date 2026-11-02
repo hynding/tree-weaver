@@ -16,6 +16,11 @@ export namespace Components {
     interface TwClassesPanel {
     }
     /**
+     * Preview sizes and breakpoints of the display types, and how to fix them with environment variables.
+     */
+    interface TwDisplaySettings {
+    }
+    /**
      * Trees in the open forest, and every forest saved in this browser.
      */
     interface TwForestPanel {
@@ -81,6 +86,15 @@ declare global {
     var HTMLTwClassesPanelElement: {
         prototype: HTMLTwClassesPanelElement;
         new (): HTMLTwClassesPanelElement;
+    };
+    /**
+     * Preview sizes and breakpoints of the display types, and how to fix them with environment variables.
+     */
+    interface HTMLTwDisplaySettingsElement extends Components.TwDisplaySettings, HTMLStencilElement {
+    }
+    var HTMLTwDisplaySettingsElement: {
+        prototype: HTMLTwDisplaySettingsElement;
+        new (): HTMLTwDisplaySettingsElement;
     };
     /**
      * Trees in the open forest, and every forest saved in this browser.
@@ -169,6 +183,7 @@ declare global {
         "tw-app": HTMLTwAppElement;
         "tw-canvas": HTMLTwCanvasElement;
         "tw-classes-panel": HTMLTwClassesPanelElement;
+        "tw-display-settings": HTMLTwDisplaySettingsElement;
         "tw-forest-panel": HTMLTwForestPanelElement;
         "tw-inspector": HTMLTwInspectorElement;
         "tw-io-dialog": HTMLTwIoDialogElement;
@@ -189,6 +204,11 @@ declare namespace LocalJSX {
      * Custom classes and selectors: CSS rules written in the editor, styled per display.
      */
     interface TwClassesPanel {
+    }
+    /**
+     * Preview sizes and breakpoints of the display types, and how to fix them with environment variables.
+     */
+    interface TwDisplaySettings {
     }
     /**
      * Trees in the open forest, and every forest saved in this browser.
@@ -240,6 +260,7 @@ declare namespace LocalJSX {
         "tw-app": TwApp;
         "tw-canvas": TwCanvas;
         "tw-classes-panel": TwClassesPanel;
+        "tw-display-settings": TwDisplaySettings;
         "tw-forest-panel": TwForestPanel;
         "tw-inspector": TwInspector;
         "tw-io-dialog": Omit<TwIoDialog, keyof TwIoDialogAttributes> & { [K in keyof TwIoDialog & keyof TwIoDialogAttributes]?: TwIoDialog[K] } & { [K in keyof TwIoDialog & keyof TwIoDialogAttributes as `attr:${K}`]?: TwIoDialogAttributes[K] } & { [K in keyof TwIoDialog & keyof TwIoDialogAttributes as `prop:${K}`]?: TwIoDialog[K] };
@@ -261,6 +282,10 @@ declare module "@stencil/core" {
              * Custom classes and selectors: CSS rules written in the editor, styled per display.
              */
             "tw-classes-panel": LocalJSX.IntrinsicElements["tw-classes-panel"] & JSXBase.HTMLAttributes<HTMLTwClassesPanelElement>;
+            /**
+             * Preview sizes and breakpoints of the display types, and how to fix them with environment variables.
+             */
+            "tw-display-settings": LocalJSX.IntrinsicElements["tw-display-settings"] & JSXBase.HTMLAttributes<HTMLTwDisplaySettingsElement>;
             /**
              * Trees in the open forest, and every forest saved in this browser.
              */
