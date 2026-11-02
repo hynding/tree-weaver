@@ -1,9 +1,9 @@
 import { createStore } from '@stencil/store';
-import type { DesignKit, DisplayId, Forest, ForestSummary } from '@tree-weaver/core';
+import type { DesignKit, DisplayId, DisplaySettings, Forest, ForestSummary } from '@tree-weaver/core';
 
 export type SidebarTab = 'branches' | 'outline' | 'classes' | 'kits' | 'forest';
 export type SaveState = 'saved' | 'saving' | 'unsaved' | 'error';
-export type DialogKind = null | 'export' | 'import';
+export type DialogKind = null | 'export' | 'import' | 'displays';
 
 export interface Toast {
   id: number;
@@ -38,6 +38,10 @@ export interface EditorState {
   openRuleId: string | null;
   /** Bumped when the canvas's stylesheets, markup or width change, so views that read the canvas refresh. */
   canvasVersion: number;
+  /** Display sizes and breakpoints changed in this browser. `TW_DISPLAYS` values win over these. */
+  displaySettings: DisplaySettings;
+  /** Bumped when the display sizes or breakpoints change, so views that list displays refresh. */
+  displaysVersion: number;
 }
 
 export const { state, onChange, reset } = createStore<EditorState>({
@@ -61,4 +65,6 @@ export const { state, onChange, reset } = createStore<EditorState>({
   openKitId: null,
   openRuleId: null,
   canvasVersion: 0,
+  displaySettings: {},
+  displaysVersion: 0,
 });

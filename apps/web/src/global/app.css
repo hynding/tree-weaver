@@ -232,6 +232,11 @@ tw-toolbar {
   width: 16px;
   height: 16px;
 }
+.displays .displays-settings {
+  margin-left: 4px;
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0 6px 6px 0;
+}
 @media (max-width: 1280px) {
   .displays .label {
     display: none;
@@ -959,6 +964,15 @@ tw-canvas {
   font-size: 12px;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+  border: 0;
+  background: transparent;
+  padding: 2px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.canvas-size:hover {
+  color: var(--text);
+  background: var(--panel-2);
 }
 .stage {
   position: relative;
@@ -1394,4 +1408,131 @@ details.advanced > summary {
 .chip .chip-link:hover {
   background: transparent;
   text-decoration: underline;
+}
+
+/* ------------------------------------------------------ display settings */
+
+.table-scroll {
+  overflow-x: auto;
+}
+.display-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.display-table th,
+.display-table td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+.display-table thead th {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.display-table tbody th {
+  font-weight: 600;
+  min-width: 170px;
+}
+.display-table tbody th svg {
+  width: 16px;
+  height: 16px;
+}
+.display-table tbody th .hint {
+  display: block;
+  font-weight: 400;
+  margin-top: 2px;
+}
+.display-table td.muted {
+  color: var(--faint);
+}
+.px-input {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 110px;
+}
+.px-input .input {
+  width: 84px;
+  font-variant-numeric: tabular-nums;
+}
+.px-input.changed .input {
+  border-color: var(--select);
+  color: var(--select);
+  font-weight: 600;
+}
+.px-input.locked .input {
+  background: var(--panel-2);
+  color: var(--muted);
+}
+.px-op {
+  color: var(--faint);
+  width: 10px;
+}
+.px-lock {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  color: var(--faint);
+}
+.px-lock svg {
+  width: 14px;
+  height: 14px;
+}
+.env-help {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: var(--panel-2);
+}
+.env-help h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+.env-help code,
+.dialog .notice code,
+.dialog .error-box code {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.env-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.env-line code {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.env-steps {
+  margin: 10px 0 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+.env-steps code {
+  overflow-wrap: anywhere;
+}
+.dialog .notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--panel-2);
+}
+.dialog .notice svg {
+  width: 15px;
+  height: 15px;
+  flex: none;
 }

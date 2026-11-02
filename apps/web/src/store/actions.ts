@@ -1,6 +1,10 @@
 import { getBlueprint, getTemplate } from '@tree-weaver/branches';
 import {
   addTableColumn,
+  applyDisplaySettings,
+  changedDisplaySettings,
+  cleanDisplaySettings,
+  mergeDisplaySettings,
   addTableRow,
   ancestorsOf,
   canHaveChildren,
@@ -32,7 +36,9 @@ import {
   wrapNode,
   type Branch,
   type DesignKit,
+  type DisplayField,
   type DisplayId,
+  type DisplaySettings,
   type Forest,
   type Leaf,
   type StyleRule,
@@ -41,7 +47,7 @@ import {
 } from '@tree-weaver/core';
 import { exportForest, exportStorybook, exportTree, getFormat, importDocument, suggestFileName, zipStorybook, type FormatId } from '@tree-weaver/formats';
 import { createEnvKits, createStarterKit, fetchKitCss } from '@tree-weaver/kits';
-import { ENV_CSS_URLS } from '../config';
+import { DISPLAYS_LOCKED, ENV_CSS_URLS, ENV_DISPLAYS } from '../config';
 import { createForestStore, Preferences, type ForestStore } from '@tree-weaver/storage';
 import { state, type SidebarTab, type Toast } from './editor';
 
@@ -70,7 +76,13 @@ export const pathTo = (id: string): Branch[] => {
 /* ------------------------------------------------------- persistence */
 
 let store: ForestStore;
-const prefs = new Preferences({ forestId: '', treeId: '', display: 'lg' as DisplayId, tab: 'branches' as SidebarTab });
+const prefs = new Preferences({
+  forestId: '',
+  treeId: '',
+  display: 'lg' as DisplayId,
+  tab: 'branches' as SidebarTab,
+  displays: {} as DisplaySettings,
+});
 const history = new History<Forest>(150);
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -139,6 +151,9 @@ export async function init(): Promise<void> {
   store = await createForestStore();
   state.storageKind = store.kind;
   const saved = prefs.read();
+  state.displaySettings = cleanDisplaySettings(saved.displays);
+  applyDisplays();
+  if (ENV_DISPLAYS.errors.length) console.warn(`TW_DISPLAYS: ${ENV_DISPLAYS.errors.join(' ')}`);
   state.display = saved.display;
   state.tab = saved.tab;
   state.forests = await store.list();
@@ -157,7 +172,7 @@ export async function init(): Promise<void> {
 
 function openLoaded(forest: Forest, treeId: string) {
   history.clear();
-  state.forest = forest;
+  state.forest = withCurrentBreakpoints(forest);
   state.treeId = forest.trees.some((t) => t.id === treeId) ? treeId : (forest.trees[0]?.id ?? '');
   state.selectedId = null;
   state.saveState = 'saved';
@@ -168,14 +183,14 @@ function openLoaded(forest: Forest, treeId: string) {
 export function undo(): void {
   if (!state.forest) return;
   const prev = history.undo(state.forest);
-  if (prev) commit(prev, false);
+  if (prev) commit(withCurrentBreakpoints(prev), false);
   syncHistoryFlags();
 }
 
 export function redo(): void {
   if (!state.forest) return;
   const next = history.redo(state.forest);
-  if (next) commit(next, false);
+  if (next) commit(withCurrentBreakpoints(next), false);
   syncHistoryFlags();
 }
 
@@ -195,6 +210,60 @@ export function select(id: string | null): void {
 export function setDisplay(display: DisplayId): void {
   state.display = display;
   prefs.write({ display });
+}
+
+/* ------------------------------------------------------------- displays */
+
+/** Display values in effect: defaults, then this browser's changes, then `TW_DISPLAYS`. */
+export const effectiveDisplaySettings = (): DisplaySettings =>
+  mergeDisplaySettings(DISPLAYS_LOCKED ? {} : state.displaySettings, ENV_DISPLAYS.settings);
+
+/** Whether a display value is fixed by the deployment, and so can't be changed here. */
+export const isDisplayFieldLocked = (id: DisplayId, field: DisplayField): boolean =>
+  DISPLAYS_LOCKED || ENV_DISPLAYS.settings[id]?.[field] !== undefined;
+
+/** Editable kits store CSS generated from their rules; regenerate it so it uses the current breakpoints. */
+function withCurrentBreakpoints(forest: Forest): Forest {
+  let changed = false;
+  const kits = forest.kits.map((k) => {
+    if (!isEditableKit(k)) return k;
+    const next = withRules(k, k.rules);
+    if (next.css === k.css) return k;
+    changed = true;
+    return next;
+  });
+  return changed ? { ...forest, kits } : forest;
+}
+
+function applyDisplays(): void {
+  applyDisplaySettings(effectiveDisplaySettings());
+  state.displaysVersion++;
+  state.canvasVersion++;
+}
+
+function saveDisplaySettings(next: DisplaySettings): void {
+  state.displaySettings = changedDisplaySettings(next);
+  prefs.write({ displays: state.displaySettings });
+  applyDisplays();
+  const forest = state.forest;
+  if (!forest) return;
+  const refreshed = withCurrentBreakpoints(forest);
+  // A new forest object re-renders everything that shows displays, even when no kit changed.
+  commit(refreshed === forest ? { ...forest } : refreshed, false);
+}
+
+/** Change one display value in this browser. `null` goes back to the default. */
+export function setDisplaySetting(id: DisplayId, field: DisplayField, value: number | null): void {
+  if (isDisplayFieldLocked(id, field)) return;
+  const entry = { ...state.displaySettings[id] };
+  if (value === null) delete entry[field];
+  else entry[field] = value;
+  saveDisplaySettings({ ...state.displaySettings, [id]: entry });
+}
+
+/** Undo every display change made in this browser. Values from `TW_DISPLAYS` stay. */
+export function resetDisplaySettings(): void {
+  saveDisplaySettings({});
 }
 
 export function setTab(tab: SidebarTab): void {

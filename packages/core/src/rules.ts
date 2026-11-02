@@ -1,6 +1,6 @@
 import { createId } from './create';
 import { parseCss, type CssNode } from './css';
-import { DISPLAYS } from './displays';
+import { displayForMedia } from './displays';
 import type { DesignKit, DisplayId, StyleMap, StyleRule } from './model';
 import { renderDisplayCss } from './render';
 
@@ -54,8 +54,6 @@ export function createCustomKit(name = 'Custom styles', rules: StyleRule[] = [])
   return withRules({ id: createId('k'), name, css: '', enabled: true, source: CUSTOM_KIT_SOURCE }, rules);
 }
 
-const normalizeMedia = (m: string): string => m.replace(/\s+/g, '').toLowerCase();
-const MEDIA_TO_DISPLAY = new Map<string, DisplayId>(DISPLAYS.filter((d) => d.media).map((d) => [normalizeMedia(d.media as string), d.id]));
 
 export interface ParsedRules {
   rules: StyleRule[];
@@ -89,7 +87,7 @@ export function parseRulesCss(css: string, previous: StyleRule[] = []): ParsedRu
       } else if (!display || node.name !== 'media' || !node.children) {
         skipped.push(`@${node.name}${node.prelude ? ` ${node.prelude}` : ''}`);
       } else {
-        const target = MEDIA_TO_DISPLAY.get(normalizeMedia(node.prelude));
+        const target = displayForMedia(node.prelude);
         if (target && display === 'lg') visit(node.children, target);
         else skipped.push(`@media ${node.prelude}`);
       }

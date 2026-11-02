@@ -32,6 +32,8 @@ jobs:
         env:
           TW_CSS_URLS: ${{ vars.TW_CSS_URLS }}
           TW_DISABLE_CSS_URLS: ${{ vars.TW_DISABLE_CSS_URLS }}
+          TW_DISPLAYS: ${{ vars.TW_DISPLAYS }}
+          TW_LOCK_DISPLAYS: ${{ vars.TW_LOCK_DISPLAYS }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

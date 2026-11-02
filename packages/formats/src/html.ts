@@ -2,7 +2,7 @@ import {
   BRANCH_ATTR,
   CUSTOM_KIT_SOURCE,
   createId,
-  DISPLAYS,
+  displayForMedia,
   INLINE_TAGS,
   isStylesheetUrl,
   LEAF_ATTR,
@@ -48,10 +48,6 @@ function* allElements(nodes: ChildNode[]): Generator<Element> {
 const textContent = (el: Element): string =>
   el.children.map((c) => (c.type === 'text' ? c.data : isElement(c) ? textContent(c) : '')).join('');
 
-const normalizeMedia = (m: string): string => m.replace(/\s+/g, '').toLowerCase();
-const MEDIA_TO_DISPLAY = new Map<string, DisplayId>(
-  DISPLAYS.filter((d) => d.media).map((d) => [normalizeMedia(d.media as string), d.id]),
-);
 const SELECTOR = new RegExp(`^\\[${BRANCH_ATTR}=["']?([^"'\\]]+)["']?\\]$`);
 
 /** Read rules written by `renderTreeCss` back into per-branch display styles. */
@@ -67,7 +63,7 @@ function readTreeCss(css: string, into: Map<string, DisplayStyles>): void {
           into.set(m[1], styles);
         }
       } else if (node.name === 'media' && node.children) {
-        const target = MEDIA_TO_DISPLAY.get(normalizeMedia(node.prelude));
+        const target = displayForMedia(node.prelude);
         if (target) visit(node.children, target);
       }
     }
