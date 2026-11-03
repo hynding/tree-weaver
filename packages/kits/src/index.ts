@@ -66,6 +66,52 @@ export function kitClasses(kits: DesignKit[]): string[] {
 
 const baseName = (path: string) => (path.split(/[?#]/)[0].split('/').pop() || path).replace(/\.css$/i, '');
 
+export interface KitManifestEntry {
+  id: string;
+  name: string;
+  enabled: boolean;
+  source?: string;
+  href?: string;
+  /** Whether the kit's CSS could be read. A linked kit whose server blocks CORS has no snapshot. */
+  readable: boolean;
+  classes: string[];
+  tokens: KitToken[];
+  media: string[];
+}
+
+export interface KitManifest {
+  /** Classes offered by the enabled kits, de-duplicated and sorted. */
+  classes: string[];
+  /** Design tokens (CSS custom properties) from the enabled kits; a later kit's value wins. */
+  tokens: KitToken[];
+  kits: KitManifestEntry[];
+}
+
+/**
+ * What a forest's design kits offer, as plain JSON: every class and token, kit by kit and
+ * combined. Hand it to an agent so it uses the kit's classes instead of inventing styles.
+ */
+export function kitManifest(kits: DesignKit[]): KitManifest {
+  const tokens = new Map<string, string>();
+  const entries = kits.map((kit): KitManifestEntry => {
+    const a = analyzeKit(kit.css);
+    if (kit.enabled) for (const t of a.tokens) tokens.set(t.name, t.value);
+    const entry: KitManifestEntry = {
+      id: kit.id,
+      name: kit.name,
+      enabled: kit.enabled,
+      readable: kit.css.trim() !== '',
+      classes: a.classes,
+      tokens: a.tokens,
+      media: a.media,
+    };
+    if (kit.source) entry.source = kit.source;
+    if (kit.href) entry.href = kit.href;
+    return entry;
+  });
+  return { classes: kitClasses(kits), tokens: [...tokens].map(([name, value]) => ({ name, value })), kits: entries };
+}
+
 /** A kit from an uploaded `.css` file. */
 export function kitFromFile(fileName: string, css: string): DesignKit {
   return createKit(baseName(fileName) || 'Design kit', css, fileName);

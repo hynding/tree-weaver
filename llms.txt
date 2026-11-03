@@ -1,0 +1,31 @@
+# Tree Weaver
+
+> Tree Weaver is a visual builder for responsive web layouts. A forest (project) holds trees (layouts); a tree is made of branches (HTML elements with classes, attributes, per-display styles and children) and leaves (text or images). Documents are plain JSON or YAML with a published JSON Schema, and export to HTML, XML, Markdown and Storybook.
+
+Key facts for writing Tree Weaver data:
+
+- Wrap documents as `{ "format": "tree-weaver", "version": 1, "tree": {...} }` or `"forest": {...}`.
+- Ids, timestamps and `kind` are optional; the importer fills them in. A string in `children` is a text leaf.
+- `styles` is keyed by display: `lg` (desktop large, the base), `xl`, `tablet`, `mobile-landscape`, `mobile-portrait`. Phones inherit tablet; everything inherits `lg`. Use kebab-case CSS properties with string values.
+- Images are leaves (`{ "kind": "leaf", "type": "image", "value": url, "attrs": { "alt": "..." } }`), not `img` branches.
+- No scripts, event handlers or `style` attributes. CSS goes in design kits (`forest.kits`).
+- Check output with `validateDocument` (`@tree-weaver/core`) or `validateText` (`@tree-weaver/formats`); every issue has a path and a fix hint.
+
+## Docs
+
+- [Format guide](https://github.com/hynding/tree-weaver/blob/main/docs/format.md): the model, displays and cascade, layout recipes, kits, validation
+- [JSON Schema](https://hynding.github.io/tree-weaver/schema/tree-weaver-v1.schema.json): draft 2020-12 schema for forests, trees, branches, leaves and kits
+- [AGENTS.md](https://github.com/hynding/tree-weaver/blob/main/AGENTS.md): working in the repository and integrating the packages
+- [README](https://github.com/hynding/tree-weaver/blob/main/README.md): features, formats and deployment settings
+
+## Examples
+
+- [Minimal tree](https://github.com/hynding/tree-weaver/blob/main/examples/minimal.tree.json): smallest useful document, no ids
+- [Landing page](https://github.com/hynding/tree-weaver/blob/main/examples/landing-page.tree.json): navbar, hero and a responsive feature grid
+- [Pricing table](https://github.com/hynding/tree-weaver/blob/main/examples/pricing-table.tree.json): table markup with per-display styles
+- [Small site forest](https://github.com/hynding/tree-weaver/blob/main/examples/site.forest.json): two trees, shared kits and custom class rules
+
+## Optional
+
+- [Live editor](https://hynding.github.io/tree-weaver/): open a JSON, YAML, XML, HTML or Markdown file with Upload
+- [Source](https://github.com/hynding/tree-weaver): pnpm workspace, Stencil app in apps/web, libraries in packages/

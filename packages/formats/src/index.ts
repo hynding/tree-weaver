@@ -7,7 +7,7 @@ import { FORMATS, FormatError, getFormat, type FormatId, type TreeDocument } fro
 import { exportXml, importXml } from './xml';
 
 export * from './types';
-export { exportJson, exportYaml, importJson, importYaml, toEnvelope, fromData } from './data';
+export { exportJson, exportYaml, importJson, importYaml, toEnvelope, fromData, validateText, type Envelope } from './data';
 export { exportHtml, importHtml } from './html';
 export { exportMarkdown, importMarkdown, splitFrontMatter, escapeMarkdown } from './markdown';
 export { exportXml, importXml, XML_NAMESPACE } from './xml';

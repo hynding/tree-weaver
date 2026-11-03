@@ -1,0 +1,15 @@
+{
+  "$schema": "https://hynding.github.io/tree-weaver/schema/tree-weaver-v1.schema.json",
+  "format": "tree-weaver",
+  "version": 1,
+  "tree": {
+    "name": "Hello",
+    "root": {
+      "tag": "body",
+      "children": [
+        { "tag": "h1", "children": ["Hello, Tree Weaver"] },
+        { "tag": "p", "children": ["Strings are text leaves. Ids are filled in on import."] }
+      ]
+    }
+  }
+}

@@ -1,0 +1,380 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hynding.github.io/tree-weaver/schema/tree-weaver-v1.schema.json",
+  "title": "Tree Weaver document",
+  "description": "A Tree Weaver forest (project) or tree (layout), made of branches (elements) and leaves (text or images). Files usually use the envelope { \"format\": \"tree-weaver\", \"version\": 1, \"forest\" | \"tree\": ... }; a bare forest, tree or branch is accepted too.",
+  "anyOf": [
+    {
+      "$ref": "#/$defs/forestEnvelope"
+    },
+    {
+      "$ref": "#/$defs/treeEnvelope"
+    },
+    {
+      "$ref": "#/$defs/forest"
+    },
+    {
+      "$ref": "#/$defs/tree"
+    },
+    {
+      "$ref": "#/$defs/branch"
+    }
+  ],
+  "$defs": {
+    "forestEnvelope": {
+      "type": "object",
+      "description": "A file holding a whole forest.",
+      "required": [
+        "format",
+        "forest"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "$schema": {
+          "type": "string"
+        },
+        "format": {
+          "const": "tree-weaver"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1
+        },
+        "forest": {
+          "$ref": "#/$defs/forest"
+        }
+      }
+    },
+    "treeEnvelope": {
+      "type": "object",
+      "description": "A file holding one tree and the design kits it uses.",
+      "required": [
+        "format",
+        "tree"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "$schema": {
+          "type": "string"
+        },
+        "format": {
+          "const": "tree-weaver"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1
+        },
+        "tree": {
+          "$ref": "#/$defs/tree"
+        },
+        "kits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/kit"
+          }
+        }
+      }
+    },
+    "forest": {
+      "type": "object",
+      "description": "A project: trees plus the design kits they share. Kits load in order; later kits override earlier ones.",
+      "required": [
+        "trees"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Optional. Filled in on import."
+        },
+        "name": {
+          "type": "string",
+          "description": "Shown in the editor. Defaults to \"Untitled forest\"."
+        },
+        "version": {
+          "const": 1
+        },
+        "trees": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/tree"
+          }
+        },
+        "kits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/kit"
+          }
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO 8601 timestamp. Optional."
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO 8601 timestamp. Optional."
+        }
+      }
+    },
+    "tree": {
+      "type": "object",
+      "description": "One layout: a page, a screen or a reusable section.",
+      "required": [
+        "root"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Optional. Filled in on import."
+        },
+        "name": {
+          "type": "string",
+          "description": "Shown in the editor. Defaults to \"Untitled tree\"."
+        },
+        "root": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/branch"
+            }
+          ],
+          "description": "The page body. It always renders as <body>, whatever its tag."
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO 8601 timestamp. Optional."
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO 8601 timestamp. Optional."
+        }
+      }
+    },
+    "node": {
+      "description": "A branch, a leaf, or a string (shorthand for a text leaf).",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/branch"
+        },
+        {
+          "$ref": "#/$defs/leaf"
+        }
+      ]
+    },
+    "branch": {
+      "type": "object",
+      "description": "A component: an HTML element with classes, attributes, per-display styles and children.",
+      "additionalProperties": false,
+      "anyOf": [
+        {
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "required": [
+            "tag"
+          ]
+        },
+        {
+          "required": [
+            "children"
+          ]
+        }
+      ],
+      "properties": {
+        "kind": {
+          "const": "branch"
+        },
+        "id": {
+          "type": "string",
+          "description": "Optional, unique within the forest. Filled in on import."
+        },
+        "tag": {
+          "type": "string",
+          "description": "HTML tag, lowercase. Defaults to \"div\". Script-like tags are not allowed.",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "not": {
+            "enum": [
+              "script",
+              "style",
+              "iframe",
+              "object",
+              "embed",
+              "frame",
+              "frameset",
+              "base",
+              "meta",
+              "link"
+            ]
+          }
+        },
+        "type": {
+          "type": "string",
+          "description": "Optional catalog type the branch came from, such as \"grid\", \"flex-row\" or \"table\"."
+        },
+        "name": {
+          "type": "string",
+          "description": "Optional friendly name shown in the outline."
+        },
+        "classes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^\\S+$"
+          },
+          "uniqueItems": true
+        },
+        "attrs": {
+          "$ref": "#/$defs/attrs"
+        },
+        "styles": {
+          "$ref": "#/$defs/displayStyles"
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/node"
+          }
+        }
+      }
+    },
+    "leaf": {
+      "type": "object",
+      "description": "Content: text, or an image whose value is its URL.",
+      "required": [
+        "value"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "leaf"
+        },
+        "id": {
+          "type": "string",
+          "description": "Optional. Filled in on import."
+        },
+        "type": {
+          "enum": [
+            "text",
+            "image"
+          ],
+          "default": "text"
+        },
+        "value": {
+          "type": "string",
+          "description": "The text, or the image URL."
+        },
+        "attrs": {
+          "$ref": "#/$defs/attrs"
+        }
+      }
+    },
+    "attrs": {
+      "type": "object",
+      "description": "HTML attributes. Event handlers (on*) and style are not allowed: use styles instead.",
+      "propertyNames": {
+        "pattern": "^(?![oO][nN])(?![sS][tT][yY][lL][eE]$)[a-zA-Z_:][a-zA-Z0-9_.:-]*$"
+      },
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "displayId": {
+      "enum": [
+        "lg",
+        "xl",
+        "tablet",
+        "mobile-landscape",
+        "mobile-portrait"
+      ],
+      "description": "lg = desktop large (the base every display inherits), xl = desktop XL, tablet, mobile-landscape and mobile-portrait (both inherit tablet)."
+    },
+    "displayStyles": {
+      "type": "object",
+      "description": "CSS declarations per display. Put shared styles on lg and only the differences on other displays.",
+      "propertyNames": {
+        "$ref": "#/$defs/displayId"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/styleMap"
+      }
+    },
+    "styleMap": {
+      "type": "object",
+      "description": "CSS declarations keyed by kebab-case property, e.g. { \"grid-template-columns\": \"1fr 1fr\" }. Values are strings with units.",
+      "propertyNames": {
+        "pattern": "^(--[A-Za-z0-9_-]+|-?[a-z][a-z0-9-]*)$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[^{};]*$"
+      }
+    },
+    "kit": {
+      "type": "object",
+      "description": "A design kit: CSS inlined in css, a stylesheet linked by href, or editable rules.",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Optional. Filled in on import."
+        },
+        "name": {
+          "type": "string",
+          "description": "Shown in the editor."
+        },
+        "css": {
+          "type": "string",
+          "description": "Raw CSS. For a linked kit, a snapshot used to list its classes."
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "source": {
+          "type": "string",
+          "description": "Where the kit came from: a file name, a URL, \"builtin\", \"custom\" or \"env\"."
+        },
+        "href": {
+          "type": "string",
+          "pattern": "^https?://[^\\s\"'<>]+$",
+          "description": "Stylesheet URL for a linked kit."
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/styleRule"
+          },
+          "description": "Editable rules. When present, css is generated from them."
+        }
+      }
+    },
+    "styleRule": {
+      "type": "object",
+      "description": "A custom CSS rule: any selector with per-display declarations.",
+      "required": [
+        "selector"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Optional. Filled in on import."
+        },
+        "selector": {
+          "type": "string",
+          "pattern": "^[^{};@]+$"
+        },
+        "styles": {
+          "$ref": "#/$defs/displayStyles"
+        }
+      }
+    }
+  }
+}

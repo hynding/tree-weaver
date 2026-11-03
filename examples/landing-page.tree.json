@@ -1,0 +1,70 @@
+{
+  "$schema": "https://hynding.github.io/tree-weaver/schema/tree-weaver-v1.schema.json",
+  "format": "tree-weaver",
+  "version": 1,
+  "tree": {
+    "name": "Landing page",
+    "root": {
+      "tag": "body",
+      "children": [
+        {
+          "tag": "header",
+          "name": "Navbar",
+          "type": "flex-row",
+          "styles": {
+            "lg": { "display": "flex", "justify-content": "space-between", "align-items": "center", "padding": "16px 32px" },
+            "mobile-portrait": { "flex-direction": "column", "gap": "8px", "padding": "12px 16px" }
+          },
+          "children": [
+            { "tag": "strong", "children": ["Acme"] },
+            {
+              "tag": "nav",
+              "styles": { "lg": { "display": "flex", "gap": "24px" } },
+              "children": [
+                { "tag": "a", "attrs": { "href": "#features" }, "children": ["Features"] },
+                { "tag": "a", "attrs": { "href": "#pricing" }, "children": ["Pricing"] },
+                { "tag": "a", "attrs": { "href": "#contact", "aria-label": "Contact us" }, "children": ["Contact"] }
+              ]
+            }
+          ]
+        },
+        {
+          "tag": "section",
+          "name": "Hero",
+          "styles": {
+            "lg": { "padding": "96px 32px", "text-align": "center", "background": "#f6f8fa" },
+            "tablet": { "padding": "64px 24px" },
+            "mobile-portrait": { "padding": "40px 16px" }
+          },
+          "children": [
+            { "tag": "h1", "styles": { "lg": { "font-size": "3rem" }, "mobile-portrait": { "font-size": "2rem" } }, "children": ["Build layouts that fit every screen"] },
+            { "tag": "p", "children": ["One tree, five displays. Desktop large is the base; the rest only override what changes."] },
+            { "kind": "leaf", "type": "image", "value": "https://picsum.photos/seed/tree-weaver/1200/600", "attrs": { "alt": "Product screenshot" } }
+          ]
+        },
+        {
+          "tag": "section",
+          "name": "Features",
+          "attrs": { "id": "features" },
+          "type": "grid",
+          "styles": {
+            "lg": { "display": "grid", "grid-template-columns": "repeat(3, minmax(0, 1fr))", "gap": "24px", "padding": "64px 32px" },
+            "tablet": { "grid-template-columns": "repeat(2, minmax(0, 1fr))" },
+            "mobile-portrait": { "grid-template-columns": "1fr", "padding": "32px 16px" }
+          },
+          "children": [
+            { "tag": "article", "classes": ["card"], "children": [{ "tag": "h3", "children": ["Grids"] }, { "tag": "p", "children": ["Three columns on desktop, two on tablet, one on phones."] }] },
+            { "tag": "article", "classes": ["card"], "children": [{ "tag": "h3", "children": ["Flex"] }, { "tag": "p", "children": ["Rows that stack on small screens."] }] },
+            { "tag": "article", "classes": ["card"], "children": [{ "tag": "h3", "children": ["Tables"] }, { "tag": "p", "children": ["Real table markup, styled by your kit."] }] }
+          ]
+        }
+      ]
+    }
+  },
+  "kits": [
+    {
+      "name": "Landing styles",
+      "css": ".card { padding: 24px; border: 1px solid #d1d9e0; border-radius: 10px; }"
+    }
+  ]
+}

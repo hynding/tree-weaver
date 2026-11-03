@@ -1,16 +1,17 @@
-import { normalizeForest, normalizeKit, normalizeTree, TreeDataError } from '@tree-weaver/core';
+import { normalizeForest, normalizeKit, normalizeTree, SCHEMA_URL, TreeDataError, validateDocument, type ValidationResult } from '@tree-weaver/core';
 import type { DesignKit, Forest, Tree } from '@tree-weaver/core';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { DOCUMENT_FORMAT, DOCUMENT_VERSION, FormatError, type FormatId, type TreeDocument } from './types';
 
 /** The envelope written to JSON and YAML files. */
 export type Envelope =
-  | { format: typeof DOCUMENT_FORMAT; version: number; forest: Forest }
-  | { format: typeof DOCUMENT_FORMAT; version: number; tree: Tree; kits?: DesignKit[] };
+  | { $schema?: string; format: typeof DOCUMENT_FORMAT; version: number; forest: Forest }
+  | { $schema?: string; format: typeof DOCUMENT_FORMAT; version: number; tree: Tree; kits?: DesignKit[] };
 
+/** The envelope for a document. `$schema` points editors and agents at the published JSON Schema. */
 export function toEnvelope(doc: TreeDocument): Envelope {
-  if (doc.kind === 'forest') return { format: DOCUMENT_FORMAT, version: DOCUMENT_VERSION, forest: doc.forest };
-  const env: Envelope = { format: DOCUMENT_FORMAT, version: DOCUMENT_VERSION, tree: doc.tree };
+  if (doc.kind === 'forest') return { $schema: SCHEMA_URL, format: DOCUMENT_FORMAT, version: DOCUMENT_VERSION, forest: doc.forest };
+  const env: Envelope = { $schema: SCHEMA_URL, format: DOCUMENT_FORMAT, version: DOCUMENT_VERSION, tree: doc.tree };
   if (doc.kits.length) env.kits = doc.kits;
   return env;
 }
@@ -74,4 +75,20 @@ export function importYaml(text: string): TreeDocument {
     throw new FormatError(`Invalid YAML: ${(err as Error).message}`, 'yaml');
   }
   return fromData(data, 'yaml');
+}
+
+/**
+ * Strictly check JSON or YAML text before importing it. Parse failures are reported as an
+ * error at `$` instead of thrown. The format is guessed from the first character when not given.
+ */
+export function validateText(text: string, format?: 'json' | 'yaml'): ValidationResult {
+  const fmt = format ?? (/^\s*[{[]/.test(text.replace(/^\uFEFF/, '')) ? 'json' : 'yaml');
+  let data: unknown;
+  try {
+    data = fmt === 'json' ? JSON.parse(text) : parseYaml(text);
+  } catch (err) {
+    const message = `Invalid ${fmt.toUpperCase()}: ${(err as Error).message}`;
+    return { valid: false, kind: null, errors: [{ severity: 'error', path: '$', message }], warnings: [], counts: { trees: 0, branches: 0, leaves: 0 } };
+  }
+  return validateDocument(data);
 }
