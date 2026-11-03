@@ -17,7 +17,15 @@ export const config: Config = {
       type: 'www',
       serviceWorker: null,
       baseUrl: '/',
-      copy: [{ src: 'favicon.svg' }],
+      copy: [
+        { src: 'favicon.svg' },
+        // Agent-facing files, published next to the editor (see AGENTS.md and llms.txt).
+        { src: '../../../llms.txt', dest: 'llms.txt' },
+        { src: '../../../AGENTS.md', dest: 'AGENTS.md' },
+        { src: '../../../schema', dest: 'schema' },
+        { src: '../../../docs', dest: 'docs' },
+        { src: '../../../examples', dest: 'examples' },
+      ],
     },
   ],
 };

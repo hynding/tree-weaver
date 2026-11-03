@@ -1,0 +1,41 @@
+{
+  "$schema": "https://hynding.github.io/tree-weaver/schema/tree-weaver-v1.schema.json",
+  "format": "tree-weaver",
+  "version": 1,
+  "tree": {
+    "name": "Pricing table",
+    "root": {
+      "tag": "body",
+      "children": [
+        {
+          "tag": "table",
+          "type": "table",
+          "styles": {
+            "lg": { "width": "100%", "border-collapse": "collapse" },
+            "mobile-portrait": { "font-size": "14px" }
+          },
+          "children": [
+            {
+              "tag": "thead",
+              "children": [
+                { "tag": "tr", "children": [
+                  { "tag": "th", "attrs": { "scope": "col" }, "children": ["Plan"] },
+                  { "tag": "th", "attrs": { "scope": "col" }, "children": ["Seats"] },
+                  { "tag": "th", "attrs": { "scope": "col" }, "children": ["Price per month"] }
+                ] }
+              ]
+            },
+            {
+              "tag": "tbody",
+              "children": [
+                { "tag": "tr", "children": [{ "tag": "td", "children": ["Starter"] }, { "tag": "td", "children": ["1"] }, { "tag": "td", "children": ["$0"] }] },
+                { "tag": "tr", "children": [{ "tag": "td", "children": ["Team"] }, { "tag": "td", "children": ["10"] }, { "tag": "td", "children": ["$49"] }] },
+                { "tag": "tr", "children": [{ "tag": "td", "children": ["Business"] }, { "tag": "td", "children": ["50"] }, { "tag": "td", "children": ["$199"] }] }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

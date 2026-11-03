@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { analyzeKit, createEnvKits, createStarterKit, kitClasses, kitFromFile, kitFromUrl, parseCssUrls } from './index';
+import { createKit } from '@tree-weaver/core';
+import { analyzeKit, createEnvKits, createStarterKit, kitClasses, kitFromFile, kitFromUrl, kitManifest, linkedKit, parseCssUrls } from './index';
 
 describe('analyzeKit', () => {
   it('extracts classes, tokens, imports and media queries', () => {
@@ -75,5 +76,25 @@ describe('stylesheet URLs from the environment', () => {
       ['env-1', 'reset', 'https://a.example/reset.css', 'env', true],
       ['env-2', 'theme', 'https://b.example/theme.css', 'env', true],
     ]);
+  });
+});
+
+describe('kitManifest', () => {
+  it('lists classes and tokens per kit and combined', () => {
+    const a = createKit('A', ':root { --brand: red; } .card { padding: 1rem } @media (max-width: 600px) { .card { padding: 0 } }');
+    const b = { ...createKit('B', ':root { --brand: blue; } .btn {}'), enabled: true };
+    const off = { ...createKit('Off', '.hidden-kit {}'), enabled: false };
+    const linked = linkedKit('https://cdn.example.com/kit.css');
+    const m = kitManifest([a, b, off, linked]);
+    expect(m.classes).toEqual(['btn', 'card']);
+    expect(m.tokens).toEqual([{ name: '--brand', value: 'blue' }]);
+    expect(m.kits.map((k) => [k.name, k.readable, k.classes])).toEqual([
+      ['A', true, ['card']],
+      ['B', true, ['btn']],
+      ['Off', true, ['hidden-kit']],
+      ['kit', false, []],
+    ]);
+    expect(m.kits[0].media).toEqual(['(max-width: 600px)']);
+    expect(m.kits[3].href).toBe('https://cdn.example.com/kit.css');
   });
 });

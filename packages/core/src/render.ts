@@ -2,6 +2,7 @@ import { DISPLAYS } from './displays';
 import type { Branch, DesignKit, DisplayStyles, Leaf, StyleMap, Tree, TreeNode } from './model';
 import { isBranch } from './model';
 import { VOID_TAGS, walk } from './ops';
+import { BLOCKED_TAGS as BLOCKED_TAG_LIST } from './schema';
 
 /** Attribute that ties rendered elements back to their branch. Styles are emitted against it. */
 export const BRANCH_ATTR = 'data-tw';
@@ -12,7 +13,7 @@ const SAFE_TAG = /^[a-zA-Z][a-zA-Z0-9-]*$/;
 const SAFE_PROP = /^-{0,2}[a-zA-Z][a-zA-Z0-9-]*$/;
 const SAFE_ATTR = /^[a-zA-Z_:][a-zA-Z0-9_.:-]*$/;
 /** Tags that would execute or embed foreign documents; they render as plain containers. */
-const BLOCKED_TAGS = new Set(['script', 'style', 'iframe', 'object', 'embed', 'frame', 'frameset', 'base', 'meta', 'link']);
+const BLOCKED_TAGS = new Set(BLOCKED_TAG_LIST);
 const URL_ATTRS = new Set(['href', 'src', 'action', 'formaction', 'poster', 'xlink:href']);
 
 /** Phrasing elements: a branch holding any of these (or a leaf) keeps its content on one line when pretty printed. */

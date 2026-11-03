@@ -1,0 +1,48 @@
+{
+  "$schema": "https://hynding.github.io/tree-weaver/schema/tree-weaver-v1.schema.json",
+  "format": "tree-weaver",
+  "version": 1,
+  "forest": {
+    "name": "Small site",
+    "kits": [
+      {
+        "name": "Base",
+        "css": ":root { --brand: #2f6f4f; } body { font-family: system-ui, sans-serif; margin: 0; } .container { max-width: 1100px; margin: 0 auto; padding: 0 16px; }"
+      },
+      {
+        "name": "Custom styles",
+        "source": "custom",
+        "rules": [
+          { "selector": ".btn", "styles": { "lg": { "display": "inline-block", "padding": "10px 18px", "background": "var(--brand)", "color": "#fff", "border-radius": "8px" }, "mobile-portrait": { "display": "block", "text-align": "center" } } },
+          { "selector": ".btn:hover", "styles": { "lg": { "filter": "brightness(1.1)" } } }
+        ]
+      }
+    ],
+    "trees": [
+      {
+        "name": "Home",
+        "root": {
+          "tag": "body",
+          "children": [
+            { "tag": "main", "classes": ["container"], "children": [
+              { "tag": "h1", "children": ["Welcome"] },
+              { "tag": "a", "classes": ["btn"], "attrs": { "href": "about.html" }, "children": ["About us"] }
+            ] }
+          ]
+        }
+      },
+      {
+        "name": "About",
+        "root": {
+          "tag": "body",
+          "children": [
+            { "tag": "main", "classes": ["container"], "children": [
+              { "tag": "h1", "children": ["About us"] },
+              { "tag": "p", "children": ["A forest holds several trees and the kits they share."] }
+            ] }
+          ]
+        }
+      }
+    ]
+  }
+}

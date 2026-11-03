@@ -10,3 +10,5 @@ export * from './history';
 export * from './css';
 export * from './cascade';
 export * from './rules';
+export * from './schema';
+export * from './validate';

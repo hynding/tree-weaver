@@ -143,6 +143,19 @@ TW_DISPLAYS='{"tablet":{"width":768,"height":1024,"breakpoint":900}}' pnpm build
 Changing a breakpoint changes the media queries in exports and in custom classes' CSS. Imported
 HTML and CSS written with the default breakpoints still maps back to the right display.
 
+## For AI agents and tools
+
+Tree Weaver data is plain JSON (or YAML) with a published contract, so agents can write it directly:
+
+- [`docs/format.md`](docs/format.md): the format guide, with the display cascade and layout recipes.
+- [`schema/tree-weaver-v1.schema.json`](schema/tree-weaver-v1.schema.json): the JSON Schema (draft 2020-12),
+  also served at https://hynding.github.io/tree-weaver/schema/tree-weaver-v1.schema.json. JSON exports name it in `$schema`.
+- `validateDocument` (`@tree-weaver/core`) and `validateText` (`@tree-weaver/formats`): strict checks that report
+  each problem with its path and a fix hint. The importer stays lenient; the validator tells you what it would drop.
+- `kitManifest` (`@tree-weaver/kits`): every class and design token a forest's kits offer, as JSON.
+- [`AGENTS.md`](AGENTS.md) and [`llms.txt`](llms.txt) (also at https://hynding.github.io/tree-weaver/llms.txt), plus
+  working files in [`examples/`](examples/).
+
 ## Workspace layout
 
 ```
