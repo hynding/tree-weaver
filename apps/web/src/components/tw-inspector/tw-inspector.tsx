@@ -7,14 +7,21 @@ import {
   formatAutoColumns,
   formatSpan,
   formatTracks,
+  canonicalTag,
   getDisplay,
   inheritedStyles,
+  inSvgContext,
   isBranch,
+  isSvgOnlyTag,
   isClassName,
   parseAutoColumns,
   parseSpan,
   parseTracks,
   resolveStyles,
+  SHAPE_GEOMETRY,
+  SHAPE_PAINT,
+  SHAPES,
+  SVG_BRANCH_TAGS,
   tableSize,
   trackLabel,
   type Branch,
@@ -63,6 +70,27 @@ const TAGS = [
   'ul', 'ol', 'li', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'form', 'label', 'button', 'hr',
 ];
 
+/** Tags offered inside a drawing. */
+const SVG_TAGS = SVG_BRANCH_TAGS.filter((t) => !t.startsWith('fe'));
+
+/** CSS properties that paint SVG, edited per display like any other style. */
+const SVG_STYLE_FIELDS: [string, string][] = [
+  ['fill', 'Fill'],
+  ['stroke', 'Stroke'],
+  ['stroke-width', 'Stroke width'],
+  ['opacity', 'Opacity'],
+  ['transform', 'Transform'],
+  ['font-size', 'Font size'],
+  ['text-anchor', 'Text anchor'],
+  ['display', 'Display'],
+];
+
+const ATTR_LABELS: Record<string, string> = {
+  x: 'X', y: 'Y', width: 'Width', height: 'Height', rx: 'Radius x', ry: 'Radius y', cx: 'Center x', cy: 'Center y', r: 'Radius',
+  x1: 'Start x', y1: 'Start y', x2: 'End x', y2: 'End y', points: 'Points', d: 'Path data', href: 'Uses', offset: 'Offset',
+  'stop-color': 'Color', 'stop-opacity': 'Opacity', fill: 'Fill', stroke: 'Stroke', 'stroke-width': 'Stroke width', opacity: 'Opacity', transform: 'Transform',
+};
+
 const SUGGEST: Record<string, string[]> = {
   display: ['block', 'grid', 'flex', 'inline', 'inline-block', 'inline-flex', 'inline-grid', 'contents', 'none', 'table'],
   'flex-direction': ['row', 'row-reverse', 'column', 'column-reverse'],
@@ -82,6 +110,10 @@ const SUGGEST: Record<string, string[]> = {
   overflow: ['visible', 'hidden', 'auto', 'scroll', 'clip'],
   gap: ['0', '0.5rem', '1rem', '1.5rem', '2rem'],
   width: ['auto', '100%', 'fit-content', 'min-content', 'max-content'],
+  fill: ['none', 'currentColor', 'url(#gradient)'],
+  stroke: ['none', 'currentColor'],
+  'text-anchor': ['start', 'middle', 'end'],
+  transform: ['rotate(45deg)', 'scale(1.5)', 'translate(10px, 10px)'],
 };
 
 const GROUPS: { title: string; fields: [string, string][] }[] = [
@@ -165,6 +197,11 @@ export class TwInspector {
             <option value={t} />
           ))}
         </datalist>
+        <datalist id="tw-dl-svg-tags">
+          {SVG_TAGS.map((t) => (
+            <option value={t} />
+          ))}
+        </datalist>
         <datalist id="tw-dl-classes">
           {kitClasses(allKits()).map((c) => (
             <option value={c} />
@@ -213,7 +250,55 @@ export class TwInspector {
     );
   }
 
+  /** A shape's own fields: which shape, its geometry, then its paint. */
+  private renderShape(leaf: Leaf) {
+    const attrs = leaf.attrs ?? {};
+    const set = (name: string, value: string) => {
+      const next = { ...attrs };
+      if (value.trim() === '') delete next[name];
+      else next[name] = value.trim();
+      updateLeaf(leaf.id, { attrs: next });
+    };
+    const geometry = SHAPE_GEOMETRY[leaf.value] ?? [];
+    const paint = leaf.value === 'stop' || leaf.value.startsWith('fe') ? [] : SHAPE_PAINT;
+    const field = (name: string) => (
+      <div class="field" key={`${leaf.id}:${name}`}>
+        <label htmlFor={`shape-${name}`} title={name}>
+          {ATTR_LABELS[name] ?? name}
+        </label>
+        {name === 'd' || name === 'points' ? (
+          <textarea id={`shape-${name}`} class="textarea mono" rows={3} onChange={(e) => set(name, (e.target as HTMLTextAreaElement).value)}>
+            {attrs[name] ?? ''}
+          </textarea>
+        ) : (
+          <input id={`shape-${name}`} class="input mono" value={attrs[name] ?? ''} list={SUGGEST[name] ? `tw-dl-${name}` : undefined} onChange={(e) => set(name, (e.target as HTMLInputElement).value)} />
+        )}
+      </div>
+    );
+    const shapes: string[] = SHAPES.includes(leaf.value as never) ? [...SHAPES] : [leaf.value, ...SHAPES];
+    return (
+      <section class="panel-section">
+        <h3 class="panel-title">Shape leaf</h3>
+        <div class="field" key={`${leaf.id}-shape`}>
+          <label htmlFor="shape-kind">Shape</label>
+          <select id="shape-kind" class="select" onChange={(e) => updateLeaf(leaf.id, { value: (e.target as HTMLSelectElement).value })}>
+            {shapes.map((t) => (
+              <option value={t} selected={t === leaf.value}>
+                {t}
+              </option>
+            ))}
+          </select>
+        </div>
+        {geometry.map(field)}
+        {paint.length ? <h4 class="sub-title">Paint</h4> : null}
+        {paint.map(field)}
+        <p class="hint">Numbers are in the drawing’s viewBox units. Style shapes for each display through their group, with Fill and Stroke.</p>
+      </section>
+    );
+  }
+
   private renderLeaf(leaf: Leaf) {
+    if (leaf.type === 'shape') return this.renderShape(leaf);
     return (
       <section class="panel-section">
         <h3 class="panel-title">{leaf.type === 'image' ? 'Image leaf' : 'Text leaf'}</h3>
@@ -264,10 +349,10 @@ export class TwInspector {
               id="b-tag"
               class="input mono"
               value={branch.tag}
-              list="tw-dl-tags"
+              list={this.inSvg(branch) ? 'tw-dl-svg-tags' : 'tw-dl-tags'}
               onChange={(e) => {
-                const tag = (e.target as HTMLInputElement).value.trim().toLowerCase();
-                if (/^[a-z][a-z0-9-]*$/.test(tag)) updateBranch(branch.id, { tag });
+                const tag = canonicalTag((e.target as HTMLInputElement).value);
+                if (/^[a-z][a-zA-Z0-9-]*$/.test(tag)) updateBranch(branch.id, { tag });
               }}
             />
           </div>
@@ -886,28 +971,30 @@ export class TwInspector {
     );
   }
 
-  private renderAttributes(branch: Branch) {
-    const entries = Object.entries(branch.attrs);
+  private renderAttributes(node: Branch | Leaf, hidden: readonly string[] = []) {
+    const own: Record<string, string> = node.attrs ?? {};
+    const entries = Object.entries(own).filter(([name]) => !hidden.includes(name));
     const set = (name: string, value: string | null) => {
-      const attrs = { ...branch.attrs };
+      const attrs = { ...own };
       if (value === null) delete attrs[name];
       else attrs[name] = value;
-      updateBranch(branch.id, { attrs });
+      if (isBranch(node)) updateBranch(node.id, { attrs });
+      else updateLeaf(node.id, { attrs });
     };
     const add = () => {
       const name = this.newAttr.name.trim();
-      if (/^[a-zA-Z_:][-a-zA-Z0-9_:.]*$/.test(name) && !/^on/i.test(name) && name !== 'class' && name !== 'style') set(name, this.newAttr.value);
+      if (/^[a-zA-Z_:][-a-zA-Z0-9_:.]*$/.test(name) && !/^on/i.test(name) && (name !== 'class' || !isBranch(node)) && name !== 'style') set(name, this.newAttr.value);
       this.newAttr = { name: '', value: '' };
     };
     return (
       <details class="group" open={entries.length > 0}>
         <summary>
-          Attributes
+          {hidden.length ? 'Other attributes' : 'Attributes'}
           {entries.length ? <span class="count">{entries.length}</span> : null}
         </summary>
         <div class="group-body">
           {entries.map(([name, value]) => (
-            <div class="kv" key={`${branch.id}:attr:${name}`}>
+            <div class="kv" key={`${node.id}:attr:${name}`}>
               <input class="input mono" value={name} aria-label="Attribute" readOnly />
               <input class="input mono" value={value} aria-label={`${name} value`} onChange={(e) => set(name, (e.target as HTMLInputElement).value)} />
               <button class="icon-btn danger" aria-label={`Remove ${name}`} onClick={() => set(name, null)}>
@@ -929,6 +1016,37 @@ export class TwInspector {
               <Icon name="plus" />
             </button>
           </div>
+        </div>
+      </details>
+    );
+  }
+
+  /** Whether a branch is an `<svg>` or drawn inside one. */
+  private inSvg(branch: Branch): boolean {
+    const tree = currentTree();
+    if (!tree) return false;
+    if (canonicalTag(branch.tag) === 'svg') return true;
+    const parent = parentOf(branch.id);
+    return !!parent && inSvgContext(tree.root, parent.id);
+  }
+
+  /** Fill, stroke and the like for SVG branches, per display. Groups pass them on to their shapes. */
+  private renderSvgPaint(branch: Branch) {
+    if (!this.inSvg(branch)) return null;
+    const count = SVG_STYLE_FIELDS.filter(([p]) => branch.styles[state.display as DisplayId]?.[p] !== undefined).length;
+    return (
+      <details class="group" open={true}>
+        <summary>
+          SVG paint
+          {count ? <span class="count">{count}</span> : null}
+        </summary>
+        <div class="group-body">
+          {SVG_STYLE_FIELDS.map(([prop, label]) => this.styleField(branch, prop, label))}
+          <p class="hint">
+            {isSvgOnlyTag(branch.tag) || branch.tag === 'svg'
+              ? 'Shapes inside inherit these unless they set their own. Set the viewBox and size under Attributes.'
+              : 'Shapes inside inherit these unless they set their own.'}
+          </p>
         </div>
       </details>
     );
@@ -957,17 +1075,20 @@ export class TwInspector {
     if (!tree) return <p class="empty">No tree selected.</p>;
     const node = ((state.selectedId && findNode(tree.root, state.selectedId)) || tree.root) as Branch | Leaf;
     const isRoot = node.id === tree.root.id;
+    // Branches drawn inside an SVG (groups, text, gradients) get paint fields instead of box layout.
+    const drawn = isBranch(node) && this.inSvg(node) && node.tag !== 'svg';
     return [
       this.renderHead(node, isRoot),
       <div class="panel-body">
         {isBranch(node)
           ? [
               this.renderBranchBasics(node, isRoot),
-              this.renderTable(node),
+              drawn ? null : this.renderTable(node),
               this.renderClasses(node),
-              this.renderLayout(node),
-              this.renderPlacement(node),
-              GROUPS.map((g) => {
+              this.renderSvgPaint(node),
+              drawn ? null : this.renderLayout(node),
+              drawn ? null : this.renderPlacement(node),
+              (drawn ? [] : GROUPS).map((g) => {
                 const count = g.fields.filter(([p]) => node.styles[state.display as DisplayId]?.[p] !== undefined).length;
                 return (
                   <details class="group" open={count > 0}>
@@ -984,7 +1105,12 @@ export class TwInspector {
               this.renderAttributes(node),
               !isRoot && this.renderActions(),
             ]
-          : [this.renderLeaf(node), this.renderMatchedStyles(node), this.renderActions()]}
+          : [
+              this.renderLeaf(node),
+              node.type === 'shape' ? this.renderAttributes(node, [...(SHAPE_GEOMETRY[node.value] ?? []), ...SHAPE_PAINT]) : null,
+              this.renderMatchedStyles(node),
+              this.renderActions(),
+            ]}
         {isRoot && tree.root.children.length === 0 ? <p class="hint" style={{ padding: '0 12px' }}>Select a branch in the canvas or outline to edit it.</p> : null}
         {this.renderDatalists()}
       </div>,

@@ -16,7 +16,11 @@ import { SCHEMA_VERSION } from './model';
 export const SCHEMA_URL = 'https://hynding.github.io/tree-weaver/schema/tree-weaver-v1.schema.json';
 
 /** Tags that render as a plain `div` because they could run or embed foreign content. */
-export const BLOCKED_TAGS: readonly string[] = ['script', 'style', 'iframe', 'object', 'embed', 'frame', 'frameset', 'base', 'meta', 'link'];
+export const BLOCKED_TAGS: readonly string[] = [
+  'script', 'style', 'iframe', 'object', 'embed', 'frame', 'frameset', 'base', 'meta', 'link',
+  // SVG animation can rewrite attributes (an href to a script URL) after rendering.
+  'animate', 'set', 'animatemotion', 'animatetransform', 'handler', 'listener',
+];
 
 
 const ref = (name: string) => ({ $ref: `#/$defs/${name}` });
@@ -27,7 +31,7 @@ export const TREE_WEAVER_SCHEMA = {
   $id: SCHEMA_URL,
   title: 'Tree Weaver document',
   description:
-    'A Tree Weaver forest (project) or tree (layout), made of branches (elements) and leaves (text or images). ' +
+    'A Tree Weaver forest (project) or tree (layout), made of branches (elements) and leaves (text, images or SVG shapes). ' +
     'Files usually use the envelope { "format": "tree-weaver", "version": 1, "forest" | "tree": ... }; ' +
     'a bare forest, tree or branch is accepted too.',
   anyOf: [ref('forestEnvelope'), ref('treeEnvelope'), ref('forest'), ref('tree'), ref('branch')],
@@ -74,7 +78,7 @@ export const TREE_WEAVER_SCHEMA = {
     },
     tree: {
       type: 'object',
-      description: 'One layout: a page, a screen or a reusable section.',
+      description: 'One layout: a page, a screen or a reusable section, or an SVG drawing when its root is an <svg>.',
       required: ['root'],
       additionalProperties: false,
       properties: {
@@ -82,7 +86,7 @@ export const TREE_WEAVER_SCHEMA = {
         name: str('Shown in the editor. Defaults to "Untitled tree".'),
         root: {
           allOf: [ref('branch')],
-          description: 'The page body. It always renders as <body>, whatever its tag.',
+          description: 'The page body, which renders as <body> whatever its tag; or, with "tag": "svg", the root of an SVG tree (a drawing).',
         },
         createdAt: str('ISO 8601 timestamp. Optional.'),
         updatedAt: str('ISO 8601 timestamp. Optional.'),
@@ -94,7 +98,7 @@ export const TREE_WEAVER_SCHEMA = {
     },
     branch: {
       type: 'object',
-      description: 'A component: an HTML element with classes, attributes, per-display styles and children.',
+      description: 'A component: an HTML or SVG element with classes, attributes, per-display styles and children.',
       additionalProperties: false,
       anyOf: [{ required: ['kind'] }, { required: ['tag'] }, { required: ['children'] }],
       properties: {
@@ -102,9 +106,11 @@ export const TREE_WEAVER_SCHEMA = {
         id: str('Optional, unique within the forest. Filled in on import.'),
         tag: {
           type: 'string',
-          description: 'HTML tag, lowercase. Defaults to "div". Script-like tags are not allowed.',
-          pattern: '^[a-z][a-z0-9-]*$',
-          not: { enum: BLOCKED_TAGS },
+          description:
+            'HTML tag, lowercase, or an SVG container tag in its own case ("svg", "g", "defs", "linearGradient"). ' +
+            'Defaults to "div". Script-like and animation tags are not allowed.',
+          pattern: '^[a-z][a-zA-Z0-9-]*$',
+          not: { enum: [...BLOCKED_TAGS, 'animateMotion', 'animateTransform'] },
         },
         type: str('Optional catalog type the branch came from, such as "grid", "flex-row" or "table".'),
         name: str('Optional friendly name shown in the outline.'),
@@ -116,20 +122,23 @@ export const TREE_WEAVER_SCHEMA = {
     },
     leaf: {
       type: 'object',
-      description: 'Content: text, or an image whose value is its URL.',
+      description:
+        'Content: text; an image whose value is its URL; or an SVG shape whose value is the element name ' +
+        '("rect", "circle", "ellipse", "line", "polyline", "polygon", "path", "use", "stop", ...) and whose attrs are its geometry and paint. ' +
+        'Shapes belong inside an <svg> branch.',
       required: ['value'],
       additionalProperties: false,
       properties: {
         kind: { const: 'leaf' },
         id: str('Optional. Filled in on import.'),
-        type: { enum: ['text', 'image'], default: 'text' },
-        value: str('The text, or the image URL.'),
+        type: { enum: ['text', 'image', 'shape'], default: 'text' },
+        value: str('The text, the image URL, or the shape element name.'),
         attrs: ref('attrs'),
       },
     },
     attrs: {
       type: 'object',
-      description: 'HTML attributes. Event handlers (on*) and style are not allowed: use styles instead.',
+      description: 'HTML or SVG attributes (SVG names keep their case, e.g. "viewBox"). Event handlers (on*) and style are not allowed: use styles instead.',
       propertyNames: { pattern: '^(?![oO][nN])(?![sS][tT][yY][lL][eE]$)[a-zA-Z_:][a-zA-Z0-9_.:-]*$' },
       additionalProperties: { type: 'string' },
     },

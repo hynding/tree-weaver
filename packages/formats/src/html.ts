@@ -1,9 +1,13 @@
 import {
   BRANCH_ATTR,
+  canonicalSvgAttr,
+  canonicalTag,
+  childrenInSvg,
   CUSTOM_KIT_SOURCE,
   createId,
   displayForMedia,
   INLINE_TAGS,
+  isShapeTag,
   isStylesheetUrl,
   LEAF_ATTR,
   parseCss,
@@ -51,7 +55,7 @@ const textContent = (el: Element): string =>
 const SELECTOR = new RegExp(`^\\[${BRANCH_ATTR}=["']?([^"'\\]]+)["']?\\]$`);
 
 /** Read rules written by `renderTreeCss` back into per-branch display styles. */
-function readTreeCss(css: string, into: Map<string, DisplayStyles>): void {
+export function readTreeCss(css: string, into: Map<string, DisplayStyles>): void {
   const visit = (nodes: CssNode[], display: DisplayId) => {
     for (const node of nodes) {
       if (node.type === 'rule') {
@@ -114,8 +118,9 @@ function applyMeta(node: RawNode, meta: RawNode, ctx: Ctx): void {
   }
 }
 
-function convertChildren(nodes: ChildNode[], ctx: Ctx, raw: boolean): RawNode[] {
-  const kept = nodes.filter((n) => n.type === 'text' || n.type === 'comment' || (isElement(n) && !SKIP_TAGS.has(n.name)));
+function convertChildren(nodes: ChildNode[], ctx: Ctx, raw: boolean, svg = false): RawNode[] {
+  // An SVG <title> is the drawing's accessible name, so it stays.
+  const kept = nodes.filter((n) => n.type === 'text' || n.type === 'comment' || (isElement(n) && (!SKIP_TAGS.has(n.name) || (svg && n.name === 'title'))));
   // Stack of open `tw:branch` directives; the bottom entry collects this level's output.
   const stack: { branch: RawNode | null; items: RawNode[] }[] = [{ branch: null, items: [] }];
   const close = () => {
@@ -150,7 +155,7 @@ function convertChildren(nodes: ChildNode[], ctx: Ctx, raw: boolean): RawNode[] 
         if (i === 0) value = value.trimStart();
         if (i === kept.length - 1) value = value.trimEnd();
         // Whitespace only matters between two pieces of inline content.
-        if (value.trim() === '') value = inlineish(kept[i - 1]) && inlineish(kept[i + 1]) ? ' ' : '';
+        if (value.trim() === '') value = !svg && inlineish(kept[i - 1]) && inlineish(kept[i + 1]) ? ' ' : '';
       }
       if (value) items.push({ kind: 'leaf', type: 'text', value });
       return;
@@ -158,11 +163,11 @@ function convertChildren(nodes: ChildNode[], ctx: Ctx, raw: boolean): RawNode[] 
     const el = node as Element;
     if (unwrapNext && el.name === 'p') {
       unwrapNext = false;
-      items.push(...convertChildren(el.children, ctx, raw));
+      items.push(...convertChildren(el.children, ctx, raw, svg));
       return;
     }
     unwrapNext = false;
-    const converted = convertElement(el, ctx, raw);
+    const converted = convertElement(el, ctx, raw, svg);
     if (meta) applyMeta(converted, meta, ctx);
     meta = null;
     items.push(converted);
@@ -171,11 +176,52 @@ function convertChildren(nodes: ChildNode[], ctx: Ctx, raw: boolean): RawNode[] 
   return stack[0].items;
 }
 
-function convertElement(el: Element, ctx: Ctx, raw: boolean): RawNode {
-  return convertParts(el.name.toLowerCase(), el.attribs, el.children, ctx, raw);
+function convertElement(el: Element, ctx: Ctx, raw: boolean, svg = false): RawNode {
+  return convertParts(el.name.toLowerCase(), el.attribs, el.children, ctx, raw, svg);
 }
 
-export function convertParts(tag: string, a: Record<string, string>, children: ChildNode[], ctx: Ctx, raw: boolean): RawNode {
+const isHandlerOrStyle = (name: string): boolean => {
+  const n = name.toLowerCase();
+  return n === 'style' || n.startsWith('on');
+};
+
+/** Attributes of an SVG element in their SVG case, with `xlink:href` read as `href`. */
+function svgAttrs(a: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(a)) {
+    const name = k.toLowerCase() === 'xlink:href' ? 'href' : canonicalSvgAttr(k);
+    if (name === 'href' && out.href !== undefined) continue;
+    out[name] = v;
+  }
+  return out;
+}
+
+/**
+ * A shape or image inside an SVG becomes a leaf. Leaves have no styles, so a shape's
+ * inline `style` declarations become presentation attributes (`fill`, `stroke`, ...).
+ */
+function svgLeaf(tag: string, a: Record<string, string>): RawNode | null {
+  if (!isShapeTag(tag) && tag !== 'image') return null;
+  const attrs: Record<string, string> = {};
+  for (const [k, v] of Object.entries(a)) if (!isHandlerOrStyle(k) && k !== LEAF_ATTR && !k.startsWith(`${BRANCH_ATTR}`)) attrs[k] = v;
+  if (a.style) for (const [prop, value] of Object.entries(parseDeclarations(a.style))) attrs[prop] ??= value;
+  const id = a[LEAF_ATTR] ?? a[BRANCH_ATTR];
+  if (tag === 'image') {
+    const { href = '', ...rest } = attrs;
+    return { kind: 'leaf', id, type: 'image', value: href, attrs: rest };
+  }
+  return { kind: 'leaf', id, type: 'shape', value: tag, attrs };
+}
+
+export function convertParts(tag: string, attribs: Record<string, string>, children: ChildNode[], ctx: Ctx, raw: boolean, svg = false): RawNode {
+  // Inside an SVG, names keep their SVG case (`linearGradient`, `viewBox`), which HTML parsers lowercase.
+  const inSvg = svg || tag === 'svg';
+  if (inSvg) tag = canonicalTag(tag);
+  const a = inSvg ? svgAttrs(attribs) : attribs;
+  if (svg) {
+    const leaf = svgLeaf(tag, a);
+    if (leaf) return leaf;
+  }
   if (tag === 'img' && a[BRANCH_ATTR] === undefined) {
     const attrs: Record<string, string> = {};
     for (const [k, v] of Object.entries(a)) if (k !== 'src' && k !== LEAF_ATTR && k !== 'style' && !k.startsWith('on')) attrs[k] = v;
@@ -204,8 +250,16 @@ export function convertParts(tag: string, a: Record<string, string>, children: C
     classes: a.class ?? '',
     attrs,
     styles,
-    children: convertChildren(children, ctx, raw || RAW_TEXT_TAGS.has(tag)),
+    children: convertChildren(children, ctx, raw || RAW_TEXT_TAGS.has(tag), childrenInSvg({ tag }, svg)),
   };
+}
+
+/** The `<svg>` root of an exported SVG tree, when it is all the body holds. */
+function soleSvgRoot(body: Element): Element | undefined {
+  const elements = body.children.filter(isElement);
+  const only = elements.length === 1 ? elements[0] : undefined;
+  const hasText = body.children.some((c) => c.type === 'text' && c.data.trim());
+  return only && only.name === 'svg' && only.attribs[`${BRANCH_ATTR}-type`] === 'root' && !hasText ? only : undefined;
 }
 
 const fileName = (href: string): string => href.split(/[?#]/)[0].split('/').pop() || href;
@@ -253,6 +307,12 @@ export function importHtml(text: string): TreeDocument {
   if (looseCss.length) kits.push({ id: createId('k'), name: title ? `${title} styles` : 'Imported styles', css: looseCss.join('\n\n'), enabled: true, source: 'html' });
 
   const ctx: Ctx = { styles };
+  // An exported SVG tree: the body holds just the drawing, which is the tree's root.
+  const drawing = body && body.attribs[BRANCH_ATTR] === undefined ? soleSvgRoot(body) : undefined;
+  if (drawing) {
+    const root = convertParts('svg', drawing.attribs, drawing.children, ctx, false);
+    return fromData({ tree: { id: treeId || undefined, name: title || 'Imported drawing', root }, kits }, 'html');
+  }
   let rootNodes: ChildNode[];
   let rootAttrs: Record<string, string> = {};
   if (body) {

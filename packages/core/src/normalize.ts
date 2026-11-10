@@ -3,6 +3,7 @@ import { isDisplayId } from './displays';
 import type { Branch, DesignKit, DisplayStyles, Forest, Leaf, StyleMap, StyleRule, Tree, TreeNode } from './model';
 import { SCHEMA_VERSION } from './model';
 import { parseRulesCss, sanitizeSelector, withRules } from './rules';
+import { canonicalTag } from './svg';
 
 /**
  * Turn loosely shaped data (parsed JSON, YAML or XML) into valid model objects.
@@ -52,8 +53,10 @@ export function normalizeNode(value: unknown, path = 'node', seen = new Set<stri
   if (!isObj(value)) throw new TreeDataError('Expected a branch or leaf object', path);
   const kind = value.kind ?? (value.tag !== undefined || value.children !== undefined ? 'branch' : 'leaf');
   if (kind === 'leaf') {
-    const type = value.type === 'image' ? 'image' : 'text';
-    const leaf: Leaf = { kind: 'leaf', id: str(value.id), type, value: str(value.value ?? value.text ?? value.src) };
+    const type = value.type === 'image' || value.type === 'shape' ? value.type : 'text';
+    let content = str(value.value ?? value.text ?? value.src);
+    if (type === 'shape') content = canonicalTag(content);
+    const leaf: Leaf = { kind: 'leaf', id: str(value.id), type, value: content };
     const attrs = stringMap(value.attrs);
     if (Object.keys(attrs).length) leaf.attrs = attrs;
     return uniq(leaf, seen);
@@ -61,7 +64,7 @@ export function normalizeNode(value: unknown, path = 'node', seen = new Set<stri
   if (kind !== 'branch') throw new TreeDataError(`Unknown node kind "${str(kind)}"`, path);
   const children = value.children === undefined ? [] : value.children;
   if (!Array.isArray(children)) throw new TreeDataError('"children" must be a list', path);
-  const tag = str(value.tag, 'div').trim().toLowerCase() || 'div';
+  const tag = canonicalTag(str(value.tag, 'div')) || 'div';
   const branch: Branch = {
     kind: 'branch',
     id: str(value.id),
@@ -94,7 +97,8 @@ export function normalizeTree(value: unknown, path = 'tree'): Tree {
     root = normalizeNode(rootValue, `${path}.root`);
   }
   if (root.kind !== 'branch') throw new TreeDataError('A tree root must be a branch', `${path}.root`);
-  root.tag = 'body';
+  // The root is the page body, unless it is an <svg>: then the tree is an SVG tree (a drawing).
+  if (root.tag !== 'svg') root.tag = 'body';
   root.type ??= 'root';
   const ts = now();
   return {

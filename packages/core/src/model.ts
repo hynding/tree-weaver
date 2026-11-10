@@ -5,7 +5,9 @@
  * - A **tree** is one layout (a page, a screen, a section template).
  * - A **branch** is a component: an element with a tag, classes, attributes,
  *   per-display styles and children.
- * - A **leaf** is content: text or an image that hangs off a branch.
+ * - A **leaf** is content: text, an image, or an SVG shape that hangs off a branch.
+ *
+ * A tree's root is the page `<body>`, or an `<svg>` for an SVG tree (see `svg.ts`).
  */
 
 /** Identifier of a display type. `lg` is the base display every other display inherits from. */
@@ -17,22 +19,22 @@ export type StyleMap = Record<string, string>;
 /** Styles per display. Missing displays inherit (see `DISPLAYS`). */
 export type DisplayStyles = Partial<Record<DisplayId, StyleMap>>;
 
-export type LeafType = 'text' | 'image';
+export type LeafType = 'text' | 'image' | 'shape';
 
 export interface Leaf {
   kind: 'leaf';
   id: string;
   type: LeafType;
-  /** Text content for `text`, the image URL for `image`. */
+  /** Text content for `text`, the image URL for `image`, the element name (`circle`, `path`, ...) for `shape`. */
   value: string;
-  /** Extra attributes, e.g. `alt` for images. */
+  /** Extra attributes, e.g. `alt` for images, or a shape's geometry and paint (`cx`, `d`, `fill`). */
   attrs?: Record<string, string>;
 }
 
 export interface Branch {
   kind: 'branch';
   id: string;
-  /** HTML tag the branch renders as. */
+  /** Tag the branch renders as: an HTML tag, or an SVG tag in its own case (`g`, `linearGradient`). */
   tag: string;
   /** Optional catalog type the branch was created from (`grid`, `flex-row`, `table`, ...). */
   type?: string;

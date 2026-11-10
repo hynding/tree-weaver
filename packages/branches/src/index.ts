@@ -1,6 +1,9 @@
 import {
   createBranch,
   createLeaf,
+  createShape,
+  createSvg,
+  createSvgTree,
   createTable,
   createTree,
   equalColumns,
@@ -16,7 +19,7 @@ import {
  * the editor offers in its palette, plus whole-tree templates.
  */
 
-export type BlueprintCategory = 'Layout' | 'Content' | 'Media' | 'Table' | 'Sections';
+export type BlueprintCategory = 'Layout' | 'Content' | 'Media' | 'Table' | 'Sections' | 'SVG';
 
 export interface Blueprint {
   id: string;
@@ -87,6 +90,32 @@ export const section = (children: TreeNode[] = [], name = 'Section'): Branch =>
     classes: ['section'],
     children: [createBranch({ type: 'container', name: 'Container', classes: ['container'], children })],
   });
+
+/** An SVG `<text>` branch with its text leaf. */
+export const svgText = (value = 'Label', x = '100', y = '110'): Branch =>
+  createBranch({ tag: 'text', name: 'SVG text', attrs: { x, y, 'text-anchor': 'middle', 'font-size': '20', fill: '#1c2420' }, children: [text(value)] });
+
+/** A small drawing to start from: a badge with a circle, a shape and a label. */
+export const svgBadge = (): Branch =>
+  createSvg(
+    [
+      createShape('rect', { x: '10', y: '10', width: '180', height: '180', rx: '24', fill: '#e3f1e9' }),
+      createShape('circle', { cx: '100', cy: '85', r: '45', fill: '#2f6f4f' }),
+      svgText('Tree Weaver', '100', '165'),
+    ],
+    '0 0 200 200',
+    'Badge',
+  );
+
+const SHAPE_LABELS: [string, string, string, string][] = [
+  ['rect', 'Rectangle', '▬', 'Rectangle, with optional rounded corners'],
+  ['circle', 'Circle', '●', 'Circle from a center and radius'],
+  ['ellipse', 'Ellipse', '⬬', 'Ellipse from a center and two radii'],
+  ['line', 'Line', '╱', 'Straight line between two points'],
+  ['polyline', 'Polyline', '⌇', 'Open line through a list of points'],
+  ['polygon', 'Polygon', '▲', 'Closed shape through a list of points'],
+  ['path', 'Path', '∿', 'Any outline, from path data'],
+];
 
 const list = (ordered: boolean): Branch =>
   createBranch({
@@ -212,9 +241,36 @@ export const BLUEPRINTS: readonly Blueprint[] = [
     description: 'Three cards in a responsive grid',
     create: () => section([heading(2, 'Features'), responsiveGrid(3, [card('Fast'), card('Flexible'), card('Portable')], 'Feature grid')], 'Features'),
   },
+
+  // SVG: a canvas branch, groups and text, and shape leaves that go inside it
+  { id: 'svg', label: 'SVG canvas', category: 'SVG', glyph: '◰', description: 'An <svg> drawing area; shapes and groups go inside', create: () => createSvg() },
+  { id: 'svg-badge', label: 'SVG badge', category: 'SVG', glyph: '✿', description: 'A small drawing to start from', create: () => svgBadge() },
+  { id: 'svg-group', label: 'Group', category: 'SVG', glyph: '⧉', description: 'SVG group (g): moves, styles and transforms its shapes together', create: () => createBranch({ tag: 'g', name: 'Group' }) },
+  { id: 'svg-text', label: 'SVG text', category: 'SVG', glyph: 'A', description: 'Text drawn in an SVG', create: () => svgText() },
+  ...SHAPE_LABELS.map(([shape, label, glyph, description]): Blueprint => ({ id: `svg-${shape}`, label, category: 'SVG', glyph, description, create: () => createShape(shape) })),
+  {
+    id: 'svg-gradient',
+    label: 'Gradient',
+    category: 'SVG',
+    glyph: '◐',
+    description: 'Linear gradient in defs; fill a shape with url(#gradient)',
+    create: () =>
+      createBranch({
+        tag: 'defs',
+        name: 'Definitions',
+        children: [
+          createBranch({
+            tag: 'linearGradient',
+            name: 'Gradient',
+            attrs: { id: 'gradient', x1: '0', y1: '0', x2: '1', y2: '1' },
+            children: [createShape('stop', { offset: '0%', 'stop-color': '#2f6f4f' }), createShape('stop', { offset: '100%', 'stop-color': '#a7d3b9' })],
+          }),
+        ],
+      }),
+  },
 ];
 
-export const BLUEPRINT_CATEGORIES: readonly BlueprintCategory[] = ['Layout', 'Content', 'Media', 'Table', 'Sections'];
+export const BLUEPRINT_CATEGORIES: readonly BlueprintCategory[] = ['Layout', 'Content', 'Media', 'Table', 'Sections', 'SVG'];
 
 export function getBlueprint(id: string): Blueprint | undefined {
   return BLUEPRINTS.find((b) => b.id === id);
@@ -233,6 +289,24 @@ const build = (id: string) => getBlueprint(id)!.create();
 
 export const TEMPLATES: readonly TreeTemplate[] = [
   { id: 'blank', label: 'Blank', description: 'An empty tree', create: (name = 'Untitled tree') => createTree(name) },
+  {
+    id: 'drawing',
+    label: 'SVG drawing',
+    description: 'An SVG tree: the root is an <svg> you fill with groups and shapes, and it exports as an .svg file',
+    create: (name = 'Drawing') =>
+      createSvgTree(name, [
+        createShape('rect', { x: '0', y: '0', width: '800', height: '600', fill: '#f4f7f5' }),
+        createBranch({
+          tag: 'g',
+          name: 'Scene',
+          children: [
+            createShape('circle', { cx: '400', cy: '260', r: '140', fill: '#2f6f4f' }),
+            createShape('path', { d: 'M400 120 C 470 200, 470 320, 400 400 C 330 320, 330 200, 400 120 Z', fill: '#a7d3b9' }),
+          ],
+        }),
+        svgText('A drawing made of branches and leaves', '400', '500'),
+      ]),
+  },
   {
     id: 'landing',
     label: 'Landing page',

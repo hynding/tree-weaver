@@ -3,6 +3,7 @@ import { SCHEMA_VERSION } from './model';
 import { VOID_TAGS } from './ops';
 import { isSafeAttr, isSafeCssProp } from './render';
 import { BLOCKED_TAGS } from './schema';
+import { canonicalTag, childrenInSvg, isShapeTag, isSvgBranchTag, isSvgOnlyTag, SHAPES } from './svg';
 
 /**
  * Strict checking of Tree Weaver data, for agents and tools that write it.
@@ -49,7 +50,7 @@ const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !
 const typeName = (v: unknown) => (v === null ? 'null' : Array.isArray(v) ? 'a list' : typeof v);
 const DISPLAY_LIST = DISPLAY_IDS.join(', ');
 const BLOCKED = new Set(BLOCKED_TAGS);
-const TAG = /^[a-z][a-z0-9-]*$/;
+const TAG = /^[a-z][a-zA-Z0-9-]*$/;
 
 const ENVELOPE_KEYS = new Set(['$schema', 'format', 'version', 'forest', 'tree', 'kits']);
 const FOREST_KEYS = new Set(['id', 'name', 'version', 'trees', 'kits', 'createdAt', 'updatedAt']);
@@ -194,25 +195,26 @@ class Checker {
       this.error(`${path}.root`, 'A tree root must be a branch, not a leaf', 'Wrap the content: "root": { "tag": "body", "children": [ ... ] }');
       return;
     }
-    if (isObj(root) && typeof root.tag === 'string' && root.tag.toLowerCase() !== 'body') {
-      this.warn(`${path}.root.tag`, `The root always renders as <body>, not <${root.tag}>`, 'Use "tag": "body" on the root and put a <main> or <div> inside it');
+    if (isObj(root) && typeof root.tag === 'string' && root.tag.toLowerCase() !== 'body' && root.tag !== 'svg') {
+      this.warn(`${path}.root.tag`, `The root renders as <body>, not <${root.tag}>`, 'Use "tag": "body" on the root and put a <main> or <div> inside it, or "tag": "svg" for an SVG tree (a drawing)');
     }
     this.node(root, `${path}.root`, true);
   }
 
-  node(value: unknown, path: string, isRoot = false) {
+  /** `inSvg`: whether the node sits inside an `<svg>` branch. */
+  node(value: unknown, path: string, isRoot = false, inSvg = false) {
     if (typeof value === 'string') {
       this.counts.leaves++;
       return;
     }
     if (!isObj(value)) return this.error(path, `Expected a branch, a leaf or a string, got ${typeName(value)}`);
     const kind = value.kind ?? (value.tag !== undefined || value.children !== undefined ? 'branch' : 'leaf');
-    if (kind === 'branch') return this.branch(value, path, isRoot);
-    if (kind === 'leaf') return this.leaf(value, path);
+    if (kind === 'branch') return this.branch(value, path, isRoot, inSvg);
+    if (kind === 'leaf') return this.leaf(value, path, inSvg);
     this.error(`${path}.kind`, `Unknown node kind "${String(kind)}"`, 'Use "branch" for elements or "leaf" for text and images');
   }
 
-  branch(value: Obj, path: string, isRoot: boolean) {
+  branch(value: Obj, path: string, isRoot: boolean, inSvg = false) {
     this.counts.branches++;
     this.unknownKeys(value, BRANCH_KEYS, path, 'branch', { class: 'classes' });
     this.id(value, path);
@@ -224,13 +226,26 @@ class Checker {
       if (typeof value.tag !== 'string') {
         this.error(`${path}.tag`, `"tag" must be a string, not ${typeName(value.tag)}`);
       } else {
-        tag = value.tag.trim().toLowerCase();
+        tag = canonicalTag(value.tag);
         if (!TAG.test(tag)) {
           this.error(`${path}.tag`, `"${value.tag}" is not a valid tag; it will render as <div>`, 'Use a lowercase HTML tag such as "section", "div" or "h2"');
-        } else if (BLOCKED.has(tag)) {
-          this.error(`${path}.tag`, `<${tag}> is not allowed; it will render as <div>`, tag === 'style' || tag === 'link' ? 'Put CSS in a design kit (forest.kits) instead' : 'Scripts and embedded documents are not supported');
+        } else if (BLOCKED.has(tag.toLowerCase())) {
+          this.error(
+            `${path}.tag`,
+            `<${tag}> is not allowed; it will render as <div>`,
+            tag === 'style' || tag === 'link' ? 'Put CSS in a design kit (forest.kits) instead' : /^(animate|set)/i.test(tag) ? 'SVG animation is not supported; animate with CSS in a design kit' : 'Scripts and embedded documents are not supported',
+          );
         } else if (tag !== value.tag) {
-          this.warn(`${path}.tag`, `Tags are lowercase; "${value.tag}" will be read as "${tag}"`);
+          this.warn(`${path}.tag`, `"${value.tag}" will be read as "${tag}"`, isSvgBranchTag(tag) ? 'SVG tags keep their own case' : 'HTML tags are lowercase');
+        } else if (isShapeTag(tag)) {
+          this.error(`${path}.tag`, `<${tag}> is an SVG shape, which is a leaf`, `Write { "type": "shape", "value": "${tag}", "attrs": { ... } }`);
+        }
+        if (!isRoot && TAG.test(tag)) {
+          if (inSvg && !isSvgBranchTag(tag) && !isSvgOnlyTag(tag)) {
+            this.warn(`${path}.tag`, `<${tag}> is not drawn inside an SVG`, 'Use SVG elements here, or wrap HTML in a "foreignObject" branch');
+          } else if (!inSvg && isSvgOnlyTag(tag)) {
+            this.warn(`${path}.tag`, `<${tag}> only works inside an SVG`, 'Put it inside a branch with "tag": "svg"');
+          }
         }
       }
     }
@@ -264,17 +279,26 @@ class Checker {
         if (!isRoot && VOID_TAGS.has(tag) && value.children.length) {
           this.error(`${path}.children`, `<${tag}> can't hold children`, tag === 'img' ? 'Use an image leaf: { "type": "image", "value": "<url>", "attrs": { "alt": "..." } }' : `Move the children out of the <${tag}>`);
         }
-        value.children.forEach((c, i) => this.node(c, `${path}.children[${i}]`));
+        const childSvg = childrenInSvg({ tag }, inSvg);
+        value.children.forEach((c, i) => this.node(c, `${path}.children[${i}]`, false, childSvg));
       }
     }
   }
 
-  leaf(value: Obj, path: string) {
+  leaf(value: Obj, path: string, inSvg = false) {
     this.counts.leaves++;
     this.unknownKeys(value, LEAF_KEYS, path, 'leaf', { text: 'value', src: 'value' });
     this.id(value, path);
-    if (value.type !== undefined && value.type !== 'text' && value.type !== 'image') {
-      this.error(`${path}.type`, `Unknown leaf type "${String(value.type)}"; it will be read as text`, 'Use "text" or "image"');
+    if (value.type !== undefined && value.type !== 'text' && value.type !== 'image' && value.type !== 'shape') {
+      this.error(`${path}.type`, `Unknown leaf type "${String(value.type)}"; it will be read as text`, 'Use "text", "image" or "shape"');
+    }
+    if (value.type === 'shape' && typeof value.value === 'string') {
+      if (!isShapeTag(value.value)) {
+        this.error(`${path}.value`, `"${value.value}" is not an SVG shape; it will render as an empty group`, `Use one of: ${SHAPES.join(', ')}, stop, or a filter primitive such as feGaussianBlur`);
+      } else if (canonicalTag(value.value) !== value.value) {
+        this.warn(`${path}.value`, `"${value.value}" will be read as "${canonicalTag(value.value)}"`);
+      }
+      if (!inSvg) this.warn(path, 'A shape is only drawn inside an SVG', 'Put it inside a branch with "tag": "svg"');
     }
     for (const alias of ['text', 'src'] as const) {
       if (value[alias] !== undefined) this.warn(`${path}.${alias}`, `"${alias}" is an alias`, value.value === undefined ? 'Use "value"' : `Remove "${alias}"; "value" is used`);
@@ -287,17 +311,18 @@ class Checker {
       else this.error(`${path}.value`, `"value" must be a string, not ${typeName(content)}`);
     }
     if (value.children !== undefined) this.error(`${path}.children`, 'A leaf has no children', 'Make it a branch with "kind": "branch" and a "tag"');
-    this.attrs(value.attrs, `${path}.attrs`);
+    this.attrs(value.attrs, `${path}.attrs`, value.type === 'shape');
     if (value.type === 'image') {
       const alt = isObj(value.attrs) ? value.attrs.alt : undefined;
-      if (alt === undefined) this.warn(`${path}.attrs`, 'The image has no alt text', 'Add "attrs": { "alt": "what the image shows" } (use "" for decorative images)');
+      if (alt === undefined && !inSvg) this.warn(`${path}.attrs`, 'The image has no alt text', 'Add "attrs": { "alt": "what the image shows" } (use "" for decorative images)');
       if (typeof content === 'string' && /^\s*(javascript|vbscript|data:text\/html)/i.test(content)) {
         this.error(`${path}.value`, 'The image URL is not allowed', 'Use an http(s) URL, a relative path or a data:image URL');
       }
     }
   }
 
-  attrs(value: unknown, path: string) {
+  /** `classAllowed`: shapes are leaves with no class list, so they carry `class` as an attribute. */
+  attrs(value: unknown, path: string, classAllowed = false) {
     if (value === undefined) return;
     if (!isObj(value)) return this.error(path, `"attrs" must be an object of attribute names to values, not ${typeName(value)}`);
     for (const [name, v] of Object.entries(value)) {
@@ -309,7 +334,7 @@ class Checker {
       if (typeof v !== 'string') this.warn(at, 'Attribute values should be strings', `Write it as "${String(v)}"`);
       const lower = name.toLowerCase();
       if (lower === 'style') this.error(at, 'The style attribute is not rendered', 'Move the declarations into "styles": { "lg": { ... } }');
-      else if (lower === 'class') this.error(at, 'class is not an attribute here', 'Use "classes": [ ... ] on the branch');
+      else if (lower === 'class' && !classAllowed) this.error(at, 'class is not an attribute here', 'Use "classes": [ ... ] on the branch');
       else if (lower.startsWith('on')) this.error(at, `Event handler "${name}" is not rendered`, 'Trees are static markup; add behaviour in the app that uses the exported HTML');
       else if (!isSafeAttr(name, String(v))) this.error(at, `Attribute "${name}" is not rendered`, /^\s*(javascript|vbscript)/i.test(String(v)) ? 'Script URLs are not allowed' : 'Use a plain attribute name such as "href", "aria-label" or "data-id"');
     }

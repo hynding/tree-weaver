@@ -1,4 +1,4 @@
-import { isBranch, normalizeTree, renderDocument, walk } from '@tree-weaver/core';
+import { isBranch, normalizeTree, renderDocument, validateDocument, walk } from '@tree-weaver/core';
 import { describe, expect, it } from 'vitest';
 import { BLUEPRINT_CATEGORIES, BLUEPRINTS, responsiveGrid, TEMPLATES } from './index';
 
@@ -36,6 +36,7 @@ describe('templates', () => {
       const tree = t.create();
       expect(normalizeTree(JSON.parse(JSON.stringify(tree)))).toEqual(tree);
       expect(renderDocument(tree)).toContain('<body');
+      expect(validateDocument({ tree: JSON.parse(JSON.stringify(tree)) }).errors).toEqual([]);
       let branches = 0;
       walk(tree.root, (n) => {
         if (isBranch(n)) branches++;

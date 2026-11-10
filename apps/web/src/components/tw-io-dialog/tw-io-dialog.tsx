@@ -1,5 +1,5 @@
 import { Component, Prop, State, h } from '@stencil/core';
-import { detectFormat, FORMATS, type FormatId } from '@tree-weaver/formats';
+import { detectFormat, FORMATS, hasDrawing, type FormatId } from '@tree-weaver/formats';
 import { currentTree, download, exportCurrent, exportStorybookCurrent, importText, toast, type ExportOutput } from '../../store/actions';
 import { state } from '../../store/editor';
 import { Icon } from '../../utils/icons';
@@ -65,11 +65,13 @@ export class TwIoDialog {
   }
 
   private renderExport() {
+    const tree = currentTree();
+    const drawing = !!tree && hasDrawing(tree);
     const forestOnly = (id: ExportTarget) => id !== 'storybook' && this.scope === 'forest' && !FORMATS.find((f) => f.id === id)!.forest;
-    if (forestOnly(this.format)) this.format = 'json';
+    const unavailable = (id: ExportTarget) => forestOnly(id) || (id === 'svg' && !drawing);
+    if (unavailable(this.format)) this.format = 'json';
     const storybook = this.format === 'storybook';
     const out = this.output();
-    const tree = currentTree();
     return [
       <div class="dialog-body">
         <div class="row wrap">
@@ -90,12 +92,12 @@ export class TwIoDialog {
             <button
               class="format-option"
               aria-pressed={String(this.format === f.id)}
-              disabled={forestOnly(f.id)}
-              title={forestOnly(f.id) ? `${f.label} holds a single tree` : undefined}
+              disabled={unavailable(f.id)}
+              title={forestOnly(f.id) ? `${f.label} holds a single tree` : unavailable(f.id) ? 'This tree has no SVG to export' : undefined}
               onClick={() => (this.format = f.id)}
             >
               <strong>{f.label}</strong>
-              <small>{f.id === 'html' ? 'Web page' : f.id === 'markdown' ? 'Readable, layout kept' : f.forest ? 'Tree or forest' : 'Single tree'}</small>
+              <small>{f.id === 'html' ? 'Web page' : f.id === 'markdown' ? 'Readable, layout kept' : f.id === 'svg' ? 'Drawing' : f.forest ? 'Tree or forest' : 'Single tree'}</small>
             </button>
           ))}
           <button class="format-option" aria-pressed={String(storybook)} onClick={() => (this.format = 'storybook')}>
@@ -113,7 +115,9 @@ export class TwIoDialog {
               ? 'A standalone page with your kits and responsive CSS inlined. It imports back with every branch and style.'
               : this.format === 'markdown'
                 ? 'Content as Markdown. Layout branches and responsive styles ride along in front matter and HTML comments, so it imports back intact.'
-                : 'Lossless: imports back exactly, including ids, kits and every display’s styles.'}
+                : this.format === 'svg'
+                  ? 'A standalone SVG file of this tree’s drawing, with your kits and responsive styles inside. It imports back as an SVG tree.'
+                  : 'Lossless: imports back exactly, including ids, kits and every display’s styles.'}
         </p>
       </div>,
       <footer>
