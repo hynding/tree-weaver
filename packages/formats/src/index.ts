@@ -4,6 +4,7 @@ import { exportHtml, importHtml } from './html';
 import { exportMarkdown, importMarkdown } from './markdown';
 import { slugify } from './slug';
 import { FORMATS, FormatError, getFormat, type FormatId, type TreeDocument } from './types';
+import { exportSvg, importSvg } from './svg';
 import { exportXml, importXml } from './xml';
 
 export * from './types';
@@ -11,6 +12,7 @@ export { exportJson, exportYaml, importJson, importYaml, toEnvelope, fromData, v
 export { exportHtml, importHtml } from './html';
 export { exportMarkdown, importMarkdown, splitFrontMatter, escapeMarkdown } from './markdown';
 export { exportXml, importXml, XML_NAMESPACE } from './xml';
+export { exportSvg, importSvg, drawingOf, hasDrawing, type SvgExportOptions } from './svg';
 export { exportStorybook, zipStorybook, STORYBOOK_VERSION, type StorybookExport, type StorybookFile, type StorybookOptions } from './storybook';
 export { zip, crc32, type ZipEntry } from './zip';
 export { slugify } from './slug';
@@ -26,6 +28,7 @@ export function detectFormat(text: string, fileName?: string): FormatId {
   const byName = fileName ? formatFromFileName(fileName) : null;
   if (byName) return byName;
   const head = text.replace(/^﻿/, '').trimStart();
+  if (/^(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*|<!DOCTYPE[^>]*>\s*)*<svg[\s>]/i.test(head)) return 'svg';
   if (/^<\?xml|^<tree-weaver[\s>]/i.test(head)) return 'xml';
   if (head.startsWith('<')) return 'html';
   if (head.startsWith('{') || head.startsWith('[')) return 'json';
@@ -48,6 +51,8 @@ export function importDocument(text: string, format?: FormatId, fileName?: strin
       return importHtml(text);
     case 'markdown':
       return importMarkdown(text);
+    case 'svg':
+      return importSvg(text);
     default:
       throw new FormatError(`Unsupported format "${String(id)}"`);
   }
@@ -82,6 +87,8 @@ export function exportTree(tree: Tree, format: FormatId, kits: DesignKit[] = [])
       return exportHtml(tree, { kits });
     case 'markdown':
       return exportMarkdown(tree, { kits });
+    case 'svg':
+      return exportSvg(tree, { kits });
     default:
       throw new FormatError(`Unsupported format "${String(format)}"`);
   }
@@ -91,5 +98,5 @@ export function exportTree(tree: Tree, format: FormatId, kits: DesignKit[] = [])
 export function suggestFileName(name: string, scope: 'tree' | 'forest', format: FormatId): string {
   const slug = slugify(name, scope);
   const ext = getFormat(format).extensions[0];
-  return format === 'html' || format === 'markdown' ? `${slug}.${ext}` : `${slug}.${scope}.${ext}`;
+  return format === 'html' || format === 'markdown' || format === 'svg' ? `${slug}.${ext}` : `${slug}.${scope}.${ext}`;
 }

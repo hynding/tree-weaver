@@ -15,6 +15,7 @@ import {
   resizeTracks,
   resolveStyles,
   trackLabel,
+  isSvgRoot,
   renderTreeBody,
   renderTreeCss,
   type Branch,
@@ -39,6 +40,10 @@ const EDITOR_CSS = `
 [data-tw-drop="before"] { box-shadow: 0 -3px 0 0 #2563eb !important; }
 [data-tw-drop="after"] { box-shadow: 0 3px 0 0 #2563eb !important; }
 [${LEAF_ATTR}][contenteditable] { outline: 2px solid #f59e0b !important; cursor: text; }
+svg [data-tw-hover] { outline: none !important; filter: drop-shadow(0 0 1px #2563eb) drop-shadow(0 0 1px #2563eb); }
+svg [data-tw-selected] { outline: none !important; filter: drop-shadow(0 0 1.5px #2563eb) drop-shadow(0 0 1.5px #2563eb) drop-shadow(0 0 1px #2563eb); }
+svg [data-tw-drop="inside"], svg [data-tw-drop="before"], svg [data-tw-drop="after"] { box-shadow: none !important; filter: drop-shadow(0 0 2px #2563eb) drop-shadow(0 0 2px #2563eb); }
+svg[data-tw]:empty { min-height: 0; min-width: 0; }
 a, button { cursor: default; }
 html { min-height: 100%; }
 body { min-height: 100vh; }
@@ -208,13 +213,16 @@ export class TwCanvas {
       doc.getElementById('tw-tree')!.textContent = renderTreeCss(root);
       const body = doc.body;
       for (const attr of Array.from(body.attributes)) body.removeAttribute(attr.name);
-      body.setAttribute(BRANCH_ATTR, root.id);
-      if (root.classes.length) body.className = root.classes.join(' ');
-      for (const [k, v] of Object.entries(root.attrs)) {
-        try {
-          body.setAttribute(k, v);
-        } catch {
-          // Ignore attribute names the DOM refuses.
+      // An SVG tree's root is the <svg> itself, drawn inside a plain body.
+      if (!isSvgRoot(root)) {
+        body.setAttribute(BRANCH_ATTR, root.id);
+        if (root.classes.length) body.className = root.classes.join(' ');
+        for (const [k, v] of Object.entries(root.attrs)) {
+          try {
+            body.setAttribute(k, v);
+          } catch {
+            // Ignore attribute names the DOM refuses.
+          }
         }
       }
       body.innerHTML = renderTreeBody(root, { designer: true });
@@ -279,7 +287,8 @@ export class TwCanvas {
   /** Double-click a text leaf to edit it in place. Enter commits, Escape cancels. */
   private onDblClick(e: MouseEvent) {
     const span = (e.target as Element).closest?.(`[${LEAF_ATTR}]`) as HTMLElement | null;
-    if (!span || span.tagName === 'IMG') return;
+    // Only HTML text edits in place; SVG text and shapes are edited in the inspector.
+    if (!span || span.tagName === 'IMG' || span.namespaceURI !== 'http://www.w3.org/1999/xhtml') return;
     e.preventDefault();
     const id = span.getAttribute(LEAF_ATTR)!;
     const original = span.textContent ?? '';
@@ -338,7 +347,7 @@ export class TwCanvas {
     if (!isTreeDrag(e)) return;
     const tree = currentTree();
     if (!tree) return;
-    let el = (e.target as Element).closest?.(`[${LEAF_ATTR}], [${BRANCH_ATTR}]`) ?? this.doc!.body;
+    let el = (e.target as Element).closest?.(`[${LEAF_ATTR}], [${BRANCH_ATTR}]`) ?? this.find(tree.root.id) ?? this.doc!.body;
     let id = el.getAttribute(LEAF_ATTR) ?? el.getAttribute(BRANCH_ATTR) ?? tree.root.id;
     const dragging = state.dragNodeId;
     if (dragging) {

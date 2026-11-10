@@ -245,7 +245,8 @@ describe('detection and helpers', () => {
     expect(suggestFileName('Home Page!', 'tree', 'json')).toBe('home-page.tree.json');
     expect(suggestFileName('Site', 'forest', 'yaml')).toBe('site.forest.yaml');
     expect(suggestFileName('Site', 'tree', 'markdown')).toBe('site.md');
-    expect(FORMATS.map((f) => f.id)).toEqual(['json', 'yaml', 'xml', 'html', 'markdown']);
+    expect(suggestFileName('Logo', 'tree', 'svg')).toBe('logo.svg');
+    expect(FORMATS.map((f) => f.id)).toEqual(['json', 'yaml', 'xml', 'html', 'markdown', 'svg']);
   });
 });
 

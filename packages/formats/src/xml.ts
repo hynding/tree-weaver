@@ -17,6 +17,7 @@ import { DOCUMENT_VERSION, FormatError, type TreeDocument } from './types';
  *         <style display="lg"><declaration property="display" value="grid"/></style>
  *         <leaf id type="text">Hello</leaf>
  *         <leaf id type="image" value="cat.png"><attr name="alt" value="A cat"/></leaf>
+ *         <leaf id type="shape" value="circle"><attr name="r" value="40"/></leaf>
  *       </branch>
  *     </tree>
  *   </forest>
@@ -40,7 +41,7 @@ function attrs(pairs: Record<string, string | undefined | boolean>): string {
 
 function nodeXml(node: TreeNode, pad: string): string[] {
   if (node.kind === 'leaf') {
-    const head = `<leaf${attrs({ id: node.id, type: node.type, value: node.type === 'image' ? node.value : undefined })}`;
+    const head = `<leaf${attrs({ id: node.id, type: node.type, value: node.type === 'text' ? undefined : node.value })}`;
     const extra = Object.entries(node.attrs ?? {}).map(([n, v]) => `<attr${attrs({ name: n })} value="${esc(v)}"/>`);
     if (node.type === 'text') return [`${pad}${head}>${escText(node.value)}</leaf>`];
     return extra.length ? [`${pad}${head}>${extra.join('')}</leaf>`] : [`${pad}${head}/>`];
@@ -108,7 +109,7 @@ function readNode(el: Element): Record<string, unknown> {
   const a = el.attribs;
   if (localName(el) === 'leaf') {
     const leafAttrs = Object.fromEntries(elements(el, 'attr').map((x) => [x.attribs.name, x.attribs.value ?? '']));
-    return { kind: 'leaf', id: a.id, type: a.type, value: a.type === 'image' ? a.value : (a.value ?? textOf(el)), attrs: leafAttrs };
+    return { kind: 'leaf', id: a.id, type: a.type, value: a.type === 'image' || a.type === 'shape' ? a.value : (a.value ?? textOf(el)), attrs: leafAttrs };
   }
   const styles: Record<string, Record<string, string>> = {};
   for (const style of elements(el, 'style')) {

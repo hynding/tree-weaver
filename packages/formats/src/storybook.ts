@@ -1,11 +1,15 @@
 import {
+  ancestorsOf,
   BASE_CSS,
   DISPLAYS,
+  escapeAttr,
+  inSvgContext,
   isBranch,
   renderNodeHtml,
   renderTreeBody,
   renderTreeCss,
   rootAttrs,
+  SVG_NAMESPACE,
   type Branch,
   type DisplayId,
   type Forest,
@@ -102,6 +106,8 @@ function collectLeaves(node: TreeNode): { args: Record<string, string>; leaves: 
       current.children.forEach((child) => visit(child, current));
       return;
     }
+    // Shapes are drawing, not content an arg would fill.
+    if (current.type === 'shape') return;
     const owner = parent ? (parent.name ?? parent.type ?? parent.tag) : 'content';
     const base = camelCase(owner, 'content') + (current.type === 'image' ? 'Image' : 'Text');
     const key = unique(base);
@@ -110,6 +116,16 @@ function collectLeaves(node: TreeNode): { args: Record<string, string>; leaves: 
   };
   visit(node, null);
   return { args, leaves };
+}
+
+/** A branch on its own. Inside an SVG it keeps an `<svg>` around it, with the nearest drawing's viewBox. */
+function branchHtml(root: Branch, node: Branch): string {
+  const chain = ancestorsOf(root, node.id);
+  const parent = chain[chain.length - 1];
+  if (!parent || !inSvgContext(root, parent.id)) return renderNodeHtml(node, { designer: true });
+  const svg = [...chain].reverse().find((b) => b.tag === 'svg');
+  const viewBox = svg?.attrs.viewBox ? ` viewBox="${escapeAttr(svg.attrs.viewBox)}"` : '';
+  return `<svg xmlns="${SVG_NAMESPACE}"${viewBox}>${renderNodeHtml(node, { designer: true, inSvg: true })}</svg>`;
 }
 
 function treeStories(tree: Tree): StoryDef[] {
@@ -140,7 +156,7 @@ function treeStories(tree: Tree): StoryDef[] {
       stories.push({
         exportName: exportName(exportBase),
         name: suffix ? `${label} ${suffix}` : label,
-        html: renderNodeHtml(node, { designer: true }),
+        html: branchHtml(tree.root, node),
         ...collectLeaves(node),
       });
     }

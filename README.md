@@ -10,9 +10,9 @@ locally in your browser.
 | Term       | Meaning                                                                                   |
 | ---------- | ----------------------------------------------------------------------------------------- |
 | **Forest** | A project. Holds trees and the design kits they share.                                    |
-| **Tree**   | One layout: a page, a screen, a reusable section.                                         |
+| **Tree**   | One layout: a page, a screen, a reusable section, or an SVG drawing.                      |
 | **Branch** | A component: an element with a tag, classes, attributes, per-display styles and children. |
-| **Leaf**   | Content hanging off a branch: text or an image.                                           |
+| **Leaf**   | Content hanging off a branch: text, an image, or an SVG shape.                            |
 
 The same words are used in the code (`Forest`, `Tree`, `Branch`, `Leaf`) and in the UI.
 
@@ -23,6 +23,11 @@ The same words are used in the code (`Forest`, `Tree`, `Branch`, `Leaf`) and in 
 - **Build layouts** by clicking or dragging branches from the palette onto the canvas or the outline:
   sections, containers, responsive grids (2/3/4 columns, sidebar layouts), flex rows and columns, tables,
   headings, paragraphs, lists, links, buttons, images, figures, cards, a navbar, a hero, a feature grid.
+- **Draw SVG** the same way: plant an _SVG drawing_ tree (its root is an `<svg>`), or drop an SVG canvas
+  into any page. Groups, text and gradients are branches; rectangles, circles, ellipses, lines, polylines,
+  polygons and paths are shape leaves with their geometry and paint in the inspector. Fill, stroke,
+  opacity and transform on a group are styles, so they can change per display. Shapes can only go
+  inside an SVG, and HTML can't be dropped into one.
 - **Edit in place**: select anything in the canvas, double-click text to rewrite it, drag branches in
   the canvas or outline to reorder or re-parent them, and undo or redo every change.
 - **Tune every display**: desktop large (the base), desktop XL, tablet, mobile landscape and mobile
@@ -52,7 +57,7 @@ The same words are used in the code (`Forest`, `Tree`, `Branch`, `Leaf`) and in 
   Switch trees from the preview, and press Esc to go back. _New tab_ opens the tree as a standalone page
   in a browser tab, and _Forest in new tab_ opens a list of every tree linking to its page. New tabs are
   snapshots: open them again after more edits.
-- **Upload and download tree data** as JSON, YAML, XML, HTML or Markdown (see below).
+- **Upload and download tree data** as JSON, YAML, XML, HTML, Markdown or SVG (see below).
 - **Download a Storybook project** for a tree or the whole forest (see [Storybook](#storybook)).
 - **Save locally**: forests autosave to IndexedDB (falling back to `localStorage`), and you can keep
   several forests in one browser.
@@ -66,6 +71,7 @@ The same words are used in the code (`Forest`, `Tree`, `Branch`, `Leaf`) and in 
 | XML      | tree or forest   | Lossless (`<tree-weaver>` → `<forest>` → `<tree>` → `<branch>` / `<leaf>`).                                         |
 | HTML     | one tree         | A standalone page with kits and responsive CSS inlined. Branch ids, names and every display's styles import back. |
 | Markdown | one tree         | Readable content (headings, lists, tables, links, images, code). Layout branches and styles ride along in front matter and HTML comments, so they import back. |
+| SVG      | one drawing      | A standalone `.svg` of an SVG tree (or a page's first `<svg>`), with kits and responsive styles inside. Imports back as an SVG tree; SVG files from other tools import too, without scripts, animation or editor metadata. |
 
 Imports also accept HTML and Markdown that Tree Weaver did not write: elements become branches,
 text and images become leaves, inline `style` attributes become desktop styles, and `<style>` /
@@ -163,7 +169,7 @@ apps/
   web/                 Stencil editor app (@tree-weaver/web)
 packages/
   core/                Tree model, immutable operations, displays, CSS/HTML rendering, validation
-  formats/             JSON, YAML, XML, HTML and Markdown import/export, Storybook export
+  formats/             JSON, YAML, XML, HTML, Markdown and SVG import/export, Storybook export
   storage/             IndexedDB / localStorage / memory forest stores and preferences
   kits/                Design kit analysis (classes, tokens, imports) and the starter kit
   branches/            The branch library (palette blueprints) and tree templates

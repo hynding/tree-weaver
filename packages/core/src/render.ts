@@ -3,6 +3,7 @@ import type { Branch, DesignKit, DisplayStyles, Leaf, StyleMap, Tree, TreeNode }
 import { isBranch } from './model';
 import { VOID_TAGS, walk } from './ops';
 import { BLOCKED_TAGS as BLOCKED_TAG_LIST } from './schema';
+import { canonicalTag, childrenInSvg, isSvgRoot, SVG_NAMESPACE, SVG_SHAPE_TAGS } from './svg';
 
 /** Attribute that ties rendered elements back to their branch. Styles are emitted against it. */
 export const BRANCH_ATTR = 'data-tw';
@@ -14,6 +15,7 @@ const SAFE_PROP = /^-{0,2}[a-zA-Z][a-zA-Z0-9-]*$/;
 const SAFE_ATTR = /^[a-zA-Z_:][a-zA-Z0-9_.:-]*$/;
 /** Tags that would execute or embed foreign documents; they render as plain containers. */
 const BLOCKED_TAGS = new Set(BLOCKED_TAG_LIST);
+const SVG_SHAPE_SET = new Set(SVG_SHAPE_TAGS);
 const URL_ATTRS = new Set(['href', 'src', 'action', 'formaction', 'poster', 'xlink:href']);
 
 /** Phrasing elements: a branch holding any of these (or a leaf) keeps its content on one line when pretty printed. */
@@ -30,10 +32,10 @@ export function escapeAttr(value: string): string {
   return escapeHtml(value).replace(/"/g, '&quot;');
 }
 
-/** The tag a branch is rendered as, after safety checks. */
+/** The tag a branch is rendered as, after safety checks. SVG tags keep their case (`linearGradient`). */
 export function safeTag(tag: string): string {
-  const t = tag.toLowerCase();
-  return SAFE_TAG.test(t) && !BLOCKED_TAGS.has(t) ? t : 'div';
+  const t = canonicalTag(tag);
+  return SAFE_TAG.test(t) && !BLOCKED_TAGS.has(t.toLowerCase()) ? t : 'div';
 }
 
 export function isSafeAttr(name: string, value: string): boolean {
@@ -97,9 +99,13 @@ export interface HtmlOptions {
   designer?: boolean;
   /** Pretty print with indentation. */
   pretty?: boolean;
+  /** Write well-formed XML (attributes always get a value), as a standalone `.svg` file needs. */
+  xml?: boolean;
+  /** Whether the node being rendered sits inside an `<svg>`. Set while rendering; callers rarely need it. */
+  inSvg?: boolean;
 }
 
-function renderAttrs(branch: Branch): string {
+function renderAttrs(branch: Branch, xml = false): string {
   const parts = [`${BRANCH_ATTR}="${escapeAttr(branch.id)}"`];
   if (branch.type) parts.push(`${BRANCH_ATTR}-type="${escapeAttr(branch.type)}"`);
   if (branch.name) parts.push(`${BRANCH_ATTR}-name="${escapeAttr(branch.name)}"`);
@@ -107,12 +113,31 @@ function renderAttrs(branch: Branch): string {
   if (classes.length) parts.push(`class="${escapeAttr(classes.join(' '))}"`);
   for (const [name, value] of Object.entries(branch.attrs)) {
     if (name === 'class' || !isSafeAttr(name, value)) continue;
-    parts.push(value === '' ? name : `${name}="${escapeAttr(value)}"`);
+    parts.push(value === '' && !xml ? name : `${name}="${escapeAttr(value)}"`);
   }
   return parts.join(' ');
 }
 
+const leafAttrs = (leaf: Leaf, skip: (name: string) => boolean): string =>
+  Object.entries(leaf.attrs ?? {})
+    .filter(([n, v]) => !skip(n) && isSafeAttr(n, v))
+    .map(([n, v]) => ` ${n}="${escapeAttr(v)}"`)
+    .join('');
+
+/** A shape's element name, or `g` for names that aren't SVG shapes. */
+const shapeTag = (value: string): string => {
+  const t = canonicalTag(value);
+  return SVG_SHAPE_SET.has(t) ? t : 'g';
+};
+
 function renderLeaf(leaf: Leaf, opts: HtmlOptions): string {
+  if (leaf.type === 'shape') {
+    return `<${shapeTag(leaf.value)} ${LEAF_ATTR}="${escapeAttr(leaf.id)}"${leafAttrs(leaf, () => false)}/>`;
+  }
+  if (leaf.type === 'image' && opts.inSvg) {
+    const href = isSafeAttr('href', leaf.value) ? leaf.value : '';
+    return `<image ${LEAF_ATTR}="${escapeAttr(leaf.id)}" href="${escapeAttr(href)}"${leafAttrs(leaf, (n) => n === 'href' || n === 'alt')}/>`;
+  }
   if (leaf.type === 'image') {
     const attrs = Object.entries(leaf.attrs ?? {})
       .filter(([n, v]) => n !== 'src' && isSafeAttr(n, v))
@@ -123,30 +148,42 @@ function renderLeaf(leaf: Leaf, opts: HtmlOptions): string {
     return `<img ${LEAF_ATTR}="${escapeAttr(leaf.id)}" src="${escapeAttr(src)}"${alt}${attrs}>`;
   }
   const content = escapeHtml(leaf.value);
-  return opts.designer ? `<span ${LEAF_ATTR}="${escapeAttr(leaf.id)}">${content}</span>` : content;
+  // Inside an SVG a <span> would end the drawing, so selectable text uses <tspan>.
+  if (!opts.designer) return content;
+  return opts.inSvg ? `<tspan ${LEAF_ATTR}="${escapeAttr(leaf.id)}">${content}</tspan>` : `<span ${LEAF_ATTR}="${escapeAttr(leaf.id)}">${content}</span>`;
 }
+
+/** Whether a child keeps its parent's content on one line when pretty printed. */
+const isInline = (node: TreeNode): boolean => (isBranch(node) ? INLINE_TAGS.has(node.tag) : node.type !== 'shape');
 
 export function renderNodeHtml(node: TreeNode, opts: HtmlOptions = {}, depth = 0): string {
   if (!isBranch(node)) return renderLeaf(node, opts);
   const tag = safeTag(node.tag);
-  const open = `<${tag} ${renderAttrs(node)}>`;
-  if (VOID_TAGS.has(tag)) return open;
+  const inSvg = childrenInSvg(node, !!opts.inSvg);
+  const svgRoot = tag === 'svg' && !opts.inSvg && opts.xml && node.attrs.xmlns === undefined ? ` xmlns="${SVG_NAMESPACE}"` : '';
+  const open = `<${tag}${svgRoot} ${renderAttrs(node, opts.xml)}>`;
+  if (VOID_TAGS.has(tag) && !opts.inSvg) return opts.xml ? `${open.slice(0, -1)}/>` : open;
   if (!node.children.length) return `${open}</${tag}>`;
-  const inline = !opts.pretty || node.children.some((c) => !isBranch(c) || INLINE_TAGS.has(c.tag));
-  if (inline) return `${open}${node.children.map((c) => renderNodeHtml(c, opts, depth + 1)).join('')}</${tag}>`;
+  const inner = { ...opts, inSvg };
+  const inline = !opts.pretty || node.children.some(isInline);
+  if (inline) return `${open}${node.children.map((c) => renderNodeHtml(c, inner, depth + 1)).join('')}</${tag}>`;
   const pad = '  '.repeat(depth + 1);
-  const inner = node.children.map((c) => `${pad}${renderNodeHtml(c, opts, depth + 1)}`).join('\n');
-  return `${open}\n${inner}\n${'  '.repeat(depth)}</${tag}>`;
+  const body = node.children.map((c) => `${pad}${renderNodeHtml(c, inner, depth + 1)}`).join('\n');
+  return `${open}\n${body}\n${'  '.repeat(depth)}</${tag}>`;
 }
 
-/** Markup for the children of the tree root (the root itself becomes `<body>`). */
+/**
+ * Markup for the tree's content. A page's root becomes `<body>`, so this is the markup of
+ * its children; an SVG tree's root is itself the `<svg>` element inside the body.
+ */
 export function renderTreeBody(root: Branch, opts: HtmlOptions = {}): string {
+  if (isSvgRoot(root)) return renderNodeHtml(root, opts, opts.pretty ? 1 : 0);
   return root.children.map((c) => renderNodeHtml(c, opts, opts.pretty ? 1 : 0)).join(opts.pretty ? '\n  ' : '');
 }
 
-/** Attributes for the `<body>` element that represents the tree root. */
+/** Attributes for the `<body>` element that represents the tree root (none for an SVG tree, whose root is the `<svg>`). */
 export function rootAttrs(root: Branch): string {
-  return renderAttrs(root);
+  return isSvgRoot(root) ? '' : renderAttrs(root);
 }
 
 /** Baseline CSS every rendered tree gets, so empty layouts are still visible and media scale. */
@@ -186,7 +223,7 @@ ${kitStyles ? `${kitStyles}\n` : ''}<style data-tw-styles>
 ${renderTreeCss(tree.root)}
 </style>${opts.extraCss ? `\n<style>${opts.extraCss}</style>` : ''}
 </head>
-<body ${rootAttrs(tree.root)}>
+<body${isSvgRoot(tree.root) ? '' : ` ${rootAttrs(tree.root)}`}>
   ${body}
 </body>
 </html>

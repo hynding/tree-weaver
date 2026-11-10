@@ -1,0 +1,47 @@
+{
+  "$schema": "https://hynding.github.io/tree-weaver/schema/tree-weaver-v1.schema.json",
+  "format": "tree-weaver",
+  "version": 1,
+  "tree": {
+    "name": "Logo",
+    "root": {
+      "tag": "svg",
+      "name": "Logo",
+      "attrs": { "xmlns": "http://www.w3.org/2000/svg", "viewBox": "0 0 200 200", "role": "img", "aria-label": "Tree Weaver logo" },
+      "styles": {
+        "lg": { "display": "block", "width": "100%", "max-width": "320px", "height": "auto" },
+        "mobile-portrait": { "max-width": "160px" }
+      },
+      "children": [
+        {
+          "tag": "defs",
+          "children": [
+            {
+              "tag": "linearGradient",
+              "attrs": { "id": "leaf-fill", "x1": "0", "y1": "0", "x2": "1", "y2": "1" },
+              "children": [
+                { "type": "shape", "value": "stop", "attrs": { "offset": "0%", "stop-color": "#a7d3b9" } },
+                { "type": "shape", "value": "stop", "attrs": { "offset": "100%", "stop-color": "#2f6f4f" } }
+              ]
+            }
+          ]
+        },
+        { "type": "shape", "value": "rect", "attrs": { "x": "0", "y": "0", "width": "200", "height": "200", "rx": "32", "fill": "#f4f7f5" } },
+        {
+          "tag": "g",
+          "name": "Leaf",
+          "styles": { "lg": { "fill": "url(#leaf-fill)" }, "tablet": { "transform": "scale(0.95)", "transform-origin": "center" } },
+          "children": [
+            { "type": "shape", "value": "path", "attrs": { "d": "M100 30 C 150 70, 150 130, 100 170 C 50 130, 50 70, 100 30 Z" } },
+            { "type": "shape", "value": "line", "attrs": { "x1": "100", "y1": "45", "x2": "100", "y2": "165", "stroke": "#f4f7f5", "stroke-width": "4" } }
+          ]
+        },
+        {
+          "tag": "text",
+          "attrs": { "x": "100", "y": "192", "text-anchor": "middle", "font-size": "14", "fill": "#1c2420" },
+          "children": ["Tree Weaver"]
+        }
+      ]
+    }
+  }
+}

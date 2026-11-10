@@ -18,6 +18,7 @@ import {
   findNode,
   findParent,
   History,
+  inSvgContext,
   insertNode,
   isBranch,
   isEditableKit,
@@ -26,6 +27,7 @@ import {
   removeTableColumn,
   removeTableRow,
   parseRulesCss,
+  placementProblem,
   renderDocument,
   renderForestIndex,
   setRuleStyle as setRuleDeclaration,
@@ -300,14 +302,20 @@ function placement(root: Branch, targetId: string, position: DropPosition): { pa
   return { parentId: hit.parent.id, index: position === 'before' ? hit.index : hit.index + 1 };
 }
 
+/** Shapes and SVG groups only go inside an `<svg>`, and HTML can't be drawn inside one. Says why with a toast. */
+function allowed(root: Branch, parentId: string, node: TreeNode): boolean {
+  const problem = placementProblem(root, parentId, node);
+  if (problem) toast(problem, 'error');
+  return !problem;
+}
+
 export function insertAt(node: TreeNode, targetId?: string, position?: DropPosition): void {
   const tree = currentTree();
   if (!tree) return;
   const target = targetId ? { targetId, position: position ?? 'inside' } : defaultTarget();
-  editTree((root) => {
-    const { parentId, index } = placement(root, target.targetId, target.position);
-    return insertNode(root, parentId, node, index);
-  });
+  const { parentId, index } = placement(tree.root, target.targetId, target.position);
+  if (!allowed(tree.root, parentId, node)) return;
+  editTree((root) => insertNode(root, parentId, node, index));
   state.selectedId = node.id;
 }
 
@@ -317,11 +325,12 @@ export function insertBlueprint(blueprintId: string, targetId?: string, position
 }
 
 export function moveTo(id: string, targetId: string, position: DropPosition): void {
-  if (id === targetId) return;
-  editTree((root) => {
-    const { parentId, index } = placement(root, targetId, position);
-    return moveNode(root, id, parentId, index);
-  });
+  const tree = currentTree();
+  const node = tree && findNode(tree.root, id);
+  if (id === targetId || !tree || !node) return;
+  const { parentId, index } = placement(tree.root, targetId, position);
+  if (!allowed(tree.root, parentId, node)) return;
+  editTree((root) => moveNode(root, id, parentId, index));
 }
 
 /** Move a node one step up or down among its siblings. */
@@ -360,7 +369,10 @@ export function wrapSelected(tag = 'div', type = 'box'): void {
   const id = state.selectedId;
   const tree = currentTree();
   if (!id || !tree || id === tree.root.id) return;
-  const wrapper = createBranch({ tag, type, name: 'Wrapper' });
+  // Inside a drawing the wrapper is an SVG group.
+  const parent = parentOf(id);
+  const svg = !!parent && inSvgContext(tree.root, parent.id);
+  const wrapper = svg ? createBranch({ tag: 'g', name: 'Group' }) : createBranch({ tag, type, name: 'Wrapper' });
   editTree((root) => wrapNode(root, id, wrapper));
   state.selectedId = wrapper.id;
 }
@@ -735,7 +747,7 @@ export function exportCurrent(format: FormatId, scope: 'tree' | 'forest'): Expor
   }
   const tree = currentTree()!;
   // A standalone page loads the deployment's stylesheets too; data formats carry only the forest's kits.
-  const kits = format === 'html' ? allKits() : forest.kits;
+  const kits = format === 'html' || format === 'svg' ? allKits() : forest.kits;
   return { text: exportTree(tree, format, kits), fileName: suggestFileName(tree.name, 'tree', format), mime: info.mime };
 }
 

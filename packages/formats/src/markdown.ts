@@ -1,6 +1,7 @@
 import {
   INLINE_TAGS,
   isBranch,
+  isSvgRoot,
   renderNodeHtml,
   walk,
   type Branch,
@@ -224,7 +225,8 @@ export function exportMarkdown(tree: Tree, opts: MarkdownExportOptions = {}): st
   if (Object.keys(root).length > 1 || tree.root.type !== 'root' || tree.root.name !== 'Body') front.root = root;
   if (Object.keys(styles).length) front.styles = styles;
   if (opts.kits?.length) front.kits = opts.kits;
-  const body = blocks(tree.root.children).join('\n\n');
+  // Markdown is a page format: an SVG tree's drawing goes in as inline SVG.
+  const body = blocks(isSvgRoot(tree.root) ? [tree.root] : tree.root.children).join('\n\n');
   return `---\n${stringifyYaml(front, { lineWidth: 0 })}---\n\n${body}\n`;
 }
 

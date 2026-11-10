@@ -10,9 +10,9 @@ canonical definition is the JSON Schema at
 | Term       | What it is                                                                      | JSON                                                |
 | ---------- | ------------------------------------------------------------------------------- | --------------------------------------------------- |
 | **Forest** | A project: trees plus the design kits (CSS) they share.                         | `{ "name", "trees": [...], "kits": [...] }`         |
-| **Tree**   | One layout: a page, a screen, a section. Its `root` always renders as `<body>`. | `{ "name", "root": { branch } }`                    |
-| **Branch** | An HTML element with classes, attributes, per-display styles and children.      | `{ "tag", "classes", "attrs", "styles", "children" }` |
-| **Leaf**   | Content: text, or an image whose `value` is its URL.                            | `{ "kind": "leaf", "type": "text" \| "image", "value" }` or a plain string |
+| **Tree**   | One layout: a page, a screen, a section. Its `root` renders as `<body>`, or is an `<svg>` for an SVG tree (a drawing). | `{ "name", "root": { branch } }`                    |
+| **Branch** | An HTML or SVG element with classes, attributes, per-display styles and children. | `{ "tag", "classes", "attrs", "styles", "children" }` |
+| **Leaf**   | Content: text; an image whose `value` is its URL; or an SVG shape whose `value` is the element name. | `{ "kind": "leaf", "type": "text" \| "image" \| "shape", "value" }` or a plain string |
 
 Files wrap a forest or a tree in an envelope:
 
@@ -77,9 +77,31 @@ Custom properties (`"--gap": "8px"`) and `var(--token)` work.
 - **Table:** real markup: `table` > `thead` / `tbody` > `tr` > `th` / `td`, with text leaves in the cells.
 - **Image:** a leaf, not an `img` branch:
   `{ "kind": "leaf", "type": "image", "value": "https://…/photo.jpg", "attrs": { "alt": "…" } }`.
+- **SVG:** see below.
+
+## SVG trees, branches and leaves
+
+- An **SVG tree** is a drawing: its root is `{ "tag": "svg", "attrs": { "viewBox": "0 0 200 200" } }`
+  instead of the body. It exports as a standalone `.svg` file, and `.svg` files import as SVG trees.
+  An `svg` branch can also sit anywhere in a page tree, as inline SVG.
+- **SVG branches** are the containers: `svg`, `g`, `defs`, `symbol`, `a`, `text`, `tspan`, `clipPath`,
+  `mask`, `pattern`, `marker`, `linearGradient`, `radialGradient`, `filter`, `foreignObject`. SVG tags and
+  attributes keep their own case (`linearGradient`, `viewBox`).
+- **SVG leaves** are shapes: `{ "type": "shape", "value": "circle", "attrs": { "cx": "50", "cy": "50", "r": "40", "fill": "tomato" } }`.
+  The value is the element (`rect`, `circle`, `ellipse`, `line`, `polyline`, `polygon`, `path`, `use`,
+  a gradient `stop`, or a filter primitive such as `feGaussianBlur`); `attrs` hold its geometry and paint,
+  and may include `class`. Text inside an SVG `text` branch is an ordinary text leaf, and an image leaf
+  inside an SVG renders as `<image>`.
+- Shapes and SVG-only branches (`g`, `text`, ...) must be inside an `svg` branch; HTML elements inside
+  one are not drawn unless they sit in a `foreignObject`.
+- Branch `styles` work on SVG branches as on any other, per display: `fill`, `stroke`, `opacity`,
+  `transform` and `font-size` set on a group reach the shapes inside it.
+- SVG animation (`animate`, `set`, `animateTransform`, `animateMotion`) is not allowed.
+
+See [`examples/logo.tree.json`](../examples/logo.tree.json).
 
 See [`examples/`](../examples/) for complete files: a minimal tree, a responsive landing page
-(navbar, hero, feature grid), a pricing table and a two-page forest with shared kits and custom classes.
+(navbar, hero, feature grid), a pricing table, an SVG logo and a two-page forest with shared kits and custom classes.
 
 ## Design kits and classes
 
@@ -98,7 +120,7 @@ Prefer classes from the forest's kits over inline styles. `kitManifest(forest.ki
 These are dropped or changed on import, and the validator reports them as errors:
 
 - tags `script`, `style`, `iframe`, `object`, `embed`, `frame`, `frameset`, `base`, `meta`, `link`
-  (they render as `div`; put CSS in a kit);
+  and SVG animation tags (they render as `div`; put CSS in a kit);
 - event-handler attributes (`onclick`, …), the `style` attribute (use `styles`) and `javascript:` URLs;
 - unknown display ids, camelCase CSS properties, children on void elements such as `img` or `br`.
 

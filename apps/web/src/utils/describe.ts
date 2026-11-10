@@ -4,6 +4,7 @@ import { isBranch, type TreeNode } from '@tree-weaver/core';
 export function nodeLabel(node: TreeNode): string {
   if (!isBranch(node)) {
     if (node.type === 'image') return node.attrs?.alt || node.value.split('/').pop() || 'Image';
+    if (node.type === 'shape') return node.attrs?.id ? `${node.value} #${node.attrs.id}` : node.value;
     const t = node.value.trim();
     return t ? (t.length > 40 ? `${t.slice(0, 40)}…` : t) : '(empty text)';
   }
@@ -17,7 +18,7 @@ export function nodeLabel(node: TreeNode): string {
 }
 
 export function nodeKind(node: TreeNode): string {
-  if (!isBranch(node)) return node.type === 'image' ? 'img' : 'text';
+  if (!isBranch(node)) return node.type === 'image' ? 'img' : node.type === 'shape' ? 'shape' : 'text';
   return node.tag;
 }
 

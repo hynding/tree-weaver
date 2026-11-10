@@ -13,7 +13,7 @@ Use these words in code, UI text, docs and commit messages:
 | forest     | project     | `Forest`                    |
 | tree       | layout      | `Tree`                      |
 | branch     | component   | `Branch`                    |
-| leaf       | content     | `Leaf`                      |
+| leaf       | content: text, an image or an SVG shape | `Leaf` (`type: 'shape'` for SVG shapes) |
 | design kit | stylesheet  | `DesignKit`                 |
 | display    | screen size | `DisplayId` (`lg` is the base) |
 
@@ -21,6 +21,8 @@ Use these words in code, UI text, docs and commit messages:
 
 1. Write the JSON envelope: `{ "format": "tree-weaver", "version": 1, "tree": { "name": "...", "root": { "tag": "body", "children": [...] } } }`.
 2. Leave out ids and timestamps. Use plain strings for text. Use image leaves, not `img` branches.
+   For SVG, use an `svg` branch (or `"tag": "svg"` on the root for a drawing), `g`/`text`/`defs`
+   branches, and shape leaves (`{ "type": "shape", "value": "path", "attrs": { "d": "..." } }`).
 3. Put base styles on `lg`, and only overrides on `tablet`, `mobile-portrait` and the rest.
 4. Prefer the forest's kit classes over inline styles. `kitManifest(kits)` (`@tree-weaver/kits`) lists them.
 5. Validate before handing the file on, and fix every error the validator reports:
