@@ -8,3 +8,4 @@ coverage/
 apps/web/src/components.d.ts.bak
 test-results/
 playwright-report/
+packages/*/LICENSE

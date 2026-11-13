@@ -14,7 +14,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "pnpm -r typecheck",
-    "schema": "UPDATE_SCHEMA=1 vitest run packages/core/src/schema.test.ts"
+    "schema": "UPDATE_SCHEMA=1 vitest run packages/core/src/schema.test.ts",
+    "smoke": "node scripts/smoke-pack.mjs",
+    "release:version": "node scripts/set-version.mjs"
   },
   "devDependencies": {
     "ajv": "^8.20.0",

@@ -1,0 +1,58 @@
+name: Publish to npm
+
+# Publishes every package in packages/ (the `tree-weaver` CLI and the @tree-weaver/*
+# libraries) when a GitHub release is published, or by hand from the Actions tab.
+# Versions already on npm are skipped, so a re-run only publishes what is new.
+#
+# Setup (once): create the `tree-weaver` organization on npmjs.com, then add an npm
+# automation (or granular publish) token as the repository secret NPM_TOKEN.
+# Release: `pnpm release:version x.y.z`, merge, then publish a release tagged vx.y.z.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Pack and show what would be published, without publishing
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write # npm provenance
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:packages
+      - run: pnpm test
+      - name: Install the packed packages and run them in plain Node
+        run: pnpm smoke
+      - name: Check the release tag matches the package versions
+        if: github.event_name == 'release'
+        run: |
+          want="${GITHUB_REF_NAME#v}"
+          have="$(node -p "require('./packages/cli/package.json').version")"
+          if [ "$want" != "$have" ]; then
+            echo "::error::Release tag $GITHUB_REF_NAME does not match package version $have. Run pnpm release:version $want first."
+            exit 1
+          fi
+      - name: Publish
+        run: pnpm -r --filter "./packages/**" publish --access public --no-git-checks ${{ (github.event_name == 'workflow_dispatch' && inputs.dry-run) && '--dry-run' || '' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
