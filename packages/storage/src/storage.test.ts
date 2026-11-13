@@ -1,7 +1,7 @@
 import { createForest, createTree } from '@tree-weaver/core';
 import { IDBFactory } from 'fake-indexeddb';
 import { describe, expect, it } from 'vitest';
-import { IndexedDbForestStore, LocalStorageForestStore, MemoryForestStore, Preferences, type ForestStore } from './index';
+import { IndexedDbForestStore, IndexedDbRecordStore, LocalStorageForestStore, MemoryForestStore, MemoryRecordStore, Preferences, type ForestStore } from './index';
 
 class MemoryStorage implements Storage {
   private data = new Map<string, string>();
@@ -68,4 +68,25 @@ describe('Preferences', () => {
     prefs.write({ forestId: 'f_1' });
     expect(new Preferences({ display: 'lg', forestId: '' }, 'k', storage).read()).toEqual({ display: 'lg', forestId: 'f_1' });
   });
+});
+
+describe('record stores', () => {
+  for (const [label, make] of [
+    ['memory', () => new MemoryRecordStore<{ id: string; n: number }>()],
+    ['indexeddb', () => new IndexedDbRecordStore<{ id: string; n: number }>('tw-test-records', new IDBFactory())],
+  ] as const) {
+    it(`${label}: puts, lists, gets and removes`, async () => {
+      const store = make();
+      await store.put({ id: 'a', n: 1 });
+      await store.put({ id: 'b', n: 2 });
+      await store.put({ id: 'a', n: 3 });
+      expect((await store.list()).sort((x, y) => x.id.localeCompare(y.id))).toEqual([
+        { id: 'a', n: 3 },
+        { id: 'b', n: 2 },
+      ]);
+      expect(await store.get('b')).toEqual({ id: 'b', n: 2 });
+      await store.remove('b');
+      expect(await store.get('b')).toBeNull();
+    });
+  }
 });

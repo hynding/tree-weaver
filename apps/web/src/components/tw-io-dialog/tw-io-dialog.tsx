@@ -2,6 +2,7 @@ import { Component, Prop, State, h } from '@stencil/core';
 import { detectFormat, FORMATS, hasDrawing, type FormatId } from '@tree-weaver/formats';
 import { currentTree, download, exportCurrent, exportStorybookCurrent, importText, toast, type ExportOutput } from '../../store/actions';
 import { state } from '../../store/editor';
+import { STORYBOOK_IMPORT_ENABLED } from '../../config';
 import { Icon } from '../../utils/icons';
 
 const ACCEPT = FORMATS.flatMap((f) => f.extensions.map((e) => `.${e}`)).join(',');
@@ -168,6 +169,16 @@ export class TwIoDialog {
           <input ref={(el) => (this.fileInput = el)} type="file" accept={ACCEPT} multiple hidden onChange={(e) => this.onFiles((e.target as HTMLInputElement).files)} />
           <p class="hint">Forests open as a new forest. Trees, web pages and Markdown join the current forest as a new tree, bringing their styles along as design kits.</p>
         </div>
+        {STORYBOOK_IMPORT_ENABLED ? (
+          <div class="row">
+            <span class="grow hint" style={{ margin: '0' }}>
+              Have a component library in Storybook? Bring its stories in as branches or trees.
+            </span>
+            <button class="btn" onClick={() => (state.dialog = 'storybook')}>
+              Import from Storybook…
+            </button>
+          </div>
+        ) : null}
         <div>
           <div class="row" style={{ marginBottom: '6px' }}>
             <strong class="grow">Or paste</strong>

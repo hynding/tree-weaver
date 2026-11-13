@@ -1,6 +1,7 @@
 import { Env } from '@stencil/core';
 import { parseCssUrls } from '@tree-weaver/kits';
 import { parseDisplaySettings, type ParsedDisplaySettings } from '@tree-weaver/core';
+import { parseTitleGlobs } from '@tree-weaver/formats';
 
 /**
  * Deployment settings, read from environment variables when the app is built
@@ -21,3 +22,18 @@ export const ENV_DISPLAYS: ParsedDisplaySettings = parseDisplaySettings(Env.TW_D
 
 /** `TW_LOCK_DISPLAYS`: when true, no display setting can be changed in the app. */
 export const DISPLAYS_LOCKED: boolean = /^(1|true|yes|on)$/i.test((Env.TW_LOCK_DISPLAYS ?? '').trim());
+
+/**
+ * `TW_STORYBOOK_URLS`: compiled Storybooks offered in the Storybook import. Ones on this
+ * site's origin also load into the palette as "From Storybook" libraries on startup.
+ */
+export const ENV_STORYBOOK_URLS: string[] = (Env.TW_STORYBOOK_URLS ?? '')
+  .split(/\s+/)
+  .map((u) => u.trim())
+  .filter(Boolean);
+
+/** `TW_STORYBOOK_INCLUDE`: title globs such as `Components/**` that limit which stories show up. */
+export const ENV_STORYBOOK_INCLUDE: string[] = parseTitleGlobs(Env.TW_STORYBOOK_INCLUDE);
+
+/** `TW_DISABLE_STORYBOOK_IMPORT`: when true, there is no Storybook import. */
+export const STORYBOOK_IMPORT_ENABLED: boolean = !/^(1|true|yes|on)$/i.test((Env.TW_DISABLE_STORYBOOK_IMPORT ?? '').trim());
