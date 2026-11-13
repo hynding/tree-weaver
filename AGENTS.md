@@ -38,7 +38,12 @@ Use these words in code, UI text, docs and commit messages:
    Without the packages, validate against `schema/tree-weaver-v1.schema.json` with any
    draft 2020-12 validator.
 
-6. Open the file in the [live editor](https://hynding.github.io/tree-weaver/) with Upload, or
+6. To save tokens, write the [shorthand](docs/shorthand.md) (`"h2: Title"`, `{ "grid": 3, "children": [...] }`,
+   `"@card"`) and run `npx tree-weaver expand page.short.yaml -o page.tree.json`.
+7. To change an existing tree, send a [patch](docs/patch.md) instead of rewriting it:
+   `npx tree-weaver patch page.tree.json edits.json`, with operations such as
+   `{ "op": "setStyles", "target": "/1", "styles": { "padding": "2rem" } }`.
+8. Open the file in the [live editor](https://hynding.github.io/tree-weaver/) with Upload, or
    render it in code with `exportTree(tree, 'html', kits)` from `@tree-weaver/formats`.
 
 Working examples are in [`examples/`](examples/); a test keeps them valid.
@@ -51,11 +56,12 @@ The `tree-weaver` package has a CLI for agents with a shell. Full guide: [`docs/
 npx tree-weaver new home.tree.json --template landing   # start from a template
 npx tree-weaver outline home.tree.json                  # paths (/2/0/1) and ids of every node
 npx tree-weaver add home.tree.json card --parent /2/0/1 # or --node '{"tag":"p","children":["Hi"]}'
+npx tree-weaver patch home.tree.json --ops '[{"op":"setText","target":"/1/0","value":"Hi"}]'
 npx tree-weaver validate home.tree.json                 # exits 1 with path + fix hint per error
 npx tree-weaver render home.tree.json -o home.html
 ```
 
-`convert` moves between JSON, YAML, XML, HTML, Markdown and SVG, `kit` lists a stylesheet's
+`expand` turns shorthand into a full document, `convert` moves between JSON, YAML, XML, HTML, Markdown and SVG, `kit` lists a stylesheet's
 classes and tokens, and `schema` prints the JSON Schema. Every command takes `--json`.
 
 ## Using the packages
@@ -69,12 +75,14 @@ bundlers and browsers. In this workspace, import them by name.
 Useful entry points:
 
 - `@tree-weaver/core`: `createForest`, `createTree`, `createBranch`, `createLeaf`; immutable ops
-  `insertNode`, `moveNode`, `removeNode`, `setStyles`, `wrapNode`; `normalizeForest` /
+  `insertNode`, `moveNode`, `removeNode`, `setStyles`, `wrapNode`; patches `applyPatch`,
+  `resolveRef`, `TREE_WEAVER_PATCH_SCHEMA`; `normalizeForest` /
   `normalizeTree` (lenient); `validateDocument` (strict); `renderDocument`; `TREE_WEAVER_SCHEMA`.
 - `@tree-weaver/formats`: `importDocument(text, format?)`, `exportTree`, `exportForest`,
   `validateText`, `exportStorybook`.
 - `@tree-weaver/branches`: ready-made blueprints (`BLUEPRINTS`, `responsiveGrid`, `flexRow`,
-  `card`, …) and tree templates (`TEMPLATES`).
+  `card`, …), tree templates (`TEMPLATES`) and the shorthand (`expandShorthand`,
+  `expandShorthandDocument`).
 - `@tree-weaver/kits`: `analyzeKit`, `kitManifest`, `createStarterKit`.
 
 ## Working in this repository
@@ -84,7 +92,8 @@ Useful entry points:
   - `pnpm typecheck`;
   - `pnpm build`: packages, then the Stencil app into `apps/web/www`;
   - `pnpm dev`: the editor at http://localhost:3333;
-  - `pnpm schema`: rewrite `schema/tree-weaver-v1.schema.json` after changing `packages/core/src/schema.ts`.
+  - `pnpm schema`: rewrite the files in `schema/` after changing `packages/core/src/schema.ts` or the
+    patch schema in `packages/core/src/patch.ts`.
 - Layout: `apps/web` is the Stencil editor; `packages/cli` the `tree-weaver` CLI and umbrella package; `packages/core` the model, ops, rendering, schema and
   validation; `packages/formats` import and export; `packages/kits` design kits;
   `packages/branches` the palette and templates; `packages/storage` IndexedDB / localStorage.

@@ -1,0 +1,334 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hynding.github.io/tree-weaver/schema/tree-weaver-patch-v1.schema.json",
+  "title": "Tree Weaver patch",
+  "description": "A list of edits to one tree, applied in order, all or nothing. Nodes are named by id or by child-index path.",
+  "oneOf": [
+    {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/op"
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "ops"
+      ],
+      "properties": {
+        "$schema": {
+          "type": "string"
+        },
+        "ops": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/op"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "styles": {
+      "type": "object",
+      "description": "CSS properties (kebab-case) for \"display\" (default lg), and/or display keys (lg, xl, tablet, mobile-landscape, mobile-portrait) holding them. null removes a property.",
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          },
+          {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "classes": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "op": {
+      "oneOf": [
+        {
+          "type": "object",
+          "description": "Add a node to a branch",
+          "required": [
+            "op",
+            "node"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "op": {
+              "const": "insert"
+            },
+            "parent": {
+              "type": "string",
+              "description": "A branch or leaf id, or a child-index path such as \"/0/2\" (\"/\" is the root)"
+            },
+            "index": {
+              "type": "integer",
+              "description": "Position among the children (default: last); negative counts from the end"
+            },
+            "node": {
+              "description": "A branch, a leaf, or a string (a text leaf). Ids are optional; with the shorthand, also \"h2: Title\", \"@card\" or { \"grid\": 3, ... }"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "Put a node in place of another",
+          "required": [
+            "op",
+            "target",
+            "node"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "op": {
+              "const": "replace"
+            },
+            "target": {
+              "type": "string",
+              "description": "A branch or leaf id, or a child-index path such as \"/0/2\" (\"/\" is the root)"
+            },
+            "node": {
+              "description": "A branch, a leaf, or a string (a text leaf). Ids are optional; with the shorthand, also \"h2: Title\", \"@card\" or { \"grid\": 3, ... }"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "Remove a node",
+          "required": [
+            "op",
+            "target"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "op": {
+              "const": "remove"
+            },
+            "target": {
+              "type": "string",
+              "description": "A branch or leaf id, or a child-index path such as \"/0/2\" (\"/\" is the root)"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "Move a node to another parent or position",
+          "required": [
+            "op",
+            "target",
+            "parent"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "op": {
+              "const": "move"
+            },
+            "target": {
+              "type": "string",
+              "description": "A branch or leaf id, or a child-index path such as \"/0/2\" (\"/\" is the root)"
+            },
+            "parent": {
+              "type": "string",
+              "description": "A branch or leaf id, or a child-index path such as \"/0/2\" (\"/\" is the root)"
+            },
+            "index": {
+              "type": "integer"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "Copy a node right after itself",
+          "required": [
+            "op",
+            "target"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "op": {
+              "const": "duplicate"
+            },
+            "target": {
+              "type": "string",
+              "description": "A branch or leaf id, or a child-index path such as \"/0/2\" (\"/\" is the root)"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "Wrap a node in a new branch",
+          "required": [
+            "op",
+            "target",
+            "node"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "op": {
+              "const": "wrap"
+            },
+            "target": {
+              "type": "string",
+              "description": "A branch or leaf id, or a child-index path such as \"/0/2\" (\"/\" is the root)"
+            },
+            "node": {
+              "description": "A branch, a leaf, or a string (a text leaf). Ids are optional; with the shorthand, also \"h2: Title\", \"@card\" or { \"grid\": 3, ... }"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "Change a branch’s tag, name, type, classes or attributes, or a leaf’s value and attributes",
+          "required": [
+            "op",
+            "target"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "op": {
+              "const": "update"
+            },
+            "target": {
+              "type": "string",
+              "description": "A branch or leaf id, or a child-index path such as \"/0/2\" (\"/\" is the root)"
+            },
+            "tag": {
+              "type": "string"
+            },
+            "name": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "classes": {
+              "$ref": "#/$defs/classes"
+            },
+            "addClasses": {
+              "$ref": "#/$defs/classes"
+            },
+            "removeClasses": {
+              "$ref": "#/$defs/classes"
+            },
+            "attrs": {
+              "type": "object",
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "value": {
+              "type": "string",
+              "description": "A leaf’s text, image URL or shape name"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "Set or remove styles on one or more displays",
+          "required": [
+            "op",
+            "target",
+            "styles"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "op": {
+              "const": "setStyles"
+            },
+            "target": {
+              "type": "string",
+              "description": "A branch or leaf id, or a child-index path such as \"/0/2\" (\"/\" is the root)"
+            },
+            "display": {
+              "enum": [
+                "lg",
+                "xl",
+                "tablet",
+                "mobile-landscape",
+                "mobile-portrait"
+              ]
+            },
+            "styles": {
+              "$ref": "#/$defs/styles"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "Set a text leaf, or make text a branch’s only content",
+          "required": [
+            "op",
+            "target",
+            "value"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "op": {
+              "const": "setText"
+            },
+            "target": {
+              "type": "string",
+              "description": "A branch or leaf id, or a child-index path such as \"/0/2\" (\"/\" is the root)"
+            },
+            "value": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

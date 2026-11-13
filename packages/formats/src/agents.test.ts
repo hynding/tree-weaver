@@ -8,7 +8,8 @@ import { exportForest, exportTree, importDocument, validateText } from './index'
 const ajv = new Ajv2020({ allErrors: true, strict: true, strictRequired: false });
 const schemaValid = ajv.compile(TREE_WEAVER_SCHEMA);
 const dir = fileURLToPath(new URL('../../../examples/', import.meta.url));
-const examples = readdirSync(dir).filter((f) => f.endsWith('.json'));
+// Documents only; patches (*.patch.json) and shorthand (*.short.*) are checked in the CLI tests.
+const examples = readdirSync(dir).filter((f) => f.endsWith('.json') && !f.endsWith('.patch.json'));
 
 describe('examples', () => {
   it('exist', () => expect(examples.length).toBeGreaterThanOrEqual(4));

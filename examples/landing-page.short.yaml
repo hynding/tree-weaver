@@ -1,0 +1,30 @@
+# The landing page in the authoring shorthand. Expand it into a full document with:
+#   npx tree-weaver expand examples/landing-page.short.yaml -o landing.tree.json
+format: tree-weaver
+version: 1
+tree:
+  name: Landing page (shorthand)
+  root:
+    - header.nav.container:
+        - "strong: Acme"
+        - nav.cluster:
+            - "a[href=#features]: Features"
+            - "a[href=#pricing]: Pricing"
+      name: Navbar
+      styles: { mobile-portrait: { flex-direction: column, gap: 0.5rem } }
+    - use: hero
+    - section:
+        - "h2: Features"
+        - grid: 3
+          children:
+            - { article.card: ["h3: Grids", "p.muted: Three columns on desktop, two on tablet, one on phones."] }
+            - { article.card: ["h3: Flex", "p.muted: Rows that stack on small screens."] }
+            - { article.card: ["h3: Tables", "p.muted: Real table markup, styled by your kit."] }
+      name: Features
+      attrs: { id: features }
+    - section:
+        - "h2: Pricing"
+        - table: [[Plan, Price], [Seedling, Free], [Grove, "$9"]]
+      name: Pricing
+      attrs: { id: pricing }
+    - footer.container: "p.muted: Made with Tree Weaver"

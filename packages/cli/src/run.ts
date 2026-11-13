@@ -2,21 +2,22 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { parseArgs, type ParseArgsConfig } from 'node:util';
 import {
+  applyPatch,
   canHaveChildren,
   createForest,
-  findNode,
   formatIssues,
-  insertNode,
   isBranch,
-  normalizeNode,
   now,
+  PatchError,
+  pathOf,
   replaceTree,
+  resolveRef,
+  TREE_WEAVER_PATCH_SCHEMA,
   TREE_WEAVER_SCHEMA,
   TreeDataError,
   validateDocument,
   type Branch,
   type DesignKit,
-  type Forest,
   type Tree,
   type TreeNode,
   type ValidationResult,
@@ -30,13 +31,14 @@ import {
   formatFromFileName,
   getFormat,
   importDocument,
+  parseData,
   toEnvelope,
   validateText,
   type FormatId,
   type TreeDocument,
 } from '@tree-weaver/formats';
 import { createStarterKit, kitFromFile, kitManifest } from '@tree-weaver/kits';
-import { BLUEPRINTS, getBlueprint, getTemplate, TEMPLATES } from '@tree-weaver/branches';
+import { BLUEPRINTS, expandShorthand, expandShorthandDocument, getBlueprint, getTemplate, TEMPLATES } from '@tree-weaver/branches';
 
 /** Where the CLI reads and writes. Swap it out to drive the CLI from code or tests. */
 export interface CliIO {
@@ -77,6 +79,8 @@ Commands:
   render <file>            Write a standalone HTML page for a tree
   convert <file>           Convert between JSON, YAML, XML, HTML, Markdown and SVG
   add <file> [blueprint]   Insert a blueprint branch or a JSON node into a tree
+  patch <file> [ops]       Apply a list of edits (insert, move, setStyles, ...) to a tree
+  expand <file>            Turn shorthand ("h2: Title", { "grid": 3 }) into a full document
   outline <file>           List a tree's branches and leaves with their ids and paths
   kit <file...>            List the classes and tokens of CSS files or a document's kits
   schema                   Print the JSON Schema for Tree Weaver documents
@@ -136,13 +140,14 @@ Write a standalone HTML page (inlined kits and responsive CSS) for a tree.
        tree-weaver add <file> --node '<json>' [options]
 
 Insert a ready-made branch from the library, or any branch or leaf given as JSON
-(ids optional), and write the document back in its own format.
+(ids optional, shorthand welcome: '"h2: Title"', '{"grid": 3, "children": [...]}'),
+and write the document back in its own format.
 
   -p, --parent <ref>    Parent branch: an id, or a child-index path such as /0/2
                         ("/" is the root; default: the root)
   -i, --index <n>       Position among the parent's children (default: last);
                         negative counts from the end: --index=-2
-      --node <json>     A branch or leaf as JSON instead of a blueprint id
+      --node <json>     A branch or leaf as JSON (or shorthand) instead of a blueprint id
   -t, --tree <ref>      Tree in a forest (default: first)
   -o, --output <file>   Write here instead of back to <file>
       --list            List the blueprints
@@ -161,9 +166,44 @@ Show each tree as an indented list. Every line has the node's path (use it with
 Print a JSON manifest of classes, tokens and media queries. Accepts .css files and
 Tree Weaver documents (their design kits are listed).
 `,
-  schema: `Usage: tree-weaver schema [-o file]
+  patch: `Usage: tree-weaver patch <file> [patch-file] [options]
+       tree-weaver patch <file> --ops '<json>' [options]
 
-Print the draft 2020-12 JSON Schema for Tree Weaver documents.
+Apply a patch: a JSON (or YAML) list of operations, applied in order, all or
+nothing. Nodes are named by id or by path (see "outline"). New nodes may use the
+shorthand. Ops: insert, replace, remove, move, duplicate, wrap, update, setStyles,
+setText. Example:
+
+  [{ "op": "insert", "parent": "/1", "node": "h2: Pricing" },
+   { "op": "setStyles", "target": "b_hero", "styles": { "padding": "4rem 0", "tablet": { "padding": "2rem 0" } } },
+   { "op": "remove", "target": "/3" }]
+
+      --ops <json>      The patch inline, instead of a patch file ("-" reads stdin)
+  -t, --tree <ref>      Tree in a forest (default: first)
+  -o, --output <file>   Write here instead of back to <file>
+      --dry-run         Check the patch and print the result instead of writing it
+      --json            Print { changes: [{ op, kind, id, path }], warnings, output }
+`,
+  expand: `Usage: tree-weaver expand <file> [options]
+
+Expand the authoring shorthand in a JSON or YAML file into a full Tree Weaver
+document, then check it. The file can be an envelope, a tree, a forest, or just a
+list of nodes for the page body. Canonical nodes pass through unchanged.
+
+  "h2: Title"   "a.btn[href=/join]: Join"   "img: url | alt"   "@card" (a blueprint)
+  { "ul": ["li: One", "li: Two"] }   { "grid": 3, "children": [...] }
+  { "row": [...] }   { "section": [...] }   { "table": [["A", "B"], ["1", "2"]] }
+  { "use": "hero", "classes": ["dark"] }   "styles": { "gap": "1rem", "tablet": {...} }
+
+  -o, --output <file>   Write here (format from the extension; default: JSON on stdout)
+  -f, --to <fmt>        Output format: ${FORMAT_IDS.join(', ')}
+  -n, --name <name>     Name of the tree, when the file doesn't give one
+      --json            Print { output, valid, errors, warnings } (with -o)
+`,
+  schema: `Usage: tree-weaver schema [--patch] [-o file]
+
+Print the draft 2020-12 JSON Schema for Tree Weaver documents, or with --patch,
+for patches.
 `,
 };
 
@@ -262,36 +302,23 @@ function pickTree(cli: Cli, doc: TreeDocument, ref: string | undefined, why: str
 
 /** Resolve a branch by id, or by a child-index path such as `/0/2` (`/` is the root). */
 function resolveNode(root: Branch, ref: string | undefined): { node: TreeNode; path: string } {
-  if (ref === undefined || ref === '/' || ref === '') return { node: root, path: '/' };
-  if (ref.startsWith('/')) {
-    let node: TreeNode = root;
-    const steps = ref.split('/').filter(Boolean);
-    for (const [depth, step] of steps.entries()) {
-      const at = `/${steps.slice(0, depth + 1).join('/')}`;
-      if (!/^\d+$/.test(step)) throw new UsageError(`Bad path "${ref}": "${step}" is not a child index`);
-      if (!isBranch(node)) throw new Error(`Path "${at}" goes inside a leaf`);
-      const child: TreeNode | undefined = node.children[Number(step)];
-      if (!child) throw new Error(`Path "${at}" does not exist; ${node.children.length} children there`);
-      node = child;
-    }
-    return { node, path: `/${steps.join('/')}` };
+  if (ref?.startsWith('/') && ref.split('/').filter(Boolean).some((step) => !/^\d+$/.test(step))) {
+    throw new UsageError(`Bad path "${ref}": use child indexes such as /0/2`);
   }
-  const node = findNode(root, ref);
-  if (!node) throw new Error(`No branch or leaf with id "${ref}". Run "tree-weaver outline" to list ids`);
-  return { node, path: pathOf(root, ref) ?? '?' };
+  return resolveRef(root, ref);
 }
 
-function pathOf(root: Branch, id: string, prefix = ''): string | null {
-  if (root.id === id) return prefix || '/';
-  for (const [i, child] of root.children.entries()) {
-    const here = `${prefix}/${i}`;
-    if (child.id === id) return here;
-    if (isBranch(child)) {
-      const found = pathOf(child, id, here);
-      if (found) return found;
-    }
-  }
-  return null;
+/** Put an updated tree back into its document and write it, in the document's own format. */
+async function writeTree(cli: Cli, loaded: Loaded, file: string, tree: Tree, output: string | undefined): Promise<string | undefined> {
+  const { doc, format } = loaded;
+  let next: TreeDocument;
+  if (doc.kind === 'forest') next = { kind: 'forest', forest: { ...replaceTree(doc.forest, tree), updatedAt: now() } };
+  else next = { ...doc, tree: { ...tree, updatedAt: now() } };
+  if (!getFormat(format).lossless) cli.note(`${file} is ${getFormat(format).label}, which doesn't keep every style or attribute; consider converting it to JSON first`);
+  const data = next.kind === 'forest' ? exportForest(next.forest, format) : exportTree(next.tree, format, next.kits);
+  const target = output ?? (file === '-' ? undefined : file);
+  await cli.emit(target, data);
+  return target;
 }
 
 /* ------------------------------------------------------------------ commands */
@@ -453,12 +480,11 @@ async function cmdAdd(cli: Cli, args: string[]): Promise<number> {
     } catch (err) {
       throw new UsageError(`--node is not valid JSON: ${(err as Error).message}`);
     }
-    const NODE_PATH = /(?:\$|branch)\.children\[0\]/g;
-    // Check the node the same way as a whole document, as the only child of a <div>.
-    const check = validateDocument({ kind: 'branch', tag: 'div', children: [data] });
-    if (!check.valid) throw new Error(`--node has errors:\n${formatIssues({ errors: check.errors, warnings: [] }).replace(NODE_PATH, 'node')}`);
-    if (check.warnings.length) cli.note(formatIssues({ errors: [], warnings: check.warnings }).replace(NODE_PATH, 'node'));
-    node = normalizeNode(data, 'node');
+    try {
+      node = expandShorthand(data, 'node');
+    } catch (err) {
+      throw new Error(`--node: ${(err as Error).message}`);
+    }
   }
 
   let index: number | undefined;
@@ -467,8 +493,8 @@ async function cmdAdd(cli: Cli, args: string[]): Promise<number> {
     index = Number(values.index);
   }
 
-  const { doc, format } = await cli.load(file, asFormat(values.from, '--from'));
-  const tree = pickTree(cli, doc, values.tree, 'adding to one tree');
+  const loaded = await cli.load(file, asFormat(values.from, '--from'));
+  const tree = pickTree(cli, loaded.doc, values.tree, 'adding to one tree');
   const { node: parent, path: parentPath } = resolveNode(tree.root, values.parent);
   const target: TreeNode = parent;
   if (!canHaveChildren(parent)) {
@@ -476,22 +502,106 @@ async function cmdAdd(cli: Cli, args: string[]): Promise<number> {
     throw new Error(`${parentPath} is ${what}, which can't hold children; pick a parent branch with --parent`);
   }
   if (index !== undefined && index < 0) index = Math.max(0, parent.children.length + 1 + index);
-  const updated: Tree = { ...tree, root: insertNode(tree.root, parent.id, node, index), updatedAt: now() };
-
-  let next: TreeDocument;
-  if (doc.kind === 'forest') {
-    const forest: Forest = { ...replaceTree(doc.forest, updated), updatedAt: now() };
-    next = { kind: 'forest', forest };
-  } else next = { ...doc, tree: updated };
-
-  if (!getFormat(format).lossless) cli.note(`${file} is ${getFormat(format).label}, which doesn't keep every style or attribute; consider converting it to JSON first`);
-  const data = next.kind === 'forest' ? exportForest(next.forest, format) : exportTree(next.tree, format, next.kits);
-  const output = values.output ?? (file === '-' ? undefined : file);
-  await cli.emit(output, data);
+  // The same checks as a patch: valid node, unique ids, SVG placement.
+  let updated: Tree;
+  try {
+    const result = applyPatch(tree.root, [{ op: 'insert', parent: parent.id, index, node }], { expandNode: (n) => n as TreeNode });
+    if (result.warnings.length) cli.note(formatIssues({ errors: [], warnings: result.warnings }).replace(/ops\[0\]\.node/g, 'node'));
+    updated = { ...tree, root: result.root };
+    node = resolveRef(result.root, result.changes[0].id).node;
+  } catch (err) {
+    throw new Error((err as Error).message.replace(/^ops\[0\]: /, '').replace(/ops\[0\]\.node/g, 'node'));
+  }
+  const output = await writeTree(cli, loaded, file, updated, values.output);
   if (output) {
     const path = pathOf(updated.root, node.id) ?? '?';
     const label = isBranch(node) ? `<${node.tag}>${node.name ? ` "${node.name}"` : ''}` : `${node.type} leaf`;
     cli.report(json, { id: node.id, path, parent: { id: parent.id, path: parentPath }, tree: { id: tree.id, name: tree.name }, output }, `Added ${label} at ${path} (id ${node.id}) in ${output}`);
+  }
+  return 0;
+}
+
+async function cmdPatch(cli: Cli, args: string[]): Promise<number> {
+  const { values, positionals } = parse(args, {
+    ops: { type: 'string' },
+    tree: { type: 'string', short: 't' },
+    output: { type: 'string', short: 'o' },
+    from: { type: 'string', short: 'F' },
+    'dry-run': { type: 'boolean' },
+  });
+  const [file, patchFile, ...rest] = positionals;
+  if (!file || rest.length) throw new UsageError('patch needs a file, and a patch file or --ops');
+  if (!patchFile === (values.ops === undefined)) throw new UsageError('Give the patch as a file or with --ops, not both');
+  if (file === '-' && (patchFile === '-' || values.ops === '-')) throw new UsageError('Only one of the document and the patch can come from stdin');
+  const patchText = values.ops !== undefined && values.ops !== '-' ? values.ops : await cli.read(patchFile ?? '-');
+  let ops: unknown;
+  try {
+    ops = parseData(patchText, values.ops !== undefined && values.ops !== '-' ? undefined : patchFile && /\.ya?ml$/i.test(patchFile) ? 'yaml' : undefined);
+  } catch (err) {
+    throw new UsageError(`The patch is not valid JSON or YAML: ${(err as Error).message.replace(/^Invalid (JSON|YAML): /, '')}`);
+  }
+
+  const loaded = await cli.load(file, asFormat(values.from, '--from'));
+  const tree = pickTree(cli, loaded.doc, values.tree, 'a patch edits one tree');
+  let result;
+  try {
+    result = applyPatch(tree.root, ops, { expandNode: (value, path) => expandShorthand(value, path) });
+  } catch (err) {
+    if (err instanceof PatchError) throw new Error(`${err.message}\nNothing was changed.`);
+    throw err;
+  }
+  if (result.warnings.length) cli.note(formatIssues({ errors: [], warnings: result.warnings }));
+  const updated: Tree = { ...tree, root: result.root };
+  const json = !!values.json;
+  if (values['dry-run']) {
+    const doc: TreeDocument = loaded.doc.kind === 'forest' ? { kind: 'forest', forest: replaceTree(loaded.doc.forest, updated) } : { ...loaded.doc, tree: updated };
+    if (json) cli.report(true, { dryRun: true, changes: result.changes, warnings: result.warnings }, '');
+    else cli.io.stdout(doc.kind === 'forest' ? exportForest(doc.forest, loaded.format) : exportTree(doc.tree, loaded.format, doc.kits));
+    return 0;
+  }
+  const output = await writeTree(cli, loaded, file, updated, values.output);
+  if (output) {
+    const lines = result.changes.map((c) => `  ${c.kind.padEnd(10)} ${c.path ?? '(removed)'}  #${c.id}`);
+    cli.report(json, { changes: result.changes, warnings: result.warnings, tree: { id: tree.id, name: tree.name }, output }, `Applied ${result.changes.length} op${result.changes.length === 1 ? '' : 's'} to ${output}\n${lines.join('\n')}`);
+  }
+  return 0;
+}
+
+async function cmdExpand(cli: Cli, args: string[]): Promise<number> {
+  const { values, positionals } = parse(args, {
+    output: { type: 'string', short: 'o' },
+    to: { type: 'string', short: 'f' },
+    name: { type: 'string', short: 'n' },
+    from: { type: 'string', short: 'F' },
+  });
+  if (positionals.length !== 1) throw new UsageError('expand needs one file (or "-" for stdin)');
+  const file = positionals[0];
+  const from = asFormat(values.from, '--from');
+  if (from && from !== 'json' && from !== 'yaml') throw new UsageError('The shorthand is written in JSON or YAML');
+  const to = asFormat(values.to, '--to') ?? (values.output ? formatFromFileName(values.output) : null) ?? 'json';
+  const text = await cli.read(file);
+  const format = from ?? (file !== '-' && /\.ya?ml$/i.test(file) ? 'yaml' : undefined);
+  let data: Record<string, unknown>;
+  try {
+    data = expandShorthandDocument(parseData(text, format as 'json' | 'yaml' | undefined));
+  } catch (err) {
+    throw new Error(`${file}: ${(err as Error).message}`);
+  }
+  const named = data.tree as Record<string, unknown> | undefined;
+  if (values.name && named && (!named.name || named.name === 'Untitled tree')) named.name = values.name;
+  const plain = JSON.parse(JSON.stringify(data)) as Record<string, unknown>;
+  const check = validateDocument(plain);
+  if (!check.valid) {
+    cli.report(!!values.json, { ok: false, valid: false, errors: check.errors, warnings: check.warnings }, '');
+    throw new Error(`The expanded document has errors:\n${formatIssues(check)}`);
+  }
+  if (check.warnings.length) cli.note(formatIssues({ errors: [], warnings: check.warnings }));
+  const doc = importDocument(JSON.stringify(plain), 'json');
+  const out = doc.kind === 'forest' && getFormat(to).forest ? exportForest(doc.forest, to) : exportTree(pickTree(cli, doc, undefined, `${getFormat(to).label} holds one tree`), to, doc.kind === 'tree' ? doc.kits : doc.forest.kits);
+  await cli.emit(values.output, out);
+  if (values.output) {
+    const c = check.counts;
+    cli.report(!!values.json, { output: values.output, format: to, valid: true, warnings: check.warnings, counts: c }, `Wrote ${values.output} (${c.branches} branches, ${c.leaves} leaves, ${getFormat(to).label})`);
   }
   return 0;
 }
@@ -561,9 +671,9 @@ async function cmdKit(cli: Cli, args: string[]): Promise<number> {
 }
 
 async function cmdSchema(cli: Cli, args: string[]): Promise<number> {
-  const { values, positionals } = parse(args, { output: { type: 'string', short: 'o' } });
+  const { values, positionals } = parse(args, { output: { type: 'string', short: 'o' }, patch: { type: 'boolean' } });
   if (positionals.length) throw new UsageError('schema takes no files; use -o to write one');
-  await cli.emit(values.output, `${JSON.stringify(TREE_WEAVER_SCHEMA, null, 2)}\n`);
+  await cli.emit(values.output, `${JSON.stringify(values.patch ? TREE_WEAVER_PATCH_SCHEMA : TREE_WEAVER_SCHEMA, null, 2)}\n`);
   return 0;
 }
 
@@ -573,6 +683,8 @@ const COMMANDS: Record<string, (cli: Cli, args: string[]) => Promise<number>> = 
   render: cmdRender,
   convert: cmdConvert,
   add: cmdAdd,
+  patch: cmdPatch,
+  expand: cmdExpand,
   outline: cmdOutline,
   kit: cmdKit,
   schema: cmdSchema,
