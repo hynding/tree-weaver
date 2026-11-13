@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import Ajv2020 from 'ajv/dist/2020';
+import { TREE_WEAVER_PATCH_SCHEMA } from '@tree-weaver/core';
 import { run, type CliIO } from './run';
 
 const example = (name: string) => readFileSync(fileURLToPath(new URL(`../../../examples/${name}`, import.meta.url)), 'utf8');
@@ -199,4 +201,112 @@ describe('tree-weaver CLI', () => {
     expect(flag.code).toBe(2);
     expect(flag.err).toContain('--colour');
   });
+
+  it('applies a patch by id and path, using shorthand, and writes the file back', async () => {
+    const files: Record<string, string> = {};
+    await cli(['new', 'p.json', '-T', 'landing'], files);
+    const outline = JSON.parse((await cli(['outline', 'p.json', '--json'], files)).out);
+    const firstId = outline.root.children[0].id;
+    files['edit.json'] = JSON.stringify([
+      { op: 'insert', parent: '/', node: { section: ['h2: Pricing', { table: [['Plan', 'Price'], ['Basic', '$5']] }], id: 'pricing', name: 'Pricing' } },
+      { op: 'setStyles', target: 'pricing', styles: { padding: '4rem 0', tablet: { padding: '2rem 0' } } },
+      { op: 'insert', parent: 'pricing', index: 0, node: 'p.muted: Simple plans' },
+      { op: 'update', target: firstId, addClasses: 'sticky' },
+    ]);
+    const r = await cli(['patch', 'p.json', 'edit.json', '--json'], files);
+    expect(r.code).toBe(0);
+    const report = JSON.parse(r.out);
+    expect(report.changes.map((c: { kind: string }) => c.kind)).toEqual(['insert', 'setStyles', 'insert', 'update']);
+    const root = JSON.parse(files['p.json']).tree.root;
+    const pricing = root.children.at(-1);
+    expect(pricing).toMatchObject({ id: 'pricing', tag: 'section', styles: { lg: { padding: '4rem 0' }, tablet: { padding: '2rem 0' } } });
+    expect(pricing.children[0]).toMatchObject({ tag: 'p', classes: ['muted'] });
+    expect(root.children[0].classes).toContain('sticky');
+    expect((await cli(['validate', 'p.json'], files)).code).toBe(0);
+  });
+
+  it('applies all of a patch or none of it', async () => {
+    const files: Record<string, string> = {};
+    await cli(['new', 'p.json', '-T', 'landing'], files);
+    const before = files['p.json'];
+    const r = await cli(['patch', 'p.json', '--ops', '[{"op":"remove","target":"/0"},{"op":"insert","parent":"/99","node":"x"}]'], files);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('ops[1]: Path "/99" does not exist');
+    expect(r.err).toContain('Nothing was changed');
+    expect(files['p.json']).toBe(before);
+    const usage = await cli(['patch', 'p.json', '--ops', '[nope'], files);
+    expect(usage.code).toBe(2);
+  });
+
+  it('dry-runs a patch and reads YAML patches and forests', async () => {
+    const files: Record<string, string> = { 's.yaml': '', 'ops.yaml': '- op: insert\n  parent: /\n  node: "hr:"\n' };
+    files['s.yaml'] = (await cli(['convert', 's.json', '--to', 'yaml'], { 's.json': example('site.forest.json') })).out;
+    const before = files['s.yaml'];
+    const dry = await cli(['patch', 's.yaml', 'ops.yaml', '--tree', '2', '--dry-run'], files);
+    expect(dry.code).toBe(0);
+    expect(dry.out).toMatch(/^forest:/m);
+    expect(files['s.yaml']).toBe(before);
+    await cli(['patch', 's.yaml', 'ops.yaml', '--tree', '2'], files);
+    const forest = (await cli(['convert', 's.yaml', '--to', 'json'], files)).out;
+    expect(JSON.parse(forest).forest.trees[1].root.children.at(-1).tag).toBe('hr');
+  });
+
+  it('adds shorthand nodes', async () => {
+    const files: Record<string, string> = {};
+    await cli(['new', 'a.json'], files);
+    expect((await cli(['add', 'a.json', '--node', '{"grid": 2, "children": ["@card", "@card"]}'], files)).code).toBe(0);
+    expect((await cli(['add', 'a.json', '--node', '"h2: Title"', '--index', '0'], files)).code).toBe(0);
+    const root = JSON.parse(files['a.json']).tree.root;
+    expect(root.children[0].tag).toBe('h2');
+    expect(root.children.at(-1)).toMatchObject({ type: 'grid' });
+  });
+
+  it('expands shorthand into a document that round-trips through every data format', async () => {
+    const files: Record<string, string> = {
+      'page.short.yaml': [
+        'tree:',
+        '  name: Landing',
+        '  root:',
+        '    - nav.nav: ["strong: Brand", { row: ["a[href=#pricing]: Pricing"] }]',
+        '    - use: hero',
+        '    - section: ["h2: Features", { grid: 3, children: ["@card", "@card", "@card"] }]',
+        '      name: Features',
+        '    - footer: "p.muted: Made with Tree Weaver"',
+        '',
+      ].join('\n'),
+    };
+    const r = await cli(['expand', 'page.short.yaml', '-o', 'page.tree.json', '--json'], files);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.out)).toMatchObject({ valid: true, format: 'json' });
+    const doc = JSON.parse(files['page.tree.json']);
+    expect(doc.tree.name).toBe('Landing');
+    const canonical = JSON.stringify(doc.tree.root);
+    for (const to of ['yaml', 'xml']) {
+      await cli(['convert', 'page.tree.json', '--to', to, '-o', `page.${to}`], files);
+      await cli(['convert', `page.${to}`, '--to', 'json', '-o', `back.${to}.json`], files);
+      expect(JSON.stringify(JSON.parse(files[`back.${to}.json`]).tree.root)).toBe(canonical);
+    }
+    expect((await cli(['render', 'page.tree.json'], files)).out).toContain('<h2');
+  });
+
+  it('explains shorthand mistakes', async () => {
+    const r = await cli(['expand', '-'], {}, '[{ "h2": "a", "p": "b" }]');
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('root.children[0]');
+    expect(JSON.parse((await cli(['schema', '--patch'])).out).title).toBe('Tree Weaver patch');
+  });
+
+  it('ships example patches and shorthand that work and match the patch schema', async () => {
+    const ajv = new Ajv2020({ allErrors: true, strict: true, strictRequired: false });
+    const patchValid = ajv.compile(TREE_WEAVER_PATCH_SCHEMA);
+    const patch = JSON.parse(example('landing-page.patch.json'));
+    expect(patchValid(patch), JSON.stringify(patchValid.errors)).toBe(true);
+    expect(patchValid([{ op: 'insert', node: 'x', colour: 'red' }])).toBe(false);
+    const files: Record<string, string> = { 'l.json': example('landing-page.tree.json'), 'p.json': example('landing-page.patch.json'), 's.yaml': example('landing-page.short.yaml') };
+    expect((await cli(['patch', 'l.json', 'p.json'], files)).code).toBe(0);
+    expect((await cli(['validate', 'l.json', '--strict'], files)).code).toBe(0);
+    expect((await cli(['expand', 's.yaml', '-o', 's.json'], files)).code).toBe(0);
+    expect((await cli(['validate', 's.json', '--strict'], files)).code).toBe(0);
+  });
 });
+

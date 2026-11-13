@@ -1,0 +1,20 @@
+{
+  "$schema": "https://hynding.github.io/tree-weaver/schema/tree-weaver-patch-v1.schema.json",
+  "ops": [
+    { "op": "setText", "target": "/1/0", "value": "Weave layouts that fit every screen" },
+    { "op": "insert", "parent": "/1", "index": 2, "node": { "row": ["a.btn.btn-primary[href=#pricing]: See pricing", "a.btn[href=#features]: Learn more"] } },
+    {
+      "op": "insert",
+      "parent": "/",
+      "node": {
+        "section": ["h2: Pricing", { "table": [["Plan", "Price", "Trees"], ["Seedling", "Free", "3"], ["Grove", "$9", "Unlimited"]] }],
+        "id": "pricing",
+        "name": "Pricing",
+        "attrs": { "id": "pricing" }
+      }
+    },
+    { "op": "setStyles", "target": "pricing", "styles": { "padding": "4rem 0", "mobile-portrait": { "padding": "2rem 0" } } },
+    { "op": "update", "target": "/0", "addClasses": "sticky" },
+    { "op": "remove", "target": "/1/1" }
+  ]
+}

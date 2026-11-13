@@ -92,3 +92,16 @@ export function validateText(text: string, format?: 'json' | 'yaml'): Validation
   }
   return validateDocument(data);
 }
+
+/**
+ * Parse JSON or YAML text into plain data (YAML is a superset of JSON, so either works
+ * when the format isn't given). Throws `FormatError` with the parser's message.
+ */
+export function parseData(text: string, format?: 'json' | 'yaml'): unknown {
+  const fmt = format ?? (/^\s*[{["]/.test(text.replace(/^﻿/, '')) ? 'json' : 'yaml');
+  try {
+    return fmt === 'json' ? JSON.parse(text) : parseYaml(text);
+  } catch (err) {
+    throw new FormatError(`Invalid ${fmt.toUpperCase()}: ${(err as Error).message}`, fmt);
+  }
+}

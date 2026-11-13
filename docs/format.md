@@ -152,3 +152,10 @@ The importer also reads these; the validator warns and suggests the canonical fo
 
 The same tree also moves as XML (lossless), HTML (a standalone page that imports back) and
 Markdown (readable content, layout in front matter). See the [README](../README.md#formats).
+
+## Shorthand and patches
+
+To write less, use the [authoring shorthand](shorthand.md) (`"h2: Title"`, `{ "grid": 3, "children": [...] }`,
+`"@card"`) and expand it with `tree-weaver expand`. To change an existing tree, send a
+[patch](patch.md): a list of operations such as `insert`, `move` and `setStyles` that name branches
+by id or path.

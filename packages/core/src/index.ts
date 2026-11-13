@@ -14,3 +14,4 @@ export * from './rules';
 export * from './schema';
 export * from './validate';
 export * from './svg';
+export * from './patch';

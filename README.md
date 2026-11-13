@@ -188,10 +188,14 @@ HTML and CSS written with the default breakpoints still maps back to the right d
 
 Tree Weaver data is plain JSON (or YAML) with a published contract, so agents can write it directly:
 
-- The **`tree-weaver` CLI** ([`docs/cli.md`](docs/cli.md)): `npx tree-weaver new | validate | render | convert | add | outline | kit | schema`,
+- The **`tree-weaver` CLI** ([`docs/cli.md`](docs/cli.md)): `npx tree-weaver new | validate | render | convert | add | patch | expand | outline | kit | schema`,
   with `--json` reports. `npm i tree-weaver` also installs every library (`@tree-weaver/core`, `formats`, `kits`, `branches`, `storage`).
 
 - [`docs/format.md`](docs/format.md): the format guide, with the display cascade and layout recipes.
+- [`docs/shorthand.md`](docs/shorthand.md): a compact authoring form (`"h2: Title"`, `{ "grid": 3, ... }`, `"@card"`)
+  that `tree-weaver expand` turns into full documents.
+- [`docs/patch.md`](docs/patch.md): patches, lists of edits (`insert`, `move`, `setStyles`, …) applied with
+  `tree-weaver patch` or `applyPatch`, all or nothing.
 - [`schema/tree-weaver-v1.schema.json`](schema/tree-weaver-v1.schema.json): the JSON Schema (draft 2020-12),
   also served at https://hynding.github.io/tree-weaver/schema/tree-weaver-v1.schema.json. JSON exports name it in `$schema`.
 - `validateDocument` (`@tree-weaver/core`) and `validateText` (`@tree-weaver/formats`): strict checks that report

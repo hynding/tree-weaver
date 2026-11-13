@@ -386,3 +386,4 @@ export const TEMPLATES: readonly TreeTemplate[] = [
 export function getTemplate(id: string): TreeTemplate | undefined {
   return TEMPLATES.find((t) => t.id === id);
 }
+export * from './shorthand';

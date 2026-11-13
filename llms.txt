@@ -11,13 +11,17 @@ Key facts for writing Tree Weaver data:
 - SVG: a tree whose root has `"tag": "svg"` is a drawing. Shapes are leaves: `{ "type": "shape", "value": "circle", "attrs": { "cx": "50", "cy": "50", "r": "40" } }`, inside an `svg` branch; groups (`g`), `text`, `defs` and gradients are branches. SVG names keep their case (`viewBox`, `linearGradient`).
 - No scripts, event handlers, SVG animation or `style` attributes. CSS goes in design kits (`forest.kits`).
 - Check output with `npx tree-weaver validate file.json`, or `validateDocument` / `validateText` from the `tree-weaver` npm package; every issue has a path and a fix hint.
-- The `tree-weaver` CLI also starts trees from templates (`new`), inserts library branches or JSON nodes by path (`add`, `outline`), converts formats (`convert`) and renders HTML (`render`).
+- The `tree-weaver` CLI also starts trees from templates (`new`), inserts library branches or JSON nodes by path (`add`, `outline`), applies patches (`patch`), expands shorthand (`expand`), converts formats (`convert`) and renders HTML (`render`).
+- Shorthand saves tokens: `"h2: Title"`, `"a.btn[href=/join]: Join"`, `"@card"` (a library branch), `{ "grid": 3, "children": [...] }`, `{ "row": [...] }`, `{ "table": [["A", "B"], ["1", "2"]] }`, and flat `styles` (`{ "gap": "1rem", "tablet": {...} }`). Run `npx tree-weaver expand file.yaml -o file.json`.
+- Edit with patches instead of rewriting: `[{ "op": "insert", "parent": "/1", "node": "h2: Pricing" }, { "op": "setStyles", "target": "b_x", "styles": { "padding": "2rem" } }]`, nodes named by id or path (`/2/0`), all or nothing: `npx tree-weaver patch file.json edits.json`.
 
 ## Docs
 
 - [Format guide](https://github.com/hynding/tree-weaver/blob/main/docs/format.md): the model, displays and cascade, layout recipes, kits, validation
 - [JSON Schema](https://hynding.github.io/tree-weaver/schema/tree-weaver-v1.schema.json): draft 2020-12 schema for forests, trees, branches, leaves and kits
 - [CLI guide](https://github.com/hynding/tree-weaver/blob/main/docs/cli.md): `npx tree-weaver` commands, options, paths and exit codes
+- [Shorthand](https://github.com/hynding/tree-weaver/blob/main/docs/shorthand.md): the compact authoring form and how it expands
+- [Patches](https://github.com/hynding/tree-weaver/blob/main/docs/patch.md): edit operations, node references and checks; [patch JSON Schema](https://hynding.github.io/tree-weaver/schema/tree-weaver-patch-v1.schema.json)
 - [AGENTS.md](https://github.com/hynding/tree-weaver/blob/main/AGENTS.md): working in the repository and integrating the packages
 - [README](https://github.com/hynding/tree-weaver/blob/main/README.md): features, formats and deployment settings
 
@@ -27,6 +31,8 @@ Key facts for writing Tree Weaver data:
 - [Landing page](https://github.com/hynding/tree-weaver/blob/main/examples/landing-page.tree.json): navbar, hero and a responsive feature grid
 - [Pricing table](https://github.com/hynding/tree-weaver/blob/main/examples/pricing-table.tree.json): table markup with per-display styles
 - [SVG logo](https://github.com/hynding/tree-weaver/blob/main/examples/logo.tree.json): an SVG tree with a gradient, a group and shape leaves
+- [Landing page in shorthand](https://github.com/hynding/tree-weaver/blob/main/examples/landing-page.short.yaml): the same page in a fraction of the text
+- [Landing page patch](https://github.com/hynding/tree-weaver/blob/main/examples/landing-page.patch.json): text, inserts, styles, classes and a removal by path
 - [Small site forest](https://github.com/hynding/tree-weaver/blob/main/examples/site.forest.json): two trees, shared kits and custom class rules
 
 ## Optional
