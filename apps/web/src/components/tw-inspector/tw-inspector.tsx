@@ -1110,7 +1110,7 @@ export class TwInspector {
                   if (picked) setSmallScreen(branch.id, d, picked[2]);
                 }}
               >
-                {options.map(([k, label, c]) => (
+                {options.map(([k, label]) => (
                   <option value={k} selected={key === k}>
                     {label || keepLabel(d)}
                   </option>
