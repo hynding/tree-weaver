@@ -2,11 +2,13 @@ import type { DropPosition } from '../store/actions';
 
 export const BLUEPRINT_MIME = 'application/x-tree-weaver-blueprint';
 export const NODE_MIME = 'application/x-tree-weaver-node';
+/** A branch from a Storybook library: `libraryId storyId`. */
+export const LIBRARY_MIME = 'application/x-tree-weaver-library';
 
 export const hasType = (e: DragEvent, type: string): boolean => !!e.dataTransfer && Array.from(e.dataTransfer.types).includes(type);
 
 /** Is this drag carrying something Tree Weaver can drop? */
-export const isTreeDrag = (e: DragEvent): boolean => hasType(e, BLUEPRINT_MIME) || hasType(e, NODE_MIME);
+export const isTreeDrag = (e: DragEvent): boolean => hasType(e, BLUEPRINT_MIME) || hasType(e, NODE_MIME) || hasType(e, LIBRARY_MIME);
 
 /** Pick before / inside / after from the pointer's position over a row or element. */
 export function dropPosition(rect: DOMRect, clientY: number, canContain: boolean): DropPosition {

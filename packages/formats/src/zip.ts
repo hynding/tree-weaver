@@ -97,3 +97,55 @@ export function zip(entries: ZipEntry[], modified = new Date()): Uint8Array {
   }
   return out;
 }
+
+/** A file read from a zip archive. */
+export interface UnzippedEntry {
+  path: string;
+  data: Uint8Array;
+}
+
+/** Inflates raw DEFLATE data, e.g. with `DecompressionStream('deflate-raw')` in a browser or `zlib.inflateRawSync` in Node. */
+export type InflateRaw = (data: Uint8Array) => Promise<Uint8Array> | Uint8Array;
+
+/**
+ * Read the files in a zip archive (stored or deflated entries; folders are skipped).
+ * Reads the central directory, so archives written by any common tool work. Zip64 and
+ * encrypted archives are not supported.
+ */
+export async function unzip(bytes: Uint8Array, inflateRaw: InflateRaw): Promise<UnzippedEntry[]> {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let eocd = -1;
+  for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 22 - 0xffff); i--) {
+    if (view.getUint32(i, true) === 0x06054b50) {
+      eocd = i;
+      break;
+    }
+  }
+  if (eocd < 0) throw new Error('This is not a zip file');
+  const count = view.getUint16(eocd + 10, true);
+  let at = view.getUint32(eocd + 16, true);
+  if (count === 0xffff || at === 0xffffffff) throw new Error('Zip64 archives are not supported');
+  const decoder = new TextDecoder();
+  const out: UnzippedEntry[] = [];
+  for (let n = 0; n < count; n++) {
+    if (view.getUint32(at, true) !== 0x02014b50) throw new Error('The zip file is damaged');
+    const flags = view.getUint16(at + 8, true);
+    const method = view.getUint16(at + 10, true);
+    const compressed = view.getUint32(at + 20, true);
+    const nameLen = view.getUint16(at + 28, true);
+    const extraLen = view.getUint16(at + 30, true);
+    const commentLen = view.getUint16(at + 32, true);
+    const local = view.getUint32(at + 42, true);
+    const path = decoder.decode(bytes.subarray(at + 46, at + 46 + nameLen));
+    at += 46 + nameLen + extraLen + commentLen;
+    if (path.endsWith('/')) continue;
+    if (flags & 1) throw new Error(`${path} is encrypted`);
+    if (view.getUint32(local, true) !== 0x04034b50) throw new Error('The zip file is damaged');
+    const start = local + 30 + view.getUint16(local + 26, true) + view.getUint16(local + 28, true);
+    const raw = bytes.subarray(start, start + compressed);
+    if (method === 0) out.push({ path, data: raw.slice() });
+    else if (method === 8) out.push({ path, data: await inflateRaw(raw) });
+    else throw new Error(`${path} uses an unsupported compression method (${method})`);
+  }
+  return out;
+}

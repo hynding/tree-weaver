@@ -1,9 +1,29 @@
 import { createStore } from '@stencil/store';
 import type { DesignKit, DisplayId, DisplaySettings, Forest, ForestSummary } from '@tree-weaver/core';
+import type { LibraryBranch } from '@tree-weaver/formats';
 
 export type SidebarTab = 'branches' | 'outline' | 'classes' | 'kits' | 'forest';
 export type SaveState = 'saved' | 'saving' | 'unsaved' | 'error';
-export type DialogKind = null | 'export' | 'import' | 'displays';
+export type DialogKind = null | 'export' | 'import' | 'displays' | 'storybook';
+
+/**
+ * Branches imported from a Storybook, kept in this browser (not in a forest) and offered in
+ * every forest's palette under "From Storybook".
+ */
+export interface StorybookLibrary {
+  id: string;
+  name: string;
+  /** The Storybook's base URL. For an uploaded Storybook, the address this browser serves it from. */
+  source: string;
+  /** Uploaded as a folder or zip, rather than read from a URL. */
+  uploaded?: boolean;
+  /** Set by the deployment (`TW_STORYBOOK_URLS`). */
+  env?: boolean;
+  items: LibraryBranch[];
+  /** Design kits the library's branches need. They join a forest when one of its branches is first used. */
+  kits: DesignKit[];
+  importedAt: string;
+}
 
 export interface Toast {
   id: number;
@@ -42,6 +62,10 @@ export interface EditorState {
   displaySettings: DisplaySettings;
   /** Bumped when the display sizes or breakpoints change, so views that list displays refresh. */
   displaysVersion: number;
+  /** Branch libraries imported from Storybooks. */
+  libraries: StorybookLibrary[];
+  /** Ids of libraries being (re)built in the background. */
+  librariesLoading: string[];
 }
 
 export const { state, onChange, reset } = createStore<EditorState>({
@@ -67,4 +91,6 @@ export const { state, onChange, reset } = createStore<EditorState>({
   canvasVersion: 0,
   displaySettings: {},
   displaysVersion: 0,
+  libraries: [],
+  librariesLoading: [],
 });

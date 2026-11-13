@@ -58,7 +58,8 @@ The same words are used in the code (`Forest`, `Tree`, `Branch`, `Leaf`) and in 
   in a browser tab, and _Forest in new tab_ opens a list of every tree linking to its page. New tabs are
   snapshots: open them again after more edits.
 - **Upload and download tree data** as JSON, YAML, XML, HTML, Markdown or SVG (see below).
-- **Download a Storybook project** for a tree or the whole forest (see [Storybook](#storybook)).
+- **Download a Storybook project** for a tree or the whole forest, or **import stories from a built
+  Storybook** as palette branches or trees (see [Storybook](#storybook)).
 - **Save locally**: forests autosave to IndexedDB (falling back to `localStorage`), and you can keep
   several forests in one browser.
 
@@ -98,6 +99,37 @@ the current tree or the whole forest. Each tree becomes a stories file with:
 Enabled design kits load globally in `.storybook/preview.js`. Unzip, then `npm install` and
 `npm run storybook`. The export is one way: change layouts in Tree Weaver and export again.
 
+#### Importing from a Storybook
+
+Upload → **Import from Storybook…** (also at the bottom of the Branches tab) reads a built Storybook
+(`storybook build`, the `storybook-static` folder) from Storybook 6 to 10. Point it at a URL on the
+same site as Tree Weaver, or upload the folder or a zip of it. Pick stories from the list (grouped by
+component, with search), then choose:
+
+- **Bring in as** palette branches, new trees (one per component, a section per story), or both.
+  Palette branches are kept in this browser under _From Storybook_ and work in every forest; using
+  one adds the design kits it needs to the forest.
+- **Stylesheets:** link the Storybook's CSS files as linked kits, or copy their CSS. Styles injected
+  at runtime (CSS-in-JS) are collected into one _runtime styles_ kit. Storybook's own preview styles
+  are left out.
+- Optionally, use the Storybook's **viewport** sizes for the display types (in this browser).
+
+Each story is rendered in a hidden frame and imported as a **static snapshot**: its markup, styles
+and text (string args name the branches that show them). Interactive behavior (state, event
+handlers, data loading) does not come along, components that need a click or a portal to show
+content come in as first rendered, and CSS-in-JS class names are the generated ones. Stories that
+fail to render are listed and skipped.
+
+Reading a rendered story needs it on Tree Weaver's own origin:
+
+- **Upload** works for any Storybook. The files stay in this browser (IndexedDB) and a small service
+  worker (`storybook-sw.js`) serves them at `<app>/__storybook__/<name>/`. Uploaded Storybooks run
+  their own scripts on Tree Weaver's origin, so only upload Storybooks you trust. Uploaded CSS is
+  always copied, since the files are only served in this browser.
+- **A URL on the same site**, e.g. a Storybook published next to Tree Weaver on GitHub Pages.
+- **A URL on another site** can't be rendered; Tree Weaver offers to link its stylesheets as kits
+  instead (when that site allows cross-origin requests).
+
 ## Deployment settings
 
 These environment variables are read when the app is built (`pnpm build`), so changing one needs a
@@ -110,6 +142,9 @@ rebuild. The GitHub Pages workflow passes them from repository variables of the 
 | `TW_DISABLE_CSS_URLS` | `true` (or `1`, `yes`, `on`) hides the field for linking stylesheet URLs in the Kits tab. Stylesheets from `TW_CSS_URLS`, and linked kits a forest already has, still load.                             |
 | `TW_DISPLAYS`         | Display sizes and breakpoints, as `display.field=pixels` pairs separated by commas (or JSON, see below). Values set here apply to everyone and are locked in **Display settings**; the rest can still be changed there. |
 | `TW_LOCK_DISPLAYS`    | `true` (or `1`, `yes`, `on`) locks every display setting in the app, so only the defaults and `TW_DISPLAYS` apply.                                                                                          |
+| `TW_STORYBOOK_URLS`   | Built Storybook URLs, separated by spaces, offered in the Storybook import. Those on the same site as Tree Weaver are also read into the palette as _From Storybook_ libraries on first start (then kept, with a refresh button). |
+| `TW_STORYBOOK_INCLUDE` | Title globs, separated by commas or new lines, that limit which stories show up, e.g. `Components/**, Patterns/Card`. `*` matches within one level, `**` across levels. |
+| `TW_DISABLE_STORYBOOK_IMPORT` | `true` (or `1`, `yes`, `on`) hides the Storybook import. Libraries already in a browser's palette stay. |
 
 ```sh
 TW_CSS_URLS="https://cdn.example.com/reset.css,https://cdn.example.com/theme.css" TW_DISABLE_CSS_URLS=true pnpm build
@@ -169,7 +204,7 @@ apps/
   web/                 Stencil editor app (@tree-weaver/web)
 packages/
   core/                Tree model, immutable operations, displays, CSS/HTML rendering, validation
-  formats/             JSON, YAML, XML, HTML, Markdown and SVG import/export, Storybook export
+  formats/             JSON, YAML, XML, HTML, Markdown and SVG import/export, Storybook export and import
   storage/             IndexedDB / localStorage / memory forest stores and preferences
   kits/                Design kit analysis (classes, tokens, imports) and the starter kit
   branches/            The branch library (palette blueprints) and tree templates

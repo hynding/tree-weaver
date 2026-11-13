@@ -1682,3 +1682,88 @@ details.areas .hint {
 .small-screens .field.current > label {
   color: var(--select);
 }
+
+/* ----------------------------------------------------- storybook library */
+
+.btn.block {
+  width: 100%;
+  justify-content: center;
+}
+.library .panel-title .row {
+  gap: 2px;
+}
+.library-group + .library-group {
+  margin-top: 10px;
+}
+.library-title {
+  margin: 6px 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ----------------------------------------------------- storybook import */
+
+.storybook-import .field-label {
+  display: block;
+  margin-bottom: 6px;
+}
+.story-list {
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 0;
+}
+.story-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 12px 3px 32px;
+  cursor: pointer;
+}
+.story-row.group {
+  padding-left: 12px;
+  font-weight: 600;
+}
+.story-row:hover {
+  background: var(--accent-soft);
+}
+.story-group + .story-group {
+  margin-top: 4px;
+}
+.story-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.story-options .option-label {
+  min-width: 90px;
+  color: var(--muted);
+}
+.story-progress {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 260px;
+  overflow: auto;
+}
+.story-progress li {
+  display: flex;
+  gap: 8px;
+  padding: 2px 0;
+}
+.story-progress .mark {
+  width: 1em;
+  flex: none;
+}
+.story-progress .ok .mark {
+  color: #1a7f4b;
+}
+.story-progress .failed .mark,
+.story-progress small {
+  color: #b42318;
+}

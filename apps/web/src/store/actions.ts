@@ -270,6 +270,27 @@ export function setDisplaySetting(id: DisplayId, field: DisplayField, value: num
   saveDisplaySettings({ ...state.displaySettings, [id]: entry });
 }
 
+/** Change several display values in this browser at once, skipping any the deployment locks. Returns the displays changed. */
+export function setDisplaySizes(settings: DisplaySettings): DisplayId[] {
+  const next: DisplaySettings = { ...state.displaySettings };
+  const changed: DisplayId[] = [];
+  for (const [id, values] of Object.entries(settings) as [DisplayId, DisplaySettings[DisplayId]][]) {
+    const entry = { ...next[id] };
+    let touched = false;
+    for (const [field, value] of Object.entries(values ?? {}) as [DisplayField, number][]) {
+      if (isDisplayFieldLocked(id, field)) continue;
+      entry[field] = value;
+      touched = true;
+    }
+    if (touched) {
+      next[id] = entry;
+      changed.push(id);
+    }
+  }
+  if (changed.length) saveDisplaySettings(next);
+  return changed;
+}
+
 /** Undo every display change made in this browser. Values from `TW_DISPLAYS` stay. */
 export function resetDisplaySettings(): void {
   saveDisplaySettings({});
@@ -317,13 +338,52 @@ function allowed(root: Branch, parentId: string, node: TreeNode): boolean {
 }
 
 export function insertAt(node: TreeNode, targetId?: string, position?: DropPosition): void {
+  insertWithKits(node, [], targetId, position);
+}
+
+/**
+ * Insert a node and add the design kits it needs (those the forest doesn't have yet) in one
+ * undo step. Used for branches from a Storybook library, which bring their styles along.
+ */
+export function insertWithKits(node: TreeNode, kits: DesignKit[], targetId?: string, position?: DropPosition): void {
   const tree = currentTree();
-  if (!tree) return;
+  const forest = state.forest;
+  if (!tree || !forest) return;
   const target = targetId ? { targetId, position: position ?? 'inside' } : defaultTarget();
   const { parentId, index } = placement(tree.root, target.targetId, target.position);
   if (!allowed(tree.root, parentId, node)) return;
-  editTree((root) => insertNode(root, parentId, node, index));
+  const added = newKits(kits);
+  try {
+    const withKits = added.length ? { ...forest, kits: [...forest.kits, ...added] } : forest;
+    commit(updateTreeRoot(withKits, tree.id, (root) => insertNode(root, parentId, node, index)));
+  } catch (err) {
+    toast((err as Error).message, 'error');
+    return;
+  }
   state.selectedId = node.id;
+  if (added.length) toast(`Added ${added.length} design kit${added.length === 1 ? '' : 's'} for ${isBranch(node) && node.name ? `“${node.name}”` : 'this branch'}`, 'info');
+}
+
+/** The kits the forest (and the deployment) doesn't already have, matched by id, linked URL or CSS. */
+export function newKits(kits: DesignKit[]): DesignKit[] {
+  const known = new Set(allKits().flatMap((k) => (k.href ? [k.id, k.href] : [k.id, k.css])));
+  return kits.filter((k) => !known.has(k.id) && !known.has(k.href ?? k.css));
+}
+
+/** Add trees and the kits they need to the open forest, in one undo step, and open the first tree. */
+export function addTreesWithKits(trees: Tree[], kits: DesignKit[]): { trees: Tree[]; kits: DesignKit[] } {
+  const forest = state.forest;
+  if (!forest || !trees.length) return { trees: [], kits: [] };
+  const names = forest.trees.map((t) => t.name);
+  const named = trees.map((t) => {
+    const name = uniqueName(t.name, names);
+    names.push(name);
+    return { ...t, name };
+  });
+  const added = newKits(kits);
+  commit({ ...forest, trees: [...forest.trees, ...named], kits: [...forest.kits, ...added] });
+  switchTree(named[0].id);
+  return { trees: named, kits: added };
 }
 
 export function insertBlueprint(blueprintId: string, targetId?: string, position?: DropPosition): void {
@@ -757,11 +817,10 @@ export async function importText(text: string, format?: FormatId, fileName?: str
   if (forest.trees.some((t) => t.id === tree.id)) tree = { ...tree, id: createId('t') };
   tree = { ...tree, name: uniqueName(tree.name, forest.trees.map((t) => t.name)) };
   // Skip kits the forest already has, and the deployment's own stylesheets.
-  const known = new Set(allKits().flatMap((k) => (k.href ? [k.id, k.href] : [k.id, k.css])));
-  const newKits = doc.kits.filter((k) => !known.has(k.id) && !known.has(k.href ?? k.css));
-  commit({ ...forest, trees: [...forest.trees, tree], kits: [...forest.kits, ...newKits] });
+  const added = newKits(doc.kits);
+  commit({ ...forest, trees: [...forest.trees, tree], kits: [...forest.kits, ...added] });
   switchTree(tree.id);
-  const kitNote = newKits.length ? ` and ${newKits.length} design kit${newKits.length === 1 ? '' : 's'}` : '';
+  const kitNote = added.length ? ` and ${added.length} design kit${added.length === 1 ? '' : 's'}` : '';
   return { summary: `Added tree “${tree.name}”${kitNote}` };
 }
 
