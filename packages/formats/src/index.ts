@@ -14,7 +14,31 @@ export { exportMarkdown, importMarkdown, splitFrontMatter, escapeMarkdown } from
 export { exportXml, importXml, XML_NAMESPACE } from './xml';
 export { exportSvg, importSvg, drawingOf, hasDrawing, type SvgExportOptions } from './svg';
 export { exportStorybook, zipStorybook, STORYBOOK_VERSION, type StorybookExport, type StorybookFile, type StorybookOptions } from './storybook';
-export { zip, crc32, type ZipEntry } from './zip';
+export { zip, unzip, crc32, type ZipEntry, type UnzippedEntry, type InflateRaw } from './zip';
+export {
+  parseStoryIndex,
+  titleGlob,
+  parseTitleGlobs,
+  filterStories,
+  groupStories,
+  isStorybookChrome,
+  absolutizeCssUrls,
+  displayForViewport,
+  viewportDisplaySettings,
+  readViewports,
+  storyLabel,
+  snapshotToBranch,
+  storiesToTrees,
+  storyKits,
+  splitRules,
+  type StoryEntry,
+  type StoryCatalog,
+  type StorySheet,
+  type StoryViewport,
+  type StorySnapshot,
+  type LibraryBranch,
+  type StoryKitOptions,
+} from './storybook-import';
 export { slugify } from './slug';
 
 /** Format for a file name, from its extension. */

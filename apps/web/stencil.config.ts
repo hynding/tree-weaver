@@ -11,6 +11,9 @@ export const config: Config = {
     TW_DISABLE_CSS_URLS: process.env.TW_DISABLE_CSS_URLS ?? '',
     TW_DISPLAYS: process.env.TW_DISPLAYS ?? '',
     TW_LOCK_DISPLAYS: process.env.TW_LOCK_DISPLAYS ?? '',
+    TW_STORYBOOK_URLS: process.env.TW_STORYBOOK_URLS ?? '',
+    TW_STORYBOOK_INCLUDE: process.env.TW_STORYBOOK_INCLUDE ?? '',
+    TW_DISABLE_STORYBOOK_IMPORT: process.env.TW_DISABLE_STORYBOOK_IMPORT ?? '',
   },
   outputTargets: [
     {
@@ -19,6 +22,8 @@ export const config: Config = {
       baseUrl: '/',
       copy: [
         { src: 'favicon.svg' },
+        // Serves Storybooks uploaded in the Storybook import (see src/utils/storybook-upload.ts).
+        { src: 'storybook-sw.js' },
         // Agent-facing files, published next to the editor (see AGENTS.md and llms.txt).
         { src: '../../../llms.txt', dest: 'llms.txt' },
         { src: '../../../AGENTS.md', dest: 'AGENTS.md' },

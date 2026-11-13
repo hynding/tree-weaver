@@ -58,6 +58,12 @@ export namespace Components {
     }
     interface TwSidebar {
     }
+    /**
+     * Import stories from a compiled Storybook as static snapshots: as branches in the palette,
+     * as new trees, or both, with the Storybook's styles as design kits.
+     */
+    interface TwStorybookImport {
+    }
     interface TwToolbar {
     }
 }
@@ -162,6 +168,16 @@ declare global {
         prototype: HTMLTwSidebarElement;
         new (): HTMLTwSidebarElement;
     };
+    /**
+     * Import stories from a compiled Storybook as static snapshots: as branches in the palette,
+     * as new trees, or both, with the Storybook's styles as design kits.
+     */
+    interface HTMLTwStorybookImportElement extends Components.TwStorybookImport, HTMLStencilElement {
+    }
+    var HTMLTwStorybookImportElement: {
+        prototype: HTMLTwStorybookImportElement;
+        new (): HTMLTwStorybookImportElement;
+    };
     interface HTMLTwToolbarElementEventMap {
         "twTogglePanel": 'left' | 'right';
     }
@@ -192,6 +208,7 @@ declare global {
         "tw-palette": HTMLTwPaletteElement;
         "tw-preview": HTMLTwPreviewElement;
         "tw-sidebar": HTMLTwSidebarElement;
+        "tw-storybook-import": HTMLTwStorybookImportElement;
         "tw-toolbar": HTMLTwToolbarElement;
     }
 }
@@ -248,6 +265,12 @@ declare namespace LocalJSX {
     }
     interface TwSidebar {
     }
+    /**
+     * Import stories from a compiled Storybook as static snapshots: as branches in the palette,
+     * as new trees, or both, with the Storybook's styles as design kits.
+     */
+    interface TwStorybookImport {
+    }
     interface TwToolbar {
         "onTwTogglePanel"?: (event: TwToolbarCustomEvent<'left' | 'right'>) => void;
     }
@@ -269,6 +292,7 @@ declare namespace LocalJSX {
         "tw-palette": TwPalette;
         "tw-preview": TwPreview;
         "tw-sidebar": TwSidebar;
+        "tw-storybook-import": TwStorybookImport;
         "tw-toolbar": TwToolbar;
     }
 }
@@ -312,6 +336,11 @@ declare module "@stencil/core" {
              */
             "tw-preview": LocalJSX.IntrinsicElements["tw-preview"] & JSXBase.HTMLAttributes<HTMLTwPreviewElement>;
             "tw-sidebar": LocalJSX.IntrinsicElements["tw-sidebar"] & JSXBase.HTMLAttributes<HTMLTwSidebarElement>;
+            /**
+             * Import stories from a compiled Storybook as static snapshots: as branches in the palette,
+             * as new trees, or both, with the Storybook's styles as design kits.
+             */
+            "tw-storybook-import": LocalJSX.IntrinsicElements["tw-storybook-import"] & JSXBase.HTMLAttributes<HTMLTwStorybookImportElement>;
             "tw-toolbar": LocalJSX.IntrinsicElements["tw-toolbar"] & JSXBase.HTMLAttributes<HTMLTwToolbarElement>;
         }
     }

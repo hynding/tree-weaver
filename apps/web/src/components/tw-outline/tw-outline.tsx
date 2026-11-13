@@ -12,8 +12,9 @@ import {
   type DropPosition,
 } from '../../store/actions';
 import { state } from '../../store/editor';
+import { dropLibraryBranch } from '../../store/storybook';
 import { nodeKind, nodeLabel } from '../../utils/describe';
-import { BLUEPRINT_MIME, NODE_MIME, dropPosition, hasType, isTreeDrag } from '../../utils/dnd';
+import { BLUEPRINT_MIME, LIBRARY_MIME, NODE_MIME, dropPosition, hasType, isTreeDrag } from '../../utils/dnd';
 import { Icon } from '../../utils/icons';
 
 /** The tree as a collapsible list of branches and leaves, with drag and drop reordering. */
@@ -58,7 +59,9 @@ export class TwOutline {
     if (!drop) return;
     const blueprint = e.dataTransfer!.getData(BLUEPRINT_MIME);
     const nodeId = e.dataTransfer!.getData(NODE_MIME);
+    const library = e.dataTransfer!.getData(LIBRARY_MIME);
     if (blueprint) insertBlueprint(blueprint, drop.id, drop.position);
+    else if (library) dropLibraryBranch(library, drop.id, drop.position);
     else if (nodeId) moveTo(nodeId, drop.id, drop.position);
   }
 

@@ -214,3 +214,92 @@ export class Preferences<T extends Record<string, unknown>> {
     return next;
   }
 }
+
+/* ---------------------------------------------------------------- libraries */
+
+/** A stored record with an id, such as a branch library imported from Storybook. */
+export interface Keyed {
+  id: string;
+}
+
+/**
+ * Per-browser records kept outside forests, such as branch libraries imported from a
+ * Storybook. They belong to this browser, not to a forest, so every forest's palette can use them.
+ */
+export interface RecordStore<T extends Keyed> {
+  list(): Promise<T[]>;
+  get(id: string): Promise<T | null>;
+  put(record: T): Promise<void>;
+  remove(id: string): Promise<void>;
+}
+
+export class MemoryRecordStore<T extends Keyed> implements RecordStore<T> {
+  private readonly records = new Map<string, T>();
+  async list() {
+    return [...this.records.values()].map(clone);
+  }
+  async get(id: string) {
+    const r = this.records.get(id);
+    return r ? clone(r) : null;
+  }
+  async put(record: T) {
+    this.records.set(record.id, clone(record));
+  }
+  async remove(id: string) {
+    this.records.delete(id);
+  }
+}
+
+/** Records in their own IndexedDB database (one object store), so forests' storage is untouched. */
+export class IndexedDbRecordStore<T extends Keyed> implements RecordStore<T> {
+  private db: Promise<IDBDatabase> | null = null;
+
+  constructor(
+    private readonly name: string,
+    private readonly factory: IDBFactory = globalThis.indexedDB,
+  ) {}
+
+  private open(): Promise<IDBDatabase> {
+    this.db ??= new Promise((resolve, reject) => {
+      const req = this.factory.open(this.name, 1);
+      req.onupgradeneeded = () => {
+        if (!req.result.objectStoreNames.contains('records')) req.result.createObjectStore('records', { keyPath: 'id' });
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+      req.onblocked = () => reject(new Error(`The ${this.name} database is blocked by another tab`));
+    });
+    return this.db;
+  }
+
+  private async store(mode: IDBTransactionMode): Promise<IDBObjectStore> {
+    return (await this.open()).transaction('records', mode).objectStore('records');
+  }
+
+  async list() {
+    return (await request((await this.store('readonly')).getAll())) as T[];
+  }
+  async get(id: string) {
+    return ((await request((await this.store('readonly')).get(id))) as T | undefined) ?? null;
+  }
+  async put(record: T) {
+    await request((await this.store('readwrite')).put(clone(record)));
+  }
+  async remove(id: string) {
+    await request((await this.store('readwrite')).delete(id));
+  }
+}
+
+/** An IndexedDB record store when the browser allows it, else one in memory. */
+export async function createRecordStore<T extends Keyed>(name: string): Promise<RecordStore<T>> {
+  if (typeof globalThis.indexedDB !== 'undefined') {
+    const store = new IndexedDbRecordStore<T>(name);
+    try {
+      await store.list();
+      return store;
+    } catch {
+      // Fall through to memory.
+    }
+  }
+  return new MemoryRecordStore<T>();
+}
