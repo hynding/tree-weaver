@@ -13,6 +13,7 @@ import {
   getDisplay,
   inheritedStyles,
   isBranch,
+  isSafeAttr,
   LEAF_ATTR,
   parseSpan,
   parseTracks,
@@ -227,6 +228,9 @@ export class TwCanvas {
         body.setAttribute(BRANCH_ATTR, root.id);
         if (root.classes.length) body.className = root.classes.join(' ');
         for (const [k, v] of Object.entries(root.attrs)) {
+          // Same rule as the rendered markup: no event handlers or script URLs, which the
+          // sandboxed frame would refuse with a "Blocked script execution" console error.
+          if (k === 'class' || !isSafeAttr(k, v)) continue;
           try {
             body.setAttribute(k, v);
           } catch {
