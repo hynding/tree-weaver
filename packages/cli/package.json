@@ -1,0 +1,86 @@
+{
+  "name": "tree-weaver",
+  "version": "0.1.0",
+  "description": "Tree Weaver for code and AI agents: the `tree-weaver` CLI, plus every Tree Weaver library in one install.",
+  "license": "MIT",
+  "homepage": "https://github.com/hynding/tree-weaver#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hynding/tree-weaver.git",
+    "directory": "packages/cli"
+  },
+  "bugs": "https://github.com/hynding/tree-weaver/issues",
+  "keywords": [
+    "tree-weaver",
+    "layout",
+    "page-builder",
+    "html",
+    "css-grid",
+    "responsive",
+    "ai-agents",
+    "cli",
+    "json-schema"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "tree-weaver": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./cli": {
+      "types": "./dist/run.d.ts",
+      "default": "./dist/run.js"
+    },
+    "./core": {
+      "types": "./dist/core.d.ts",
+      "default": "./dist/core.js"
+    },
+    "./formats": {
+      "types": "./dist/formats.d.ts",
+      "default": "./dist/formats.js"
+    },
+    "./kits": {
+      "types": "./dist/kits.d.ts",
+      "default": "./dist/kits.js"
+    },
+    "./branches": {
+      "types": "./dist/branches.d.ts",
+      "default": "./dist/branches.js"
+    },
+    "./storage": {
+      "types": "./dist/storage.d.ts",
+      "default": "./dist/storage.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src",
+    "!src/**/*.test.ts"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node ../../scripts/esm-extensions.mjs dist && node ../../scripts/chmod-bin.mjs dist/cli.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepack": "node ../../scripts/copy-license.mjs"
+  },
+  "dependencies": {
+    "@tree-weaver/branches": "workspace:*",
+    "@tree-weaver/core": "workspace:*",
+    "@tree-weaver/formats": "workspace:*",
+    "@tree-weaver/kits": "workspace:*",
+    "@tree-weaver/storage": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

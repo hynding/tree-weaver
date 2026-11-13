@@ -2,6 +2,20 @@
   "name": "@tree-weaver/formats",
   "version": "0.1.0",
   "description": "Import and export Tree Weaver forests and trees as JSON, YAML, XML, HTML and Markdown.",
+  "license": "MIT",
+  "keywords": [
+    "tree-weaver",
+    "layout",
+    "page-builder",
+    "responsive"
+  ],
+  "homepage": "https://github.com/hynding/tree-weaver#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hynding/tree-weaver.git",
+    "directory": "packages/formats"
+  },
+  "bugs": "https://github.com/hynding/tree-weaver/issues",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -12,11 +26,16 @@
       "default": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist",
+    "src",
+    "!src/**/*.test.ts"
+  ],
   "sideEffects": false,
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "build": "tsc -p tsconfig.json && node ../../scripts/esm-extensions.mjs dist",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepack": "node ../../scripts/copy-license.mjs"
   },
   "dependencies": {
     "@tree-weaver/core": "workspace:*",
@@ -24,5 +43,11 @@
     "domhandler": "^6.0.1",
     "marked": "^18.1.1",
     "yaml": "^2.9.1"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

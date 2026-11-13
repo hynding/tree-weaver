@@ -2,6 +2,20 @@
   "name": "@tree-weaver/core",
   "version": "0.1.0",
   "description": "Tree model for Tree Weaver: forests, trees, branches and leaves, plus display types and CSS/HTML rendering.",
+  "license": "MIT",
+  "keywords": [
+    "tree-weaver",
+    "layout",
+    "page-builder",
+    "responsive"
+  ],
+  "homepage": "https://github.com/hynding/tree-weaver#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hynding/tree-weaver.git",
+    "directory": "packages/core"
+  },
+  "bugs": "https://github.com/hynding/tree-weaver/issues",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -12,11 +26,22 @@
       "default": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist",
+    "src",
+    "!src/**/*.test.ts"
+  ],
   "sideEffects": false,
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "build": "tsc -p tsconfig.json && node ../../scripts/esm-extensions.mjs dist",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepack": "node ../../scripts/copy-license.mjs"
   },
-  "dependencies": {}
+  "dependencies": {},
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
 }

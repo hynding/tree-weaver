@@ -188,6 +188,9 @@ HTML and CSS written with the default breakpoints still maps back to the right d
 
 Tree Weaver data is plain JSON (or YAML) with a published contract, so agents can write it directly:
 
+- The **`tree-weaver` CLI** ([`docs/cli.md`](docs/cli.md)): `npx tree-weaver new | validate | render | convert | add | outline | kit | schema`,
+  with `--json` reports. `npm i tree-weaver` also installs every library (`@tree-weaver/core`, `formats`, `kits`, `branches`, `storage`).
+
 - [`docs/format.md`](docs/format.md): the format guide, with the display cascade and layout recipes.
 - [`schema/tree-weaver-v1.schema.json`](schema/tree-weaver-v1.schema.json): the JSON Schema (draft 2020-12),
   also served at https://hynding.github.io/tree-weaver/schema/tree-weaver-v1.schema.json. JSON exports name it in `$schema`.
@@ -203,6 +206,7 @@ Tree Weaver data is plain JSON (or YAML) with a published contract, so agents ca
 apps/
   web/                 Stencil editor app (@tree-weaver/web)
 packages/
+  cli/                 The `tree-weaver` CLI, and one package that re-exports every library
   core/                Tree model, immutable operations, displays, CSS/HTML rendering, validation
   formats/             JSON, YAML, XML, HTML, Markdown and SVG import/export, Storybook export and import
   storage/             IndexedDB / localStorage / memory forest stores and preferences
@@ -211,6 +215,7 @@ packages/
 ```
 
 The packages are plain TypeScript with no DOM dependency, so they can run in Node as well as the browser.
+They are published to npm as `tree-weaver` and `@tree-weaver/*` (see Releasing).
 
 ## Development
 
@@ -222,9 +227,18 @@ pnpm dev          # builds the packages, then serves the editor at http://localh
 pnpm build        # builds every package and the app (apps/web/www)
 pnpm test         # unit tests for the packages (Vitest)
 pnpm typecheck
+pnpm smoke        # packs the packages, installs them in an empty project and runs them in plain Node
 ```
 
 The app uses relative asset paths, so the built `apps/web/www` folder works from any subpath, including GitHub Pages.
+
+### Releasing to npm
+
+1. Once: create the `tree-weaver` organization on npmjs.com (for the `@tree-weaver/*` packages) and add
+   an npm automation or granular publish token as the repository secret `NPM_TOKEN`.
+2. `pnpm release:version 0.2.0` to set every package's version, and merge that.
+3. Publish a GitHub release tagged `v0.2.0`. `.github/workflows/publish.yml` builds, tests, runs the
+   smoke test and publishes with provenance. Run it by hand from the Actions tab for a dry run.
 
 ## Defaults chosen
 

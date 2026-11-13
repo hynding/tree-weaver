@@ -34,6 +34,7 @@ Use these words in code, UI text, docs and commit messages:
    if (!result.valid) throw new Error(formatIssues(result));
    ```
 
+   From a shell: `npx tree-weaver validate file.json` (add `--json` for a report).
    Without the packages, validate against `schema/tree-weaver-v1.schema.json` with any
    draft 2020-12 validator.
 
@@ -42,12 +43,28 @@ Use these words in code, UI text, docs and commit messages:
 
 Working examples are in [`examples/`](examples/); a test keeps them valid.
 
+## Using the CLI
+
+The `tree-weaver` package has a CLI for agents with a shell. Full guide: [`docs/cli.md`](docs/cli.md).
+
+```sh
+npx tree-weaver new home.tree.json --template landing   # start from a template
+npx tree-weaver outline home.tree.json                  # paths (/2/0/1) and ids of every node
+npx tree-weaver add home.tree.json card --parent /2/0/1 # or --node '{"tag":"p","children":["Hi"]}'
+npx tree-weaver validate home.tree.json                 # exits 1 with path + fix hint per error
+npx tree-weaver render home.tree.json -o home.html
+```
+
+`convert` moves between JSON, YAML, XML, HTML, Markdown and SVG, `kit` lists a stylesheet's
+classes and tokens, and `schema` prints the JSON Schema. Every command takes `--json`.
+
 ## Using the packages
 
-The packages are not on npm yet. In this workspace, import them by name
-(`@tree-weaver/core`, `@tree-weaver/formats`, `@tree-weaver/kits`, `@tree-weaver/branches`,
-`@tree-weaver/storage`). Their builds use extensionless ESM imports, so consume them through a
-bundler or Vitest, not plain `node`.
+`npm i tree-weaver` installs the CLI and every library; import from `tree-weaver` or its subpaths
+(`tree-weaver/core`, `/formats`, `/kits`, `/branches`, `/storage`). Each library is also published
+on its own as `@tree-weaver/core`, `@tree-weaver/formats`, `@tree-weaver/kits`,
+`@tree-weaver/branches` and `@tree-weaver/storage`. They are ESM only and run in plain Node 20+,
+bundlers and browsers. In this workspace, import them by name.
 
 Useful entry points:
 
@@ -68,7 +85,7 @@ Useful entry points:
   - `pnpm build`: packages, then the Stencil app into `apps/web/www`;
   - `pnpm dev`: the editor at http://localhost:3333;
   - `pnpm schema`: rewrite `schema/tree-weaver-v1.schema.json` after changing `packages/core/src/schema.ts`.
-- Layout: `apps/web` is the Stencil editor; `packages/core` the model, ops, rendering, schema and
+- Layout: `apps/web` is the Stencil editor; `packages/cli` the `tree-weaver` CLI and umbrella package; `packages/core` the model, ops, rendering, schema and
   validation; `packages/formats` import and export; `packages/kits` design kits;
   `packages/branches` the palette and templates; `packages/storage` IndexedDB / localStorage.
 - Packages are DOM-free TypeScript. Keep it that way so they run in Node and in agents' tools.
@@ -77,5 +94,12 @@ Useful entry points:
   of them, run `pnpm schema`, and add an example or test when the format grows.
 - Anything rendered from a tree passes through `safeTag`, `isSafeAttr` and `sanitizeCssValue`
   in `core/src/render.ts`. Don't add a path around them.
-- CI (`.github/workflows/ci.yml`) runs `pnpm build` and `pnpm test`. Every push to `main`
+- Package sources use extensionless relative imports; `scripts/esm-extensions.mjs` adds `.js` to the
+  built output so it runs in plain Node. `pnpm smoke` packs every package, installs the tarballs in
+  an empty project and runs the libraries and the CLI there.
+- The CLI lives in `packages/cli` (published as `tree-weaver`); `run(argv, io)` in `src/run.ts`
+  takes an injectable file system, which the tests use. Keep `docs/cli.md` in step with it.
+- Releases: `pnpm release:version x.y.z` sets every package's version, then a GitHub release tagged
+  `vx.y.z` runs `.github/workflows/publish.yml`, which publishes to npm (needs the `NPM_TOKEN` secret).
+- CI (`.github/workflows/ci.yml`) runs `pnpm build`, `pnpm test` and `pnpm smoke`. Every push to `main`
   deploys the editor to GitHub Pages, including `llms.txt`, the schema, the docs and the examples.

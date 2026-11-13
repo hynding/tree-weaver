@@ -20,3 +20,5 @@ jobs:
         run: pnpm build
       - name: Unit tests
         run: pnpm test
+      - name: Install the packed packages and run them in plain Node
+        run: pnpm smoke
