@@ -1,6 +1,10 @@
 import { Component, Element, State, h } from '@stencil/core';
 import {
+  areaBounds,
+  areaNames,
   BASE_CSS,
+  brokenAreas,
+  parseAreas,
   BRANCH_ATTR,
   canHaveChildren,
   findNode,
@@ -27,6 +31,7 @@ import { allKits, currentTree, insertBlueprint, moveTo, pathTo, select, selected
 import { onChange, state } from '../../store/editor';
 import { nodeKind, nodeLabel } from '../../utils/describe';
 import { BLUEPRINT_MIME, NODE_MIME, dropPosition, hasType, isTreeDrag } from '../../utils/dnd';
+import { areaColor } from '../../utils/areas';
 import { canvasElement, setCanvasDocument } from '../../utils/frame';
 import { handleShortcut } from '../../utils/shortcuts';
 
@@ -63,6 +68,9 @@ body { min-height: 100vh; }
 #tw-grid-overlay .handle.span::after { background: #f59e0b; }
 #tw-grid-overlay .label.span { background: #b45309; }
 #tw-grid-overlay.dragging > :not(.live) { display: none; }
+#tw-grid-overlay .label.above { transform: translate(-50%, calc(-100% - 3px)); }
+#tw-grid-overlay .area { position: absolute; box-sizing: border-box; border: 2px dashed var(--area); border-radius: 3px; }
+#tw-grid-overlay .area span { position: absolute; left: 0; bottom: 0; padding: 1px 6px; border-radius: 0 3px 0 0; background: var(--area); color: #fff; font: 600 1em/1.4 system-ui, sans-serif; }
 `;
 
 const SKELETON = `<!doctype html><html><head><meta charset="utf-8">
@@ -476,8 +484,29 @@ export class TwCanvas {
       if (geo.rowGap) add('gap', { left: geo.left, top: y - geo.rowGap, width: geo.width, height: geo.rowGap });
       else add('row-line', { left: geo.left, top: y, width: geo.width });
     });
+    const gridStyles = resolveStyles(gridNode.styles, display);
+    const areas = parseAreas(gridStyles['grid-template-areas']);
+    if (areas?.length && !brokenAreas(areas).length) {
+      for (const name of areaNames(areas)) {
+        const b = areaBounds(areas, name)!;
+        if (b.right >= geo.widths.length || b.bottom >= geo.heights.length) continue;
+        const box = add('area', {
+          left: geo.xs[b.left],
+          top: geo.ys[b.top],
+          width: geo.xs[b.right] + geo.widths[b.right] - geo.xs[b.left],
+          height: geo.ys[b.bottom] + geo.heights[b.bottom] - geo.ys[b.top],
+        });
+        box.style.setProperty('--area', areaColor(name, areaNames(areas)));
+        box.appendChild(doc.createElement('span')).textContent = name;
+      }
+    }
+    const childNode = child ? findNode(tree.root, child.getAttribute(BRANCH_ATTR)!) : null;
+    const childArea = isBranch(childNode) ? resolveStyles(childNode.styles, display)['grid-area'] : undefined;
+    const inArea = !!childArea && !!areas && areaNames(areas).includes(childArea);
     if (!child) {
-      geo.widths.forEach((w, i) => add('label', { left: geo.xs[i] + w / 2, top: geo.top }, editable ? `${trackLabel(editable[i])} · ${Math.round(w)}px` : `${Math.round(w)}px`));
+      // With named areas, column labels sit above the grid so they don't cover the area names.
+      const labelClass = areas?.length ? 'label above' : 'label';
+      geo.widths.forEach((w, i) => add(labelClass, { left: geo.xs[i] + w / 2, top: geo.top }, editable ? `${trackLabel(editable[i])} · ${Math.round(w)}px` : `${Math.round(w)}px`));
       if (editable) {
         for (let i = 0; i < geo.widths.length - 1; i++) {
           const handle = add('handle', { left: geo.xs[i] + geo.widths[i] + geo.colGap / 2, top: geo.top, height: geo.height });
@@ -485,7 +514,7 @@ export class TwCanvas {
           this.handles.set(handle, (e) => this.startColumnDrag(e, gridEl!, gridNode.id, editable, geo.widths, i, geo.top));
         }
       }
-    } else {
+    } else if (!inArea) {
       const rect = child.getBoundingClientRect();
       const view = doc.defaultView!;
       const handle = add('handle span', { left: rect.right + view.scrollX, top: rect.top + view.scrollY, height: rect.height });

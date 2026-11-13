@@ -32,6 +32,13 @@ import {
   renderForestIndex,
   setRuleStyle as setRuleDeclaration,
   setStyle,
+  setStyles,
+  applyGridLayout,
+  applySmallScreen,
+  clearAreas,
+  startAreas,
+  getGridLayout,
+  type SmallScreenChoice,
   updateNode,
   updateTreeRoot,
   withRules,
@@ -400,6 +407,34 @@ export function updateLeaf(id: string, patch: Partial<Omit<Leaf, 'kind' | 'id'>>
 
 export function setStyleValue(id: string, prop: string, value: string | null, display: DisplayId = state.display): void {
   editTree((root) => setStyle(root, id, display, prop, value));
+}
+
+/** Set several style properties on one display as a single undo step. */
+export function setStyleValues(id: string, patch: Record<string, string | null>, display: DisplayId = state.display): void {
+  editTree((root) => setStyles(root, id, display, patch));
+}
+
+/** Turn a branch into a ready-made grid layout on the current display. */
+export function applyLayout(branchId: string, layoutId: string): void {
+  const layout = getGridLayout(layoutId);
+  if (!layout) return;
+  let created: string[] = [];
+  editTree((root) => {
+    const result = applyGridLayout(root, branchId, state.display, layout);
+    created = result.created;
+    return result.root;
+  });
+  if (created.length) toast(`${layout.label}: added ${created.length} ${created.length === 1 ? 'box' : 'boxes'} for the empty areas.`);
+}
+
+/** Choose what a grid does on a smaller display. */
+export function setSmallScreen(branchId: string, display: DisplayId, choice: SmallScreenChoice): void {
+  editTree((root) => applySmallScreen(root, branchId, display, choice));
+}
+
+/** Give a grid named areas (one per child) on the current display, or take them away. */
+export function gridAreasEdit(branchId: string, op: 'start' | 'clear'): void {
+  editTree((root) => (op === 'start' ? startAreas : clearAreas)(root, branchId, state.display));
 }
 
 export function tableEdit(tableId: string, op: 'add-row' | 'remove-row' | 'add-column' | 'remove-column', index?: number): void {

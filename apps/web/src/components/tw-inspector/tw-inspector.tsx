@@ -1,6 +1,25 @@
 import { Component, State, h } from '@stencil/core';
 import {
+  areaBounds,
+  areaNames,
+  brokenAreas,
   countTracks,
+  EMPTY_AREA,
+  formatAreas,
+  GAP_PRESETS,
+  gapPreset,
+  GRID_LAYOUTS,
+  isAreaName,
+  matchGridLayout,
+  paintAreas,
+  parseAreas,
+  readSmallScreen,
+  removeAreaColumn,
+  removeAreaRow,
+  resizeAreas,
+  smallerDisplays,
+  type GridAreas,
+  type SmallScreenChoice,
   DISPLAYS,
   equalColumns,
   findNode,
@@ -35,6 +54,11 @@ import { kitClasses } from '@tree-weaver/kits';
 import {
   addRule,
   allKits,
+  applyLayout,
+  gridAreasEdit,
+  setDisplay,
+  setSmallScreen,
+  setStyleValues,
   currentTree,
   extractClass,
   findRule,
@@ -54,6 +78,7 @@ import {
 } from '../../store/actions';
 import { state } from '../../store/editor';
 import { nodeKind, nodeLabel } from '../../utils/describe';
+import { areaColor } from '../../utils/areas';
 import { canvasElement } from '../../utils/frame';
 import { Icon } from '../../utils/icons';
 import { describeHref, matchStyles, type MatchedRule, type StyleGroup } from '../../utils/matched-styles';
@@ -104,6 +129,8 @@ const SUGGEST: Record<string, string[]> = {
   'grid-template-columns': ['1fr', 'repeat(2, minmax(0, 1fr))', 'repeat(3, minmax(0, 1fr))', 'repeat(4, minmax(0, 1fr))', 'repeat(auto-fit, minmax(220px, 1fr))', '260px minmax(0, 1fr)'],
   'grid-column': ['auto', 'span 2', 'span 3', '1 / -1'],
   'grid-row': ['auto', 'span 2', '1 / -1'],
+  'grid-template-areas': ['none', '"header header" "sidebar main"'],
+  'grid-area': ['auto'],
   'text-align': ['left', 'center', 'right', 'justify', 'start', 'end'],
   'font-weight': ['300', '400', '500', '600', '700', '800'],
   position: ['static', 'relative', 'absolute', 'fixed', 'sticky'],
@@ -142,6 +169,26 @@ export class TwInspector {
   @State() newDecl = { prop: '', value: '' };
   @State() stylesOpen = false;
   @State() styleFilter = '';
+  /** The area name the painter paints with; `.` empties cells. */
+  @State() brush = '';
+  @State() newArea = '';
+  /** The cell a paint drag started on, and the cell under the pointer now. */
+  @State() paintFrom: [number, number] | null = null;
+  @State() paintTo: [number, number] | null = null;
+  /** Commits a paint drag that ends anywhere on the page. */
+  private endPaint: (() => void) | null = null;
+
+  connectedCallback() {
+    const up = () => this.endPaint?.();
+    window.addEventListener('pointerup', up);
+    this.disconnect = () => window.removeEventListener('pointerup', up);
+  }
+
+  disconnectedCallback() {
+    this.disconnect?.();
+  }
+
+  private disconnect?: () => void;
 
   private styleField(branch: Branch, prop: string, label: string, opts: FieldOpts = {}) {
     const display = state.display as DisplayId;
@@ -471,13 +518,17 @@ export class TwInspector {
           </div>
           {this.styleField(branch, 'display', 'Display')}
           {isGrid && [
+            this.renderLayoutPicker(branch, effective, !effective['grid-template-columns']),
             this.renderColumns(branch, effective),
-            this.styleField(branch, 'gap', 'Gap'),
+            this.renderAreas(branch, effective),
+            this.renderGap(branch, effective),
+            this.renderSmallScreens(branch),
             this.styleField(branch, 'justify-items', 'Justify items'),
             this.styleField(branch, 'align-items', 'Align items'),
             <details class="advanced">
               <summary>Advanced grid CSS</summary>
               {this.styleField(branch, 'grid-template-columns', 'Columns')}
+              {this.styleField(branch, 'grid-template-areas', 'Areas')}
               {this.styleField(branch, 'grid-template-rows', 'Rows')}
               {this.styleField(branch, 'grid-auto-flow', 'Flow')}
             </details>,
@@ -487,8 +538,9 @@ export class TwInspector {
             this.styleField(branch, 'flex-wrap', 'Wrap', { options: SUGGEST['flex-wrap'] }),
             this.styleField(branch, 'justify-content', 'Justify'),
             this.styleField(branch, 'align-items', 'Align'),
-            this.styleField(branch, 'gap', 'Gap'),
+            this.renderGap(branch, effective),
           ]}
+          {!isGrid && !isFlex && mode !== 'none' ? this.renderLayoutPicker(branch, effective, false, 'Start from a grid layout') : null}
         </div>
       </details>
     );
@@ -529,8 +581,8 @@ export class TwInspector {
     const inherited = inheritedStyles(branch.styles, display)['grid-template-columns'];
     const auto = parseAutoColumns(template);
     const tracks = auto ? null : parseTracks(template);
-    const set = (value: string) => setStyleValue(branch.id, 'grid-template-columns', value);
-    const setTracks = (next: GridTrack[]) => set(formatTracks(next));
+    const set = (value: string, removed?: number) => this.setColumns(branch, effective, value, removed);
+    const setTracks = (next: GridTrack[], removed?: number) => set(formatTracks(next), removed);
     const count = tracks ? tracks.length : countTracks(template);
     const equal = tracks?.every((t) => t.kind === 'share' && t.value === 1) ?? false;
     return (
@@ -603,7 +655,7 @@ export class TwInspector {
     );
   }
 
-  private renderTrack(track: GridTrack, index: number, tracks: GridTrack[], setTracks: (next: GridTrack[]) => void) {
+  private renderTrack(track: GridTrack, index: number, tracks: GridTrack[], setTracks: (next: GridTrack[], removed?: number) => void) {
     const replace = (next: GridTrack) => setTracks(tracks.map((t, i) => (i === index ? next : t)));
     const changeKind = (kind: GridTrack['kind']) => {
       if (kind === 'share') replace({ kind, value: 1 });
@@ -657,7 +709,7 @@ export class TwInspector {
             }}
           />
         )}
-        <button class="icon-btn" title="Remove column" aria-label={`Remove column ${index + 1}`} disabled={tracks.length <= 1} onClick={() => setTracks(tracks.filter((_, i) => i !== index))}>
+        <button class="icon-btn" title="Remove column" aria-label={`Remove column ${index + 1}`} disabled={tracks.length <= 1} onClick={() => setTracks(tracks.filter((_, i) => i !== index), index)}>
           <Icon name="x" />
         </button>
       </li>
@@ -701,7 +753,48 @@ export class TwInspector {
     const setCol = (next: GridSpan) => this.setGridValue(branch, 'grid-column', formatSpan(next));
     const setRow = (next: GridSpan) => this.setGridValue(branch, 'grid-row', formatSpan(next));
     const spans = Array.from({ length: Math.min(Math.max(count, 3), 6) }, (_, i) => i + 1);
+    const names = areaNames(parseAreas(parentStyles['grid-template-areas']) ?? []);
+    const area = own['grid-area'] && names.includes(own['grid-area']) ? own['grid-area'] : '';
+    const areaField = names.length ? (
+      <div class="field" key={`${branch.id}:${display}:area`}>
+        <label htmlFor="grid-area" title="grid-area" class={{ overridden: !!branch.styles[display]?.['grid-area'] }}>
+          Area
+        </label>
+        <select
+          id="grid-area"
+          class="select"
+          onChange={(e) => {
+            const v = (e.target as HTMLSelectElement).value;
+            const inherited = inheritedStyles(branch.styles, display)['grid-area'];
+            setStyleValues(branch.id, { 'grid-area': v || (inherited && inherited !== 'auto' ? 'auto' : null), 'grid-column': null, 'grid-row': null });
+          }}
+        >
+          <option value="" selected={!area}>
+            None: next free spot
+          </option>
+          {names.map((n) => (
+            <option value={n} selected={area === n}>
+              {n}
+            </option>
+          ))}
+        </select>
+        <span />
+      </div>
+    ) : null;
+    if (area) {
+      return [
+        areaField,
+        <p class="hint">Sits in the “{area}” area of {nodeLabel(parent)}. Paint the area bigger or smaller there, or pick None to size this box by columns.</p>,
+        this.styleField(branch, 'justify-self', 'Justify self'),
+        this.styleField(branch, 'align-self', 'Align self'),
+        <details class="advanced">
+          <summary>Advanced grid CSS</summary>
+          {this.styleField(branch, 'grid-area', 'Area')}
+        </details>,
+      ];
+    }
     return [
+      areaField,
       col ? (
         [
           <div class="field" key={`${branch.id}:${display}:wide`}>
@@ -765,8 +858,276 @@ export class TwInspector {
         <summary>Advanced grid CSS</summary>
         {this.styleField(branch, 'grid-column', 'Column')}
         {this.styleField(branch, 'grid-row', 'Row')}
+        {this.styleField(branch, 'grid-area', 'Area')}
       </details>,
     ];
+  }
+
+  /**
+   * Write new columns. Named areas follow along: a removed column takes its cells with it,
+   * and added columns stretch the areas on the right edge, so the areas stay valid.
+   */
+  private setColumns(branch: Branch, effective: StyleMap, value: string, removed?: number) {
+    const areas = parseAreas(effective['grid-template-areas']);
+    const count = parseTracks(value)?.length ?? 0;
+    if (!areas?.length || !count || areas[0].length === count) {
+      setStyleValue(branch.id, 'grid-template-columns', value);
+      return;
+    }
+    const trimmed = removed !== undefined ? removeAreaColumn(areas, removed) : areas;
+    setStyleValues(branch.id, { 'grid-template-columns': value, 'grid-template-areas': formatAreas(resizeAreas(trimmed, trimmed.length, count)) });
+  }
+
+  /** Pictures of ready-made grids; picking one sets columns, areas and boxes. */
+  private renderLayoutPicker(branch: Branch, effective: StyleMap, open: boolean, title = 'Layouts') {
+    const current = matchGridLayout(effective);
+    return (
+      <details class="advanced layouts" open={open} key={`${branch.id}:layouts:${title}`}>
+        <summary>{current ? `${title} · ${current.label}` : title}</summary>
+        <div class="layout-picker" role="group" aria-label="Grid layouts">
+          {GRID_LAYOUTS.map((l) => (
+            <button class="layout-thumb" aria-pressed={String(current?.id === l.id)} title={l.hint} onClick={() => applyLayout(branch.id, l.id)}>
+              <span
+                class="layout-pic"
+                aria-hidden="true"
+                style={{ gridTemplateColumns: l.picture.map((n) => `${n}fr`).join(' '), gridTemplateAreas: l.areas ? formatAreas(l.areas) : '' }}
+              >
+                {l.areas
+                  ? areaNames(l.areas).map((n) => <i class={{ main: n === 'main' || n === 'large' || n === 'hero' }} style={{ gridArea: n }} />)
+                  : Array.from({ length: l.id === 'cards' ? 6 : (l.boxes ?? 1) }, () => <i />)}
+              </span>
+              <span class="layout-name">{l.label}</span>
+            </button>
+          ))}
+        </div>
+        <p class="hint">Applies to {getDisplay(state.display as DisplayId).label}. Boxes are added for any area that has no child yet.</p>
+      </details>
+    );
+  }
+
+  /** Paint named areas onto the grid's cells, and choose which box sits in each. */
+  private renderAreas(branch: Branch, effective: StyleMap) {
+    const display = state.display as DisplayId;
+    const template = effective['grid-template-columns'];
+    const auto = parseAutoColumns(template);
+    const cols = parseTracks(template)?.length || countTracks(template) || 1;
+    const parsed = parseAreas(effective['grid-template-areas']);
+    const own = branch.styles[display]?.['grid-template-areas'];
+    const has = !!parsed?.length;
+    const names = areaNames(parsed ?? []);
+    let body;
+    if (auto) {
+      body = <p class="hint">Named areas need a set number of columns. Choose “Set number” under Columns to use them.</p>;
+    } else if (!parsed) {
+      body = [
+        <p class="hint">These areas use CSS the painter can’t read. Edit them under Advanced, or start over.</p>,
+        <button class="btn small" onClick={() => gridAreasEdit(branch.id, 'clear')}>
+          Start over
+        </button>,
+      ];
+    } else if (!has) {
+      body = [
+        <p class="hint">Name parts of the grid, like header or sidebar, then paint where each one goes. Boxes are placed by area, so each display can move them around.</p>,
+        <button class="btn small" onClick={() => gridAreasEdit(branch.id, 'start')}>
+          <Icon name="plus" /> Add an area for each box
+        </button>,
+      ];
+    } else {
+      body = this.renderAreaPainter(branch, parsed, cols, names);
+    }
+    return (
+      <details class="advanced areas" open={has} key={`${branch.id}:${display}:areas`}>
+        <summary class={{ overridden: !!own }}>Named areas{names.length ? ` · ${names.length}` : ''}</summary>
+        {body}
+        {own && has && display !== 'lg' ? (
+          <button class="link-btn" onClick={() => setStyleValue(branch.id, 'grid-template-areas', null)}>
+            Use the same areas as {getDisplay(getDisplay(display).inherits.slice(-1)[0] ?? 'lg').label}
+          </button>
+        ) : null}
+      </details>
+    );
+  }
+
+  private renderAreaPainter(branch: Branch, parsed: GridAreas, cols: number, names: string[]) {
+    const areas = parsed[0].length === cols ? parsed : resizeAreas(parsed, parsed.length, cols);
+    const brush = this.brush === EMPTY_AREA || isAreaName(this.brush) ? this.brush : (names[0] ?? EMPTY_AREA);
+    const shown = this.paintFrom && this.paintTo ? paintAreas(areas, this.paintFrom, this.paintTo, brush) : areas;
+    const broken = brokenAreas(shown);
+    const commit = (next: GridAreas) => setStyleValue(branch.id, 'grid-template-areas', formatAreas(next));
+    this.endPaint = this.paintFrom
+      ? () => {
+          const from = this.paintFrom;
+          const to = this.paintTo;
+          this.paintFrom = this.paintTo = null;
+          if (from && to) commit(paintAreas(areas, from, to, brush));
+        }
+      : null;
+    const brushes = names.includes(brush) || brush === EMPTY_AREA ? names : [...names, brush];
+    const children = branch.children.filter(isBranch);
+    const display = state.display as DisplayId;
+    const filled = new Set(children.map((c) => resolveStyles(c.styles, display)['grid-area']));
+    const addArea = () => {
+      const name = this.newArea.trim();
+      if (!isAreaName(name)) {
+        toast('Area names start with a letter and use letters, numbers, - or _.', 'error');
+        return;
+      }
+      this.brush = name;
+      this.newArea = '';
+    };
+    return [
+      <div class="area-brushes" role="group" aria-label="Paint with">
+        {brushes.map((n) => (
+          <button class="area-chip" aria-pressed={String(brush === n)} style={{ '--area': areaColor(n, names) }} onClick={() => (this.brush = n)}>
+            {n}
+          </button>
+        ))}
+        <button class="area-chip empty" aria-pressed={String(brush === EMPTY_AREA)} title="Paint cells back to empty" onClick={() => (this.brush = EMPTY_AREA)}>
+          Empty
+        </button>
+      </div>,
+      <form
+        class="row area-new"
+        onSubmit={(e) => {
+          e.preventDefault();
+          addArea();
+        }}
+      >
+        <input class="input mono" placeholder="new-area" aria-label="New area name" value={this.newArea} onInput={(e) => (this.newArea = (e.target as HTMLInputElement).value)} />
+        <button class="btn small" type="submit" disabled={!this.newArea.trim()}>
+          Paint new
+        </button>
+      </form>,
+      <div class="area-grid" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
+        {shown.map((row, r) =>
+          row.map((cell, c) => {
+            const b = cell === EMPTY_AREA ? null : areaBounds(shown, cell);
+            const first = b && b.top === r && b.left === c;
+            return (
+              <button
+                class={{ 'area-cell': true, empty: cell === EMPTY_AREA }}
+                style={cell === EMPTY_AREA ? {} : { '--area': areaColor(cell, names) }}
+                aria-label={`Row ${r + 1}, column ${c + 1}: ${cell === EMPTY_AREA ? 'empty' : cell}. Paint with ${brush === EMPTY_AREA ? 'empty' : brush}`}
+                onPointerDown={(e) => {
+                  if (e.button !== 0) return;
+                  (e.target as Element).releasePointerCapture?.(e.pointerId);
+                  this.paintFrom = [r, c];
+                  this.paintTo = [r, c];
+                }}
+                onPointerEnter={() => {
+                  if (this.paintFrom) this.paintTo = [r, c];
+                }}
+                onClick={(e) => {
+                  // Keyboard presses paint one cell; pointer drags commit on release.
+                  if ((e as MouseEvent).detail === 0) commit(paintAreas(areas, [r, c], [r, c], brush));
+                }}
+              >
+                {first ? cell : ''}
+              </button>
+            );
+          }),
+        )}
+      </div>,
+      <div class="row wrap area-rows">
+        <button class="btn small" onClick={() => commit(resizeAreas(areas, areas.length + 1, cols))}>
+          <Icon name="plus" /> Row
+        </button>
+        <button class="btn small" disabled={areas.length <= 1} onClick={() => commit(removeAreaRow(areas, areas.length - 1))}>
+          − Row
+        </button>
+        <span class="grow" />
+        <button class="link-btn" onClick={() => gridAreasEdit(branch.id, 'clear')}>
+          Remove areas
+        </button>
+      </div>,
+      <p class="hint">Drag across cells to paint a rectangle.</p>,
+      broken.length ? (
+        <p class="hint warn">
+          {broken.map((n) => `“${n}”`).join(', ')} {broken.length === 1 ? 'isn’t a rectangle' : 'aren’t rectangles'}, so browsers ignore these areas until {broken.length === 1 ? 'it is' : 'they are'}.
+        </p>
+      ) : null,
+      names.some((n) => !filled.has(n)) ? (
+        <p class="hint">
+          No box in {names.filter((n) => !filled.has(n)).map((n) => `“${n}”`).join(', ')} yet. Select a box inside this grid and pick its Area.
+        </p>
+      ) : null,
+    ];
+  }
+
+  /** Gap in words, with the exact value still editable. */
+  private renderGap(branch: Branch, effective: StyleMap) {
+    const display = state.display as DisplayId;
+    const preset = gapPreset(effective.gap);
+    const own = branch.styles[display]?.gap;
+    return [
+      <div class="grid-columns-head gap-head" key={`${branch.id}:${display}:gap-presets`}>
+        <span class={{ 'grid-label': true, overridden: !!own }}>Gap</span>
+        <div class="segmented" role="group" aria-label="Gap between boxes">
+          {GAP_PRESETS.map((g) => (
+            <button aria-pressed={String(preset?.id === g.id)} title={`${g.label} gap (${g.value})`} onClick={() => setStyleValue(branch.id, 'gap', g.value)}>
+              {g.label}
+            </button>
+          ))}
+        </div>
+      </div>,
+      this.styleField(branch, 'gap', 'Exact gap'),
+    ];
+  }
+
+  /** What the grid does on each display narrower than desktop. */
+  private renderSmallScreens(branch: Branch) {
+    const current = state.display as DisplayId;
+    const options: [string, string, SmallScreenChoice][] = [
+      ['keep', '', { kind: 'keep' }],
+      ['stack', 'Stack (one column)', { kind: 'stack' }],
+      ['2', '2 columns', { kind: 'columns', count: 2 }],
+      ['3', '3 columns', { kind: 'columns', count: 3 }],
+    ];
+    const keyOf = (c: SmallScreenChoice) => (c.kind === 'columns' ? String(c.count) : c.kind);
+    return (
+      <div class="small-screens" key={`${branch.id}:small-screens`}>
+        <span class="grid-label">On smaller screens</span>
+        {smallerDisplays().map((d) => {
+          const choice = readSmallScreen(branch, d);
+          const key = keyOf(choice);
+          const known = options.some(([k]) => k === key);
+          return (
+            <div class={{ field: true, overridden: choice.kind !== 'keep', current: d === current }}>
+              <label htmlFor={`small-${d}`} title={getDisplay(d).media ?? ''}>
+                {getDisplay(d).label}
+              </label>
+              <select
+                id={`small-${d}`}
+                class="select"
+                onChange={(e) => {
+                  const v = (e.target as HTMLSelectElement).value;
+                  if (v === 'custom') {
+                    setDisplay(d);
+                    toast(`Showing ${getDisplay(d).label}: change the columns or areas here and they apply to it only.`);
+                    return;
+                  }
+                  const picked = options.find(([k]) => k === v);
+                  if (picked) setSmallScreen(branch.id, d, picked[2]);
+                }}
+              >
+                {options.map(([k, label, c]) => (
+                  <option value={k} selected={key === k}>
+                    {label || keepLabel(d)}
+                  </option>
+                ))}
+                <option value="custom" selected={!known || key === 'custom'}>
+                  {known ? 'Custom…' : 'Custom (set on this display)'}
+                </option>
+              </select>
+              <button class="icon-btn" title={`Show ${getDisplay(d).label}`} aria-label={`Show ${getDisplay(d).label}`} disabled={d === current} onClick={() => setDisplay(d)}>
+                <Icon name="eye" />
+              </button>
+            </div>
+          );
+        })}
+        <p class="hint">Stacking or fewer columns also re-flows named areas and pulls wide boxes back inside the grid.</p>
+      </div>
+    );
   }
 
   private renderTable(branch: Branch) {
@@ -1123,3 +1484,10 @@ export class TwInspector {
   }
 }
 
+
+
+/** "Same as LG": short, so it fits beside the display name. */
+function keepLabel(display: DisplayId): string {
+  const from = getDisplay(display).inherits.slice(-1)[0];
+  return from ? `Same as ${getDisplay(from).short}` : 'Same';
+}

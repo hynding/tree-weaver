@@ -72,6 +72,10 @@ Custom properties (`"--gap": "8px"`) and `var(--token)` work.
 
 - **Grid:** `display: grid` plus `grid-template-columns` on `lg`, fewer columns on `tablet` and
   `mobile-portrait`. Children are the cells; span with `grid-column: span 2`.
+- **Named areas:** `grid-template-areas` on the grid (`"\"header header\" \"nav main\""`) and
+  `grid-area: header` on each child. Every area must be a rectangle. To stack on a phone, give that
+  display one column and the same names one per row (`"\"header\" \"nav\" \"main\""`); the
+  children keep their `grid-area`.
 - **Flex row:** `display: flex`, `gap`, `align-items`; switch to `flex-direction: column` on
   `mobile-portrait` to stack.
 - **Table:** real markup: `table` > `thead` / `tbody` > `tr` > `th` / `td`, with text leaves in the cells.
