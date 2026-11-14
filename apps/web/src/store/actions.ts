@@ -54,7 +54,21 @@ import {
   type Tree,
   type TreeNode,
 } from '@tree-weaver/core';
-import { exportForest, exportStorybook, exportTree, getFormat, importDocument, suggestFileName, zipStorybook, type FormatId, type TreeDocument } from '@tree-weaver/formats';
+import {
+  exportComponent,
+  exportForest,
+  exportStorybook,
+  exportTree,
+  getFormat,
+  importDocument,
+  suggestFileName,
+  zip,
+  zipStorybook,
+  type ComponentFramework,
+  type ComponentStyling,
+  type FormatId,
+  type TreeDocument,
+} from '@tree-weaver/formats';
 import { createEnvKits, createStarterKit, fetchKitCss, isEnvKit } from '@tree-weaver/kits';
 import { DISPLAYS_LOCKED, ENV_CSS_URLS, ENV_DISPLAYS } from '../config';
 import { createForestStore, MemoryForestStore, Preferences, type ForestStore } from '@tree-weaver/storage';
@@ -873,6 +887,20 @@ export function exportStorybookCurrent(scope: 'tree' | 'forest'): ExportOutput {
   const listing = project.files.map((f) => `  ${f.path}`).join('\n');
   const text = `${project.name}/\n${listing}\n${stories ? `\n// ${stories.path}\n${stories.content}` : ''}`;
   return { text, fileName: `${project.name}.zip`, mime: 'application/zip', bytes: zipStorybook(project) };
+}
+
+/** The current tree as a React, Vue or Svelte component (or HTML + CSS files); several files come as a zip. */
+export function exportComponentCurrent(framework: ComponentFramework, styling: ComponentStyling): ExportOutput {
+  const tree = currentTree()!;
+  // Only the forest's kits: the deployment's stylesheets are the host app's to load.
+  const out = exportComponent(tree, { framework, styling, kits: state.forest!.kits });
+  if (out.files.length === 1) {
+    const file = out.files[0];
+    return { text: file.contents, fileName: file.path, mime: 'text/plain' };
+  }
+  const text = out.files.map((f) => `/* ===== ${f.path} ===== */\n${f.contents}`).join('\n');
+  const folder = framework === 'html' ? suggestFileName(tree.name, 'tree', 'html').replace(/\.tree\.html$|\.html$/, '') : out.name;
+  return { text, fileName: `${folder}.zip`, mime: 'application/zip', bytes: zip(out.files.map((f) => ({ path: `${folder}/${f.path}`, content: f.contents }))) };
 }
 
 export function download(output: ExportOutput): void {

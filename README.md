@@ -58,6 +58,8 @@ The same words are used in the code (`Forest`, `Tree`, `Branch`, `Leaf`) and in 
   in a browser tab, and _Forest in new tab_ opens a list of every tree linking to its page. New tabs are
   snapshots: open them again after more edits.
 - **Upload and download tree data** as JSON, YAML, XML, HTML, Markdown or SVG (see below).
+- **Export a component** for an app: React, Vue or Svelte, or HTML with CSS files, styled with a
+  stylesheet or with Tailwind classes (see [`docs/export.md`](docs/export.md)).
 - **Download a Storybook project** for a tree or the whole forest, or **import stories from a built
   Storybook** as palette branches or trees (see [Storybook](#storybook)).
 - **Save locally**: forests autosave to IndexedDB (falling back to `localStorage`), and you can keep
@@ -189,15 +191,16 @@ HTML and CSS written with the default breakpoints still maps back to the right d
 Tree Weaver data is plain JSON (or YAML) with a published contract, so agents can write it directly:
 
 - The **MCP server** ([`docs/mcp.md`](docs/mcp.md)): `npx -y @tree-weaver/mcp` gives Claude, Cursor, VS Code and other MCP clients
-  tools to create, patch, validate, render and screenshot trees.
+  tools to create, patch, validate, render, screenshot and export trees.
 - **Embedding and links** ([`docs/embed.md`](docs/embed.md)): a `<tree-weaver-editor>` element for other apps, and editor links
   that open a document (`?src=<url>`, or `#doc=` from `npx tree-weaver link file.json`).
-- The **`tree-weaver` CLI** ([`docs/cli.md`](docs/cli.md)): `npx tree-weaver new | validate | render | convert | add | patch | expand | outline | kit | schema`,
+- The **`tree-weaver` CLI** ([`docs/cli.md`](docs/cli.md)): `npx tree-weaver new | validate | render | export | convert | add | patch | expand | outline | kit | schema`,
   with `--json` reports. `npm i tree-weaver` also installs every library (`@tree-weaver/core`, `formats`, `kits`, `branches`, `storage`).
 
 - [`docs/format.md`](docs/format.md): the format guide, with the display cascade and layout recipes.
 - [`docs/shorthand.md`](docs/shorthand.md): a compact authoring form (`"h2: Title"`, `{ "grid": 3, ... }`, `"@card"`)
   that `tree-weaver expand` turns into full documents.
+- [`docs/export.md`](docs/export.md): trees as React, Vue or Svelte components (CSS or Tailwind) with `tree-weaver export`.
 - [`docs/patch.md`](docs/patch.md): patches, lists of edits (`insert`, `move`, `setStyles`, …) applied with
   `tree-weaver patch` or `applyPatch`, all or nothing.
 - [`schema/tree-weaver-v1.schema.json`](schema/tree-weaver-v1.schema.json): the JSON Schema (draft 2020-12),

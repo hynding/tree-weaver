@@ -53,6 +53,7 @@ or set `TW_CHROMIUM_PATH` to a Chrome or Chromium binary. Every other tool works
 | `patch_tree` | Apply [patch operations](patch.md) in order, all or nothing: `insert`, `replace`, `remove`, `move`, `duplicate`, `wrap`, `update`, `setStyles`, `setText`. Nodes may be shorthand. Writes the file back, or returns the result for an inline `document`. `dryRun` describes the changes without writing. |
 | `validate` | The strict check, with a path and a fix hint for every problem. |
 | `render_html` | A standalone HTML page with kits and responsive CSS inlined. |
+| `export_component` | A tree as a React, Vue or Svelte component, or HTML with CSS files, styled with a CSS file or Tailwind classes. Returns every file, or writes them into `outputDir`. See [exporting components](export.md). |
 | `convert` | Between JSON, YAML, XML, HTML, Markdown and SVG. |
 | `screenshot` | A PNG per display (default `lg`, `tablet`, `mobile-portrait`) from headless Chromium, with page height and a warning when content overflows sideways. Scripts are disabled while rendering. |
 | `catalog` | Blueprints, templates, displays or formats. |
@@ -71,6 +72,7 @@ to fix, and a failed patch changes nothing.
 | `tree-weaver://guide/format` | [Format guide](format.md) |
 | `tree-weaver://guide/shorthand` | [Shorthand guide](shorthand.md) |
 | `tree-weaver://guide/patch` | [Patch guide](patch.md) |
+| `tree-weaver://guide/export` | [Component export guide](export.md) |
 | `tree-weaver://catalog/blueprints`, `…/templates` | The building blocks, as JSON |
 
 The `build_layout` prompt takes a brief and walks the model through create, refine, validate and

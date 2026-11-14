@@ -1,14 +1,14 @@
 import { Component, Prop, State, h } from '@stencil/core';
-import { detectFormat, FORMATS, hasDrawing, type FormatId } from '@tree-weaver/formats';
-import { currentTree, download, exportCurrent, exportStorybookCurrent, importText, toast, type ExportOutput } from '../../store/actions';
+import { COMPONENT_FRAMEWORKS, detectFormat, FORMATS, hasDrawing, type ComponentFramework, type ComponentStyling, type FormatId } from '@tree-weaver/formats';
+import { currentTree, download, exportComponentCurrent, exportCurrent, exportStorybookCurrent, importText, toast, type ExportOutput } from '../../store/actions';
 import { state } from '../../store/editor';
 import { STORYBOOK_IMPORT_ENABLED } from '../../config';
 import { Icon } from '../../utils/icons';
 
 const ACCEPT = FORMATS.flatMap((f) => f.extensions.map((e) => `.${e}`)).join(',');
 
-/** Export targets: every data format, plus a Storybook project. */
-type ExportTarget = FormatId | 'storybook';
+/** Export targets: every data format, a Storybook project, or a component for a codebase. */
+type ExportTarget = FormatId | 'storybook' | 'component';
 
 /** Upload and download trees and forests in JSON, YAML, XML, HTML and Markdown, or download them as a Storybook project. */
 @Component({ tag: 'tw-io-dialog' })
@@ -17,6 +17,8 @@ export class TwIoDialog {
 
   @State() format: ExportTarget = 'json';
   @State() scope: 'tree' | 'forest' = 'tree';
+  @State() framework: ComponentFramework = 'react';
+  @State() styling: ComponentStyling = 'css';
   @State() pasted = '';
   @State() pasteFormat: FormatId | 'auto' = 'auto';
   @State() error = '';
@@ -36,7 +38,9 @@ export class TwIoDialog {
 
   private output(): ExportOutput | null {
     try {
-      return this.format === 'storybook' ? exportStorybookCurrent(this.scope) : exportCurrent(this.format, this.scope);
+      if (this.format === 'storybook') return exportStorybookCurrent(this.scope);
+      if (this.format === 'component') return exportComponentCurrent(this.framework, this.styling);
+      return exportCurrent(this.format, this.scope);
     } catch (err) {
       return { text: `Error: ${(err as Error).message}`, fileName: '', mime: 'text/plain' };
     }
@@ -68,11 +72,14 @@ export class TwIoDialog {
   private renderExport() {
     const tree = currentTree();
     const drawing = !!tree && hasDrawing(tree);
-    const forestOnly = (id: ExportTarget) => id !== 'storybook' && this.scope === 'forest' && !FORMATS.find((f) => f.id === id)!.forest;
+    const forestOnly = (id: ExportTarget) =>
+      id === 'component' ? this.scope === 'forest' : id !== 'storybook' && this.scope === 'forest' && !FORMATS.find((f) => f.id === id)!.forest;
     const unavailable = (id: ExportTarget) => forestOnly(id) || (id === 'svg' && !drawing);
     if (unavailable(this.format)) this.format = 'json';
     const storybook = this.format === 'storybook';
+    const component = this.format === 'component';
     const out = this.output();
+    const zipped = !!out?.bytes;
     return [
       <div class="dialog-body">
         <div class="row wrap">
@@ -105,12 +112,45 @@ export class TwIoDialog {
             <strong>Storybook</strong>
             <small>Stories project (zip)</small>
           </button>
+          <button
+            class="format-option"
+            aria-pressed={String(component)}
+            disabled={forestOnly('component')}
+            title={forestOnly('component') ? 'A component holds a single tree' : undefined}
+            onClick={() => (this.format = 'component')}
+          >
+            <strong>Component</strong>
+            <small>React, Vue, Svelte</small>
+          </button>
         </div>
+        {component ? (
+          <div class="row wrap">
+            <div class="segmented" role="group" aria-label="Framework">
+              {COMPONENT_FRAMEWORKS.map((f) => (
+                <button aria-pressed={String(this.framework === f.id)} title={f.label} onClick={() => (this.framework = f.id)}>
+                  {f.id === 'html' ? 'HTML + CSS' : f.label.split(' ')[0]}
+                </button>
+              ))}
+            </div>
+            <div class="segmented" role="group" aria-label="Styles">
+              <button aria-pressed={String(this.styling === 'css')} onClick={() => (this.styling = 'css')}>
+                CSS file
+              </button>
+              <button aria-pressed={String(this.styling === 'tailwind')} onClick={() => (this.styling = 'tailwind')}>
+                Tailwind
+              </button>
+            </div>
+          </div>
+        ) : null}
         <textarea class="preview" readOnly aria-label="Export preview">
           {out?.text}
         </textarea>
         <p class="hint" style={{ margin: '0' }}>
-          {storybook
+          {component
+            ? this.styling === 'tailwind'
+              ? 'Source code for your app, with Tailwind classes (v3.4+ or v4) and each display as a responsive variant. Design kits come along in kits.css.'
+              : 'Source code for your app, with a stylesheet of readable, namespaced class names and a media query per display. Design kits come along in kits.css.'
+            : storybook
             ? 'A Storybook project: a story for each tree, each display type and each named branch, with text and images editable as controls. Unzip it, then run npm install and npm run storybook.'
             : this.format === 'html'
               ? 'A standalone page with your kits and responsive CSS inlined. It imports back with every branch and style.'
@@ -124,7 +164,7 @@ export class TwIoDialog {
       <footer>
         <button
           class="btn"
-          disabled={!out?.fileName || storybook}
+          disabled={!out?.fileName || storybook || zipped}
           onClick={async () => {
             await navigator.clipboard.writeText(out!.text);
             toast('Copied to the clipboard', 'success');

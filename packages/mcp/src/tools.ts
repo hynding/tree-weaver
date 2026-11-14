@@ -18,6 +18,7 @@ import {
 } from '@tree-weaver/core';
 import {
   detectFormat,
+  exportComponent,
   exportForest,
   exportTree,
   FORMATS,
@@ -28,6 +29,8 @@ import {
   parseData,
   toEnvelope,
   validateText,
+  type ComponentFramework,
+  type ComponentStyling,
   type FormatId,
   type TreeDocument,
 } from '@tree-weaver/formats';
@@ -233,6 +236,26 @@ export class Tools {
     for (const file of args.kits ?? []) kits.push(kitFromFile(file, await this.ws.read(file)));
     const html = exportTree(tree, 'html', kits);
     return this.deliver(args.output, html, `HTML page for "${tree.name}" (${html.length} characters).`, { tree: { id: tree.id, name: tree.name } });
+  }
+
+  async exportComponent(
+    args: Source & { framework: ComponentFramework; styling?: ComponentStyling; tree?: string; name?: string; typescript?: boolean; outputDir?: string; kits?: string[] },
+  ): Promise<ToolOutput> {
+    const { doc } = await this.load(args);
+    const tree = pickTree(doc, args.tree);
+    const kits = [...kitsOf(doc)];
+    for (const file of args.kits ?? []) kits.push(kitFromFile(file, await this.ws.read(file)));
+    const out = exportComponent(tree, { framework: args.framework, styling: args.styling, kits, name: args.name, typescript: args.typescript });
+    const summary = `${out.name}: "${tree.name}" as ${args.framework} with ${out.styling === 'tailwind' ? 'Tailwind classes' : 'a CSS file'} (${out.files.length} file${out.files.length === 1 ? '' : 's'}, entry ${out.entry}).`;
+    const meta = { name: out.name, framework: out.framework, styling: out.styling, entry: out.entry };
+    if (args.outputDir) {
+      const dir = args.outputDir.replace(/[\\/]+$/, '');
+      const written: string[] = [];
+      for (const f of out.files) written.push(await this.ws.write(`${dir}/${f.path}`, f.contents));
+      return { text: `${summary}\nWrote ${written.join(', ')}.`, data: { ...meta, files: written } };
+    }
+    const text = out.files.map((f) => `===== ${f.path} =====\n${f.contents}`).join('\n');
+    return { text: `${summary}\n\n${text}`, data: { ...meta, files: out.files.map((f) => f.path) } };
   }
 
   async convert(args: Source & { to: FormatId; tree?: string; output?: string }): Promise<ToolOutput> {

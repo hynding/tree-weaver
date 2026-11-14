@@ -329,3 +329,34 @@ describe('tree-weaver link', () => {
     expect((await cli(['link', 'x.json', '--editor', 'nope'])).code).toBe(2);
   });
 });
+
+describe('tree-weaver export', () => {
+  const files = () => ({ 'page.json': example('landing-page.tree.json') });
+
+  it('writes a React component, its CSS and kits to a folder', async () => {
+    const r = await cli(['export', 'page.json', '-o', 'src/components/', '--json'], files());
+    expect(r.code).toBe(0);
+    const report = JSON.parse(r.out);
+    expect(report.entry).toMatch(/^src\/components\/\w+\.jsx$/);
+    expect(r.files[report.entry]).toContain('export default function');
+    expect(report.files.some((p: string) => p.endsWith('.css'))).toBe(true);
+  });
+
+  it('prints Vue with Tailwind, and several files with headers', async () => {
+    const vue = await cli(['export', 'page.json', '-f', 'vue', '-s', 'tailwind'], files());
+    expect(vue.code).toBe(0);
+    expect(vue.out).toContain('<template>');
+    expect(vue.out).toContain('<style src="./kits.css">');
+    const html = await cli(['export', 'page.json', '--framework', 'html'], files());
+    expect(html.out).toContain('===== index.html =====');
+    expect(html.out).toContain('===== base.css =====');
+  });
+
+  it('names the component, writes TypeScript and rejects unknown frameworks', async () => {
+    const r = await cli(['export', 'page.json', '--ts', '-n', 'Home', '-o', 'out', '--json'], files());
+    expect(JSON.parse(r.out).entry).toBe('out/Home.tsx');
+    const bad = await cli(['export', 'page.json', '-f', 'angular'], files());
+    expect(bad.code).toBe(2);
+    expect(bad.err).toContain('react, vue, svelte, html');
+  });
+});

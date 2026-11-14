@@ -45,6 +45,9 @@ Use these words in code, UI text, docs and commit messages:
    `{ "op": "setStyles", "target": "/1", "styles": { "padding": "2rem" } }`.
 8. Open the file in the [live editor](https://hynding.github.io/tree-weaver/) with Upload, or
    render it in code with `exportTree(tree, 'html', kits)` from `@tree-weaver/formats`.
+9. To put the layout into an app, export it as a component: `npx tree-weaver export page.tree.json
+   --framework react|vue|svelte|html [--styling tailwind] -o src/components/`, or
+   `exportComponent(tree, { framework, styling, kits })`. See [`docs/export.md`](docs/export.md).
 
 Working examples are in [`examples/`](examples/); a test keeps them valid.
 
@@ -59,6 +62,7 @@ npx tree-weaver add home.tree.json card --parent /2/0/1 # or --node '{"tag":"p",
 npx tree-weaver patch home.tree.json --ops '[{"op":"setText","target":"/1/0","value":"Hi"}]'
 npx tree-weaver validate home.tree.json                 # exits 1 with path + fix hint per error
 npx tree-weaver render home.tree.json -o home.html
+npx tree-weaver export home.tree.json -f react -o src/ # React/Vue/Svelte component, CSS or Tailwind
 ```
 
 `expand` turns shorthand into a full document, `convert` moves between JSON, YAML, XML, HTML, Markdown and SVG, `kit` lists a stylesheet's
@@ -69,7 +73,7 @@ classes and tokens, and `schema` prints the JSON Schema. Every command takes `--
 Agents in MCP clients can use `@tree-weaver/mcp` instead of the CLI: `claude mcp add tree-weaver --
 npx -y @tree-weaver/mcp --root .`, or `{ "command": "npx", "args": ["-y", "@tree-weaver/mcp"] }` in a
 client's `mcpServers`. Tools: `create_tree`, `outline`, `patch_tree`, `validate`, `render_html`,
-`convert`, `screenshot` (a PNG per display), `catalog`, `kit_manifest`. The schemas and guides are
+`export_component`, `convert`, `screenshot` (a PNG per display), `catalog`, `kit_manifest`. The schemas and guides are
 resources (`tree-weaver://guide/shorthand`, …). Full guide: [`docs/mcp.md`](docs/mcp.md).
 
 ## Handing a tree to a person
@@ -94,7 +98,7 @@ Useful entry points:
   `resolveRef`, `TREE_WEAVER_PATCH_SCHEMA`; `normalizeForest` /
   `normalizeTree` (lenient); `validateDocument` (strict); `renderDocument`; `TREE_WEAVER_SCHEMA`.
 - `@tree-weaver/formats`: `importDocument(text, format?)`, `exportTree`, `exportForest`,
-  `validateText`, `exportStorybook`.
+  `validateText`, `exportStorybook`, `exportComponent` (React, Vue, Svelte, HTML; CSS or Tailwind).
 - `@tree-weaver/branches`: ready-made blueprints (`BLUEPRINTS`, `responsiveGrid`, `flexRow`,
   `card`, …), tree templates (`TEMPLATES`) and the shorthand (`expandShorthand`,
   `expandShorthandDocument`).

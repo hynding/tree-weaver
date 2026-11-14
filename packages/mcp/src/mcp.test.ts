@@ -38,7 +38,7 @@ describe('Tree Weaver MCP server', () => {
   it('lists its tools, resources and prompt, with instructions', async () => {
     const { client } = await connect();
     const tools = (await client.listTools()).tools.map((t) => t.name);
-    expect(tools).toEqual(expect.arrayContaining(['create_tree', 'outline', 'patch_tree', 'validate', 'render_html', 'convert', 'screenshot', 'catalog', 'kit_manifest']));
+    expect(tools).toEqual(expect.arrayContaining(['create_tree', 'outline', 'patch_tree', 'validate', 'render_html', 'export_component', 'convert', 'screenshot', 'catalog', 'kit_manifest']));
     expect(client.getInstructions()).toContain('patch_tree');
     const resources = (await client.listResources()).resources.map((r) => r.uri);
     expect(resources).toContain('tree-weaver://schema/document');
@@ -138,6 +138,21 @@ describe('Tree Weaver MCP server', () => {
     expect(yaml.text).toMatch(/format: tree-weaver/);
     const md = await call('convert', { path: 'p.json', to: 'markdown' });
     expect(md.text).toContain('keeps the content but not every style');
+  });
+
+  it('exports components inline or into a folder', async () => {
+    const { call } = await connect();
+    writeFileSync(join(root, 'p.json'), example('landing-page.tree.json'));
+    const vue = await call('export_component', { path: 'p.json', framework: 'vue', styling: 'tailwind' });
+    expect(vue.isError).toBeFalsy();
+    expect(vue.text).toContain('<template>');
+    expect(vue.structuredContent!.entry).toMatch(/\.vue$/);
+    const react = await call('export_component', { path: 'p.json', framework: 'react', typescript: true, name: 'Home', outputDir: 'src/ui' });
+    expect(react.text).toContain('Wrote src/ui/Home.tsx');
+    expect(readFileSync(join(root, 'src/ui/Home.tsx'), 'utf8')).toContain('export default function Home()');
+    expect(existsSync(join(root, 'src/ui/Home.css'))).toBe(true);
+    const escape = await call('export_component', { path: 'p.json', framework: 'html', outputDir: '../outside' });
+    expect(escape.isError).toBe(true);
   });
 
   it('lists the catalog and kit classes', async () => {

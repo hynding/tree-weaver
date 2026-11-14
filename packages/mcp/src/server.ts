@@ -24,7 +24,8 @@ and leaves (text, images, SVG shapes). Styles are keyed by display: "lg" is the 
 
 Workflow: create_tree (from a template or compact shorthand) -> outline (paths like /1/0 and ids) ->
 patch_tree (small edits by path or id; nodes may be shorthand such as "h2: Pricing" or "@card") ->
-validate -> screenshot (see each display) or render_html. Prefer the design kit's classes
+validate -> screenshot (see each display) or render_html, and export_component to hand the layout to a
+React, Vue or Svelte codebase. Prefer the design kit's classes
 (kit_manifest) over inline styles. Read tree-weaver://guide/shorthand and tree-weaver://guide/patch
 for the full syntax. File paths are relative to the server's workspace folder.`;
 
@@ -157,6 +158,27 @@ export function createServer(options: ServerOptions = {}): McpServer {
   );
 
   server.registerTool(
+    'export_component',
+    {
+      title: 'Export a component',
+      description:
+        'Turn a tree into source code for a codebase: a React (.jsx/.tsx), Vue or Svelte component, or an HTML page with CSS files. Styles become a CSS file with readable class names, or Tailwind classes with displays as responsive variants; design kits go to kits.css. Returns every file, or writes them into "outputDir".',
+      inputSchema: {
+        ...source,
+        framework: z.enum(['react', 'vue', 'svelte', 'html']).describe('What to write'),
+        styling: z.enum(['css', 'tailwind']).optional().describe('css (default): a stylesheet with generated classes; tailwind: utility classes'),
+        tree: treeRef,
+        name: z.string().optional().describe('Component name (default: from the tree name, in PascalCase)'),
+        typescript: z.boolean().optional().describe('React only: write .tsx'),
+        outputDir: z.string().optional().describe('Workspace folder to write the files into, instead of returning them'),
+        kits: z.array(z.string()).optional().describe('Extra .css files in the workspace to add as design kits'),
+      },
+      annotations: { ...writes, readOnlyHint: false, title: 'Export a component' },
+    },
+    wrap((args) => tools.exportComponent(args)),
+  );
+
+  server.registerTool(
     'convert',
     {
       title: 'Convert a document',
@@ -216,6 +238,7 @@ export function createServer(options: ServerOptions = {}): McpServer {
     { name: 'format-guide', uri: 'tree-weaver://guide/format', title: 'Format guide', description: 'The model, displays and cascade, layout recipes, kits, validation', mimeType: 'text/markdown', read: () => readDoc('format.md') },
     { name: 'shorthand-guide', uri: 'tree-weaver://guide/shorthand', title: 'Shorthand guide', description: 'Compact authoring syntax for nodes and documents', mimeType: 'text/markdown', read: () => readDoc('shorthand.md') },
     { name: 'patch-guide', uri: 'tree-weaver://guide/patch', title: 'Patch guide', description: 'Every patch operation with examples', mimeType: 'text/markdown', read: () => readDoc('patch.md') },
+    { name: 'export-guide', uri: 'tree-weaver://guide/export', title: 'Component export guide', description: 'React, Vue, Svelte and HTML exports, class naming and Tailwind display variants', mimeType: 'text/markdown', read: () => readDoc('export.md') },
     { name: 'blueprints', uri: 'tree-weaver://catalog/blueprints', title: 'Blueprints', description: 'Ready-made branches', mimeType: 'application/json', read: () => json(BLUEPRINTS.map(({ id, label, category, description }) => ({ id, label, category, description }))) },
     { name: 'templates', uri: 'tree-weaver://catalog/templates', title: 'Templates', description: 'Tree templates for create_tree', mimeType: 'application/json', read: () => json(TEMPLATES.map(({ id, label, description }) => ({ id, label, description }))) },
   ];
