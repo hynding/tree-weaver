@@ -1,0 +1,183 @@
+import { describe, expect, it } from 'vitest';
+import { createBranch, createForest, createKit, createTree, insertNode, moveNode, removeNode, setStyle, text, type Branch, type Forest, type Tree } from '@tree-weaver/core';
+import { keyBetween, LOCAL_ORIGIN, newRoom, orderKeys, parseRoomHash, readForest, roomHash, sharedTypes, writeForest, Y } from './index';
+
+const b = (id: string, init: Parameters<typeof createBranch>[0]): Branch => ({ ...createBranch(init), id });
+
+function sample(): Forest {
+  const root = b('root', { tag: 'body' });
+  root.children = [b('h', { tag: 'header', name: 'Header' }), b('m', { tag: 'main', name: 'Main', children: [{ ...text('Hello'), id: 'txt' }] }), b('f', { tag: 'footer', name: 'Footer' })];
+  const tree: Tree = { ...createTree('Home', root), id: 't1' };
+  const forest = { ...createForest('Site', [tree]), id: 'forest1' };
+  forest.kits = [{ ...createKit('Base', 'body{}'), id: 'k1' }];
+  return forest;
+}
+
+const withRoot = (f: Forest, fn: (root: Branch) => Branch): Forest => ({ ...f, trees: f.trees.map((t, i) => (i === 0 ? { ...t, root: fn(t.root) } : t)) });
+
+/** Two peers that exchange every update. */
+function pair() {
+  const a = new Y.Doc();
+  const c = new Y.Doc();
+  a.on('update', (u: Uint8Array, origin: unknown) => origin !== 'remote' && Y.applyUpdate(c, u, 'remote'));
+  c.on('update', (u: Uint8Array, origin: unknown) => origin !== 'remote' && Y.applyUpdate(a, u, 'remote'));
+  return { a, c };
+}
+
+/** Two peers that are offline from each other until `sync()`. */
+function offline() {
+  const a = new Y.Doc();
+  const c = new Y.Doc();
+  const sync = () => {
+    Y.applyUpdate(c, Y.encodeStateAsUpdate(a, Y.encodeStateVector(c)), 'remote');
+    Y.applyUpdate(a, Y.encodeStateAsUpdate(c, Y.encodeStateVector(a)), 'remote');
+  };
+  return { a, c, sync };
+}
+
+const strip = (f: Forest | null) => JSON.parse(JSON.stringify(f));
+
+describe('order keys', () => {
+  it('makes keys between any two keys', () => {
+    let keys = [keyBetween(undefined, undefined)];
+    for (let i = 0; i < 40; i++) keys = [keyBetween(undefined, keys[0]), ...keys];
+    for (let i = 0; i < 40; i++) keys.push(keyBetween(keys[keys.length - 1], undefined));
+    for (let i = 0; i < 40; i++) keys.splice(1, 0, keyBetween(keys[0], keys[1]));
+    expect([...keys].sort()).toEqual(keys);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it('keeps keys in order and only re-keys what moved', () => {
+    const old = { a: '1', b: '2', c: '3', d: '4' } as Record<string, string>;
+    const next = orderKeys(['b', 'c', 'd', 'a'], (id) => old[id]);
+    expect([next.get('b'), next.get('c'), next.get('d')]).toEqual(['2', '3', '4']);
+    expect(next.get('a')! > '4').toBe(true);
+  });
+});
+
+describe('forest documents', () => {
+  it('round-trips a forest', () => {
+    const doc = new Y.Doc();
+    const f = sample();
+    writeForest(doc, null, f);
+    expect(strip(readForest(doc))).toEqual({ ...strip(f), updatedAt: expect.any(String) });
+  });
+
+  it('merges concurrent edits to different nodes and to different parts of one node', () => {
+    const { a, c, sync } = offline();
+    const base = sample();
+    writeForest(a, null, base);
+    sync();
+    const fa = readForest(a)!;
+    const fc = readForest(c)!;
+    // A changes the header's tablet styles and the text; C changes the header's base styles and adds a node.
+    const na = withRoot(fa, (r) => {
+      const s = setStyle(r, 'h', 'tablet', 'padding', '1rem');
+      return { ...s, children: s.children.map((n) => (n.id === 'm' ? { ...(n as Branch), children: [{ ...text('Hi'), id: 'txt' }] } : n)) };
+    });
+    writeForest(a, fa, na);
+    const nc = withRoot(fc, (r) => insertNode(setStyle(r, 'h', 'lg', 'color', 'red'), 'root', b('new', { tag: 'aside', name: 'Aside' })));
+    writeForest(c, fc, nc);
+    sync();
+    const ra = strip(readForest(a));
+    expect(ra).toEqual(strip(readForest(c)));
+    const root = ra.trees[0].root;
+    expect(root.children.map((n: Branch) => n.id)).toEqual(['h', 'm', 'f', 'new']);
+    expect(root.children[0].styles).toEqual({ lg: { color: 'red' }, tablet: { padding: '1rem' } });
+    expect(root.children[1].children[0].value).toBe('Hi');
+  });
+
+  it('moves a node without touching its siblings, and resolves concurrent moves of one node', () => {
+    const { a, c, sync } = offline();
+    writeForest(a, null, sample());
+    sync();
+    const fa = readForest(a)!;
+    const fc = readForest(c)!;
+    writeForest(a, fa, withRoot(fa, (r) => moveNode(r, 'f', 'root', 0)));
+    writeForest(c, fc, withRoot(fc, (r) => moveNode(r, 'f', 'm')));
+    sync();
+    const ra = readForest(a)!;
+    expect(strip(ra)).toEqual(strip(readForest(c)));
+    // The node is in exactly one place.
+    const ids = JSON.stringify(ra).match(/"id":"f"/g);
+    expect(ids).toHaveLength(1);
+  });
+
+  it('keeps work added under a branch someone else deleted', () => {
+    const { a, c, sync } = offline();
+    writeForest(a, null, sample());
+    sync();
+    const fa = readForest(a)!;
+    const fc = readForest(c)!;
+    writeForest(a, fa, withRoot(fa, (r) => removeNode(r, 'm')));
+    writeForest(c, fc, withRoot(fc, (r) => insertNode(r, 'm', b('kid', { tag: 'p', name: 'Kid' }))));
+    sync();
+    const root = readForest(a)!.trees[0].root;
+    expect(root.children.map((n) => n.id)).toEqual(['h', 'f', 'kid']);
+    expect(strip(readForest(a))).toEqual(strip(readForest(c)));
+  });
+
+  it('breaks a loop made by two concurrent moves', () => {
+    const { a, c, sync } = offline();
+    const base = withRoot(sample(), (r) => ({ ...r, children: [b('x', { tag: 'div' }), b('y', { tag: 'div' })] }));
+    writeForest(a, null, base);
+    sync();
+    const fa = readForest(a)!;
+    const fc = readForest(c)!;
+    writeForest(a, fa, withRoot(fa, (r) => moveNode(r, 'x', 'y')));
+    writeForest(c, fc, withRoot(fc, (r) => moveNode(r, 'y', 'x')));
+    sync();
+    const f = readForest(a)!;
+    expect(strip(f)).toEqual(strip(readForest(c)));
+    expect(JSON.stringify(f).match(/"id":"[xy]"/g)).toHaveLength(2);
+  });
+
+  it('merges two copies of the same forest without duplicating anything', () => {
+    const { a, c, sync } = offline();
+    writeForest(a, null, sample());
+    writeForest(c, null, sample());
+    sync();
+    const f = readForest(a)!;
+    expect(f.trees).toHaveLength(1);
+    expect(f.trees[0].root.children.map((n) => n.id)).toEqual(['h', 'm', 'f']);
+  });
+
+  it('syncs trees, kits and names live', () => {
+    const { a, c } = pair();
+    const f = sample();
+    writeForest(a, null, f);
+    const extra = { ...createTree('About'), id: 't2' };
+    const next = { ...f, name: 'Shop', trees: [extra, ...f.trees], kits: [...f.kits, { ...createKit('More', 'p{}'), id: 'k2' }] };
+    writeForest(a, f, next);
+    const r = readForest(c)!;
+    expect(r.name).toBe('Shop');
+    expect(r.trees.map((t) => t.id)).toEqual(['t2', 't1']);
+    expect(r.kits.map((k) => k.id)).toEqual(['k1', 'k2']);
+    writeForest(a, next, { ...next, trees: [f.trees[0]] });
+    expect(readForest(c)!.trees.map((t) => t.id)).toEqual(['t1']);
+  });
+
+  it('undoes only local changes', () => {
+    const { a, c } = pair();
+    const f = sample();
+    writeForest(a, null, f, 'setup');
+    const undo = new Y.UndoManager(sharedTypes(a), { trackedOrigins: new Set([LOCAL_ORIGIN]) });
+    const mine = withRoot(f, (r) => removeNode(r, 'f'));
+    writeForest(a, f, mine);
+    const fc = readForest(c)!;
+    writeForest(c, fc, withRoot(fc, (r) => setStyle(r, 'h', 'lg', 'color', 'blue')));
+    undo.undo();
+    const r = readForest(a)!.trees[0].root;
+    expect(r.children.map((n) => n.id)).toEqual(['h', 'm', 'f']);
+    expect((r.children[0] as Branch).styles.lg).toEqual({ color: 'blue' });
+  });
+});
+
+describe('rooms', () => {
+  it('puts the room and key in the hash', () => {
+    const room = newRoom();
+    expect(parseRoomHash(`#${roomHash(room)}`)).toEqual(room);
+    expect(parseRoomHash('#doc=abc&' + roomHash(room))).toEqual(room);
+    expect(parseRoomHash('#collab=nope')).toBeNull();
+  });
+});

@@ -11,10 +11,13 @@
   },
   "dependencies": {
     "@tree-weaver/branches": "workspace:*",
+    "@tree-weaver/collab": "workspace:*",
     "@tree-weaver/core": "workspace:*",
     "@tree-weaver/formats": "workspace:*",
     "@tree-weaver/kits": "workspace:*",
-    "@tree-weaver/storage": "workspace:*"
+    "@tree-weaver/storage": "workspace:*",
+    "y-webrtc": "^10.3.0",
+    "yjs": "^13.6.33"
   },
   "devDependencies": {
     "@stencil/core": "^4.45.2",

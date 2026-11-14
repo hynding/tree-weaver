@@ -3,6 +3,8 @@ import { DISPLAYS } from '@tree-weaver/core';
 import { redo, renameForest, setDisplay, switchTree, undo } from '../../store/actions';
 import { state } from '../../store/editor';
 import { isEmbedded } from '../../store/embed-flags';
+import { COLLAB_ENABLED } from '../../config';
+import { PEER_COLORS } from '../../utils/peers';
 import { BrandMark, DisplayIcon, Icon } from '../../utils/icons';
 
 const SAVE_LABEL = { saved: 'Saved locally', saving: 'Saving…', unsaved: 'Unsaved changes', error: 'Save failed' } as const;
@@ -71,6 +73,25 @@ export class TwToolbar {
           <span class={{ 'save-state': true, 'hide-narrow': true, error: state.saveState === 'error' }} title={`Storage: ${state.storageKind}`}>
             {SAVE_LABEL[state.saveState]}
           </span>
+        )}
+        {COLLAB_ENABLED && !isEmbedded() && (
+          <button
+            class={{ 'bar-btn': true, sharing: state.collabStatus !== 'off' }}
+            title={state.collabStatus === 'live' ? `Shared live · ${state.collabPeers.length + 1} here` : state.collabStatus === 'joining' ? 'Joining…' : 'Edit this forest together with others'}
+            onClick={() => (state.dialog = 'share')}
+          >
+            {state.collabStatus === 'off' ? (
+              <Icon name="users" />
+            ) : (
+              <span class="peer-stack" aria-hidden="true">
+                <span class="peer-dot" style={{ background: PEER_COLORS[state.collabColor] }} />
+                {state.collabPeers.slice(0, 4).map((p) => (
+                  <span class="peer-dot" style={{ background: PEER_COLORS[p.color] }} title={p.name} />
+                ))}
+              </span>
+            )}
+            <span class="hide-narrow">{state.collabStatus === 'joining' ? 'Joining…' : state.collabStatus === 'live' ? `Live · ${state.collabPeers.length + 1}` : 'Share'}</span>
+          </button>
         )}
         <button class="bar-btn" title="See the tree as it ships, without the editor" onClick={() => (state.preview = true)}>
           <Icon name="eye" />

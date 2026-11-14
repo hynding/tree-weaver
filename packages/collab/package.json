@@ -1,0 +1,50 @@
+{
+  "name": "@tree-weaver/collab",
+  "version": "0.1.0",
+  "description": "Live collaboration for Tree Weaver forests: a Yjs document model that merges concurrent edits per node and field.",
+  "license": "MIT",
+  "keywords": [
+    "tree-weaver",
+    "layout",
+    "page-builder",
+    "responsive"
+  ],
+  "homepage": "https://github.com/hynding/tree-weaver#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hynding/tree-weaver.git",
+    "directory": "packages/collab"
+  },
+  "bugs": "https://github.com/hynding/tree-weaver/issues",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "!src/**/*.test.ts"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node ../../scripts/esm-extensions.mjs dist",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepack": "node ../../scripts/copy-license.mjs"
+  },
+  "dependencies": {
+    "@tree-weaver/core": "workspace:*",
+    "yjs": "^13.6.33"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -36,11 +36,13 @@ import { BLUEPRINT_MIME, LIBRARY_MIME, NODE_MIME, dropPosition, hasType, isTreeD
 import { areaColor } from '../../utils/areas';
 import { canvasElement, setCanvasDocument } from '../../utils/frame';
 import { handleShortcut } from '../../utils/shortcuts';
+import { PEER_CANVAS_CSS } from '../../utils/peers';
 
 /** Outlines for hover, selection and drop targets, plus room to drop into empty branches. */
 const EDITOR_CSS = `
 [data-tw-hover] { outline: 1px dashed #2563eb !important; outline-offset: -1px; }
 [data-tw-selected] { outline: 2px solid #2563eb !important; outline-offset: -2px; }
+${PEER_CANVAS_CSS}
 [data-tw]:not(img, hr, br, input, body):empty { min-height: 2.25rem; min-width: 2.25rem; outline: 1px dashed #b7c2bc; outline-offset: -1px;
   background: repeating-linear-gradient(45deg, rgba(47,111,79,.04) 0 6px, transparent 6px 12px); }
 [data-tw-drop="inside"] { box-shadow: inset 0 0 0 2px #2563eb !important; background-color: rgba(37,99,235,.06) !important; }
@@ -120,6 +122,7 @@ export class TwCanvas {
     if (this.stage) this.observer.observe(this.stage);
     // Hover does not change what this component renders, so follow it directly.
     this.unsubscribe.push(onChange('hoverId', () => this.sync()));
+    this.unsubscribe.push(onChange('collabPeers', () => this.sync()));
     if (this.iframe) {
       this.iframe.addEventListener('load', () => this.onFrameLoad());
       this.iframe.srcdoc = SKELETON;
@@ -250,11 +253,27 @@ export class TwCanvas {
     if (changed) state.canvasVersion++;
     this.mark('data-tw-selected', state.selectedId);
     this.mark('data-tw-hover', state.hoverId && state.hoverId !== state.selectedId ? state.hoverId : null);
+    this.markPeers();
     this.drawGrid();
   }
 
   private find(id: string | null): Element | null {
     return this.doc ? canvasElement(id) : null;
+  }
+
+  /** Outline what collaborators in the same tree have selected, in their colours. */
+  private markPeers() {
+    const doc = this.doc;
+    if (!doc) return;
+    doc.querySelectorAll('[data-tw-peer]').forEach((el) => el.removeAttribute('data-tw-peer'));
+    for (const p of state.collabPeers) {
+      if (p.treeId !== state.treeId || !p.selectedId) continue;
+      const el = this.find(p.selectedId);
+      if (el) {
+        el.setAttribute('data-tw-peer', String(p.color));
+        el.setAttribute('data-tw-peer-name', p.name);
+      }
+    }
   }
 
   private mark(attr: string, id: string | null) {

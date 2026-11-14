@@ -4,6 +4,7 @@ import { state } from '../../store/editor';
 import { startLinks } from '../../store/embed';
 import { initLibraries } from '../../store/storybook';
 import { initVersions } from '../../store/versions';
+import { startCollab } from '../../store/collab';
 import { handleShortcut } from '../../utils/shortcuts';
 
 @Component({ tag: 'tw-app' })
@@ -17,6 +18,7 @@ export class TwApp {
       void initLibraries();
       initVersions();
       void startLinks();
+      startCollab();
     } catch (err) {
       console.error(err);
       toast(`Tree Weaver could not start: ${(err as Error).message}`, 'error');
@@ -43,7 +45,7 @@ export class TwApp {
     return (
       <Host class={{ 'left-open': this.leftOpen, 'right-open': this.rightOpen }}>
         {state.ready && state.forest ? (
-          [<tw-toolbar />, <tw-sidebar />, <tw-canvas />, <tw-inspector />, state.dialog === 'displays' ? <tw-display-settings /> : state.dialog === 'storybook' ? <tw-storybook-import /> : state.dialog ? <tw-io-dialog mode={state.dialog} /> : null, state.preview ? <tw-preview /> : null]
+          [<tw-toolbar />, <tw-sidebar />, <tw-canvas />, <tw-inspector />, state.dialog === 'displays' ? <tw-display-settings /> : state.dialog === 'storybook' ? <tw-storybook-import /> : state.dialog === 'share' ? <tw-share-dialog /> : state.dialog ? <tw-io-dialog mode={state.dialog} /> : null, state.preview ? <tw-preview /> : null]
         ) : (
           <div class="app-loading">Gathering your forests…</div>
         )}

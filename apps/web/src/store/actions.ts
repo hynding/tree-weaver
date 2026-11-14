@@ -113,7 +113,22 @@ const prefs = new Preferences({
 const history = new History<Forest>(150);
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 
+/** Undo and redo in a shared forest, which undo only this editor's changes (see store/collab.ts). */
+export interface HistoryOverride {
+  undo(): void;
+  redo(): void;
+  /** Update `canUndo` and `canRedo`. */
+  flags(): void;
+}
+let historyOverride: HistoryOverride | null = null;
+
+export function setHistoryOverride(o: HistoryOverride | null): void {
+  historyOverride = o;
+  syncHistoryFlags();
+}
+
 function syncHistoryFlags() {
+  if (historyOverride) return historyOverride.flags();
   state.canUndo = history.canUndo;
   state.canRedo = history.canRedo;
 }
@@ -161,6 +176,12 @@ export function historyTimeline(): TimelineEntry<Forest>[] {
 /** Jump `offset` steps through the undo history (negative goes back). */
 export function goToHistory(offset: number): void {
   if (!state.forest) return;
+  if (historyOverride) {
+    // Shared: going back is a new change for everyone, not a rewind of this tab's stack.
+    const entry = history.timeline(state.forest).find((e) => e.offset === offset);
+    if (entry) commit(withCurrentBreakpoints(entry.state), true, { label: 'Went back to an earlier state' });
+    return;
+  }
   const reached = history.go(state.forest, offset);
   if (reached) commit(withCurrentBreakpoints(reached), false);
   syncHistoryFlags();
@@ -223,6 +244,7 @@ function openLoaded(forest: Forest, treeId: string) {
 
 export function undo(): void {
   if (!state.forest) return;
+  if (historyOverride) return historyOverride.undo();
   const prev = history.undo(state.forest);
   if (prev) commit(withCurrentBreakpoints(prev), false);
   syncHistoryFlags();
@@ -230,6 +252,7 @@ export function undo(): void {
 
 export function redo(): void {
   if (!state.forest) return;
+  if (historyOverride) return historyOverride.redo();
   const next = history.redo(state.forest);
   if (next) commit(withCurrentBreakpoints(next), false);
   syncHistoryFlags();

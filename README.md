@@ -30,6 +30,11 @@ The same words are used in the code (`Forest`, `Tree`, `Branch`, `Leaf`) and in 
   inside an SVG, and HTML can't be dropped into one.
 - **Edit in place**: select anything in the canvas, double-click text to rewrite it, drag branches in
   the canvas or outline to reorder or re-parent them, and undo or redo every change.
+- **Edit together, live**: **Share** gives a link; everyone who opens it edits the same forest in real
+  time, sees who else is there and what they have selected, and keeps a copy in their own browser.
+  Changes merge branch by branch and field by field, and undo takes back only your own. It works
+  without a Tree Weaver server: browsers connect directly (WebRTC), encrypted with a key that lives
+  only in the link. See [collaboration](docs/collaboration.md).
 - **Look back and roll back**: the **History** tab lists every change this session, labelled with what
   changed ("Added Card", "Changed styles on Hero") and who made it (you, the host page, an agent); click
   one to go back to it. Save named versions of a forest, compare any version with what is open (added,
@@ -152,6 +157,9 @@ rebuild. The GitHub Pages workflow passes them from repository variables of the 
 | `TW_STORYBOOK_URLS`   | Built Storybook URLs, separated by spaces, offered in the Storybook import. Those on the same site as Tree Weaver are also read into the palette as _From Storybook_ libraries on first start (then kept, with a refresh button). |
 | `TW_STORYBOOK_INCLUDE` | Title globs, separated by commas or new lines, that limit which stories show up, e.g. `Components/**, Patterns/Card`. `*` matches within one level, `**` across levels. |
 | `TW_DISABLE_STORYBOOK_IMPORT` | `true` (or `1`, `yes`, `on`) hides the Storybook import. Libraries already in a browser's palette stay. |
+| `TW_DISABLE_COLLAB` | `true` (or `1`, `yes`, `on`) hides **Share** and ignores `#collab=` links. |
+| `TW_COLLAB_SIGNALING` | WebSocket signaling servers for live collaboration, separated by commas or spaces. Default: `wss://y-webrtc-eu.fly.dev`. Run your own with `npx y-webrtc-signaling` (see [collaboration](docs/collaboration.md)). |
+| `TW_COLLAB_ICE` | STUN/TURN servers for WebRTC, as JSON (`[{"urls":"turn:turn.example.com","username":"u","credential":"p"}]`). A TURN server lets people behind strict firewalls connect. It ends up in the public bundle, so use credentials meant for that. |
 
 ```sh
 TW_CSS_URLS="https://cdn.example.com/reset.css,https://cdn.example.com/theme.css" TW_DISABLE_CSS_URLS=true pnpm build
