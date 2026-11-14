@@ -8,6 +8,7 @@ import { exportSvg, importSvg } from './svg';
 import { exportXml, importXml } from './xml';
 
 export * from './types';
+export { diffDocuments } from './diff';
 export { exportJson, exportYaml, importJson, importYaml, toEnvelope, fromData, parseData, validateText, type Envelope } from './data';
 export { exportHtml, importHtml } from './html';
 export { exportMarkdown, importMarkdown, splitFrontMatter, escapeMarkdown } from './markdown';

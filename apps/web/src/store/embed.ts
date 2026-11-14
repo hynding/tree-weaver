@@ -1,8 +1,10 @@
-import { isDisplayId } from '@tree-weaver/core';
+import { applyPatch, formatDiff, diffLines, isDisplayId, replaceTree, type Tree } from '@tree-weaver/core';
+import { expandShorthand } from '@tree-weaver/branches';
 import { exportForest, exportTree, FORMATS, importDocument, type FormatId } from '@tree-weaver/formats';
 import type { EditorMessage, HostMessage } from '@tree-weaver/embed';
-import { allKits, currentTree, importText, openDocument, setDisplay, switchTree, toast } from './actions';
-import { onChange, state } from './editor';
+import { allKits, commit, currentTree, importText, openDocument, redo, setDisplay, switchTree, toast, undo } from './actions';
+import { compareWithCurrent, restoreVersion, saveVersion, versionBefore } from './versions';
+import { onChange, state, type ForestVersion } from './editor';
 import { allowedOrigins, isEmbedded, sourceUrl } from './embed-flags';
 
 /**
@@ -70,6 +72,30 @@ async function openFromUrl(): Promise<void> {
   }
 }
 
+function pickTree(ref: string | undefined): Tree {
+  const forest = state.forest!;
+  if (ref === undefined) {
+    const tree = currentTree();
+    if (!tree) throw new Error('No tree is open');
+    return tree;
+  }
+  const lower = String(ref).toLowerCase();
+  const tree = forest.trees.find((t) => t.id === ref) ?? forest.trees.find((t) => t.name.toLowerCase() === lower);
+  if (!tree) throw new Error(`No tree "${ref}"`);
+  return tree;
+}
+
+const versionInfo = (v: ForestVersion) => ({ id: v.id, name: v.name, createdAt: v.createdAt, source: v.source, auto: !!v.auto });
+
+/** A version by id, or by name (newest match). */
+function versionRef(ref: unknown): ForestVersion {
+  if (typeof ref !== 'string' || !ref) throw new Error('"version" is missing');
+  const lower = ref.toLowerCase();
+  const v = state.versions.find((x) => x.id === ref) ?? state.versions.find((x) => x.name.toLowerCase() === lower);
+  if (!v) throw new Error(`No version "${ref}"`);
+  return v;
+}
+
 function forestJson() {
   const forest = state.forest!;
   return JSON.parse(exportForest(forest, 'json')).forest;
@@ -83,7 +109,50 @@ async function handle(msg: HostMessage): Promise<unknown> {
       if (msg.document === undefined || msg.document === null) throw new Error('"document" is missing');
       if (msg.format !== undefined && !FORMAT_IDS.includes(msg.format)) throw new Error(`Unknown format "${msg.format}"`);
       const text = typeof msg.document === 'string' ? msg.document : JSON.stringify(msg.document);
-      return openDocument(importDocument(text, msg.format as FormatId | undefined));
+      const doc = importDocument(text, msg.format as FormatId | undefined);
+      // Reloading what is open (an edited copy) is a change worth being able to roll back.
+      const open = state.forest;
+      const replacing = !!open && (doc.kind === 'forest' ? doc.forest.id === open.id : open.trees.some((t) => t.id === doc.tree.id));
+      if (replacing) await versionBefore('host', msg.label ? `Before ${msg.label}` : 'Before a host page update');
+      return openDocument(doc, { source: 'host', ...(msg.label ? { label: msg.label } : {}) });
+    }
+    case 'patch': {
+      const forest = state.forest;
+      if (!forest) throw new Error('Nothing is open');
+      const tree = pickTree(msg.tree);
+      const result = applyPatch(tree.root, msg.ops, { expandNode: (value, path) => expandShorthand(value, path) });
+      if (!result.changes.length) return { changes: [], warnings: result.warnings };
+      await versionBefore('agent', msg.label ? `Before ${msg.label}` : 'Before an agent patch');
+      const updated: Tree = { ...tree, root: result.root, updatedAt: new Date().toISOString() };
+      // The forest may have changed while the version saved; patch the newest copy of the tree.
+      const current = state.forest!;
+      if (current.trees.find((t) => t.id === tree.id) !== tree) throw new Error('The tree changed while the patch was being applied; nothing was changed');
+      commit({ ...replaceTree(current, updated), updatedAt: updated.updatedAt }, true, { source: 'agent', ...(msg.label ? { label: msg.label } : {}) });
+      return { changes: result.changes, warnings: result.warnings };
+    }
+    case 'undo':
+      undo();
+      return { canUndo: state.canUndo, canRedo: state.canRedo };
+    case 'redo':
+      redo();
+      return { canUndo: state.canUndo, canRedo: state.canRedo };
+    case 'saveVersion': {
+      const v = await saveVersion(String(msg.name ?? ''), { source: 'host' });
+      if (!v) throw new Error('The version could not be saved');
+      return versionInfo(v);
+    }
+    case 'listVersions':
+      return state.versions.map(versionInfo);
+    case 'restoreVersion': {
+      const v = versionRef(msg.version);
+      restoreVersion(v.id);
+      return versionInfo(v);
+    }
+    case 'diff': {
+      const v = versionRef(msg.version);
+      const diff = compareWithCurrent(v.id);
+      if (!diff) throw new Error('Nothing is open');
+      return { empty: diff.empty, changes: diffLines(diff), text: formatDiff(diff) };
     }
     case 'getDocument': {
       const format = (msg.format ?? 'json') as FormatId;

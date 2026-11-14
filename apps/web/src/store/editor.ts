@@ -1,8 +1,8 @@
 import { createStore } from '@stencil/store';
-import type { DesignKit, DisplayId, DisplaySettings, Forest, ForestSummary } from '@tree-weaver/core';
+import type { ChangeSource, DesignKit, DisplayId, DisplaySettings, Forest, ForestSummary } from '@tree-weaver/core';
 import type { LibraryBranch } from '@tree-weaver/formats';
 
-export type SidebarTab = 'branches' | 'outline' | 'classes' | 'kits' | 'forest';
+export type SidebarTab = 'branches' | 'outline' | 'classes' | 'kits' | 'forest' | 'history';
 export type SaveState = 'saved' | 'saving' | 'unsaved' | 'error';
 export type DialogKind = null | 'export' | 'import' | 'displays' | 'storybook';
 
@@ -23,6 +23,17 @@ export interface StorybookLibrary {
   /** Design kits the library's branches need. They join a forest when one of its branches is first used. */
   kits: DesignKit[];
   importedAt: string;
+}
+
+/** A saved copy of a forest, named by someone or taken automatically before an outside change. */
+export interface ForestVersion {
+  id: string;
+  forestId: string;
+  name: string;
+  createdAt: string;
+  source: ChangeSource;
+  auto?: boolean;
+  forest: Forest;
 }
 
 export interface Toast {
@@ -66,6 +77,8 @@ export interface EditorState {
   libraries: StorybookLibrary[];
   /** Ids of libraries being (re)built in the background. */
   librariesLoading: string[];
+  /** Saved versions of the open forest, newest first. */
+  versions: ForestVersion[];
 }
 
 export const { state, onChange, reset } = createStore<EditorState>({
@@ -93,4 +106,5 @@ export const { state, onChange, reset } = createStore<EditorState>({
   displaysVersion: 0,
   libraries: [],
   librariesLoading: [],
+  versions: [],
 });

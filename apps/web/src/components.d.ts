@@ -26,6 +26,12 @@ export namespace Components {
     interface TwForestPanel {
     }
     /**
+     * The open forest's history: every undo step this session (with who made it: you, the host
+     * page, an agent), and versions saved in this browser, which can be compared and restored.
+     */
+    interface TwHistoryPanel {
+    }
+    /**
      * Properties for the selected branch or leaf; styles edit the current display only.
      */
     interface TwInspector {
@@ -110,6 +116,16 @@ declare global {
     var HTMLTwForestPanelElement: {
         prototype: HTMLTwForestPanelElement;
         new (): HTMLTwForestPanelElement;
+    };
+    /**
+     * The open forest's history: every undo step this session (with who made it: you, the host
+     * page, an agent), and versions saved in this browser, which can be compared and restored.
+     */
+    interface HTMLTwHistoryPanelElement extends Components.TwHistoryPanel, HTMLStencilElement {
+    }
+    var HTMLTwHistoryPanelElement: {
+        prototype: HTMLTwHistoryPanelElement;
+        new (): HTMLTwHistoryPanelElement;
     };
     /**
      * Properties for the selected branch or leaf; styles edit the current display only.
@@ -201,6 +217,7 @@ declare global {
         "tw-classes-panel": HTMLTwClassesPanelElement;
         "tw-display-settings": HTMLTwDisplaySettingsElement;
         "tw-forest-panel": HTMLTwForestPanelElement;
+        "tw-history-panel": HTMLTwHistoryPanelElement;
         "tw-inspector": HTMLTwInspectorElement;
         "tw-io-dialog": HTMLTwIoDialogElement;
         "tw-kits-panel": HTMLTwKitsPanelElement;
@@ -231,6 +248,12 @@ declare namespace LocalJSX {
      * Trees in the open forest, and every forest saved in this browser.
      */
     interface TwForestPanel {
+    }
+    /**
+     * The open forest's history: every undo step this session (with who made it: you, the host
+     * page, an agent), and versions saved in this browser, which can be compared and restored.
+     */
+    interface TwHistoryPanel {
     }
     /**
      * Properties for the selected branch or leaf; styles edit the current display only.
@@ -285,6 +308,7 @@ declare namespace LocalJSX {
         "tw-classes-panel": TwClassesPanel;
         "tw-display-settings": TwDisplaySettings;
         "tw-forest-panel": TwForestPanel;
+        "tw-history-panel": TwHistoryPanel;
         "tw-inspector": TwInspector;
         "tw-io-dialog": Omit<TwIoDialog, keyof TwIoDialogAttributes> & { [K in keyof TwIoDialog & keyof TwIoDialogAttributes]?: TwIoDialog[K] } & { [K in keyof TwIoDialog & keyof TwIoDialogAttributes as `attr:${K}`]?: TwIoDialogAttributes[K] } & { [K in keyof TwIoDialog & keyof TwIoDialogAttributes as `prop:${K}`]?: TwIoDialog[K] };
         "tw-kits-panel": TwKitsPanel;
@@ -314,6 +338,11 @@ declare module "@stencil/core" {
              * Trees in the open forest, and every forest saved in this browser.
              */
             "tw-forest-panel": LocalJSX.IntrinsicElements["tw-forest-panel"] & JSXBase.HTMLAttributes<HTMLTwForestPanelElement>;
+            /**
+             * The open forest's history: every undo step this session (with who made it: you, the host
+             * page, an agent), and versions saved in this browser, which can be compared and restored.
+             */
+            "tw-history-panel": LocalJSX.IntrinsicElements["tw-history-panel"] & JSXBase.HTMLAttributes<HTMLTwHistoryPanelElement>;
             /**
              * Properties for the selected branch or leaf; styles edit the current display only.
              */

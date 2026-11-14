@@ -30,6 +30,11 @@ The same words are used in the code (`Forest`, `Tree`, `Branch`, `Leaf`) and in 
   inside an SVG, and HTML can't be dropped into one.
 - **Edit in place**: select anything in the canvas, double-click text to rewrite it, drag branches in
   the canvas or outline to reorder or re-parent them, and undo or redo every change.
+- **Look back and roll back**: the **History** tab lists every change this session, labelled with what
+  changed ("Added Card", "Changed styles on Hero") and who made it (you, the host page, an agent); click
+  one to go back to it. Save named versions of a forest, compare any version with what is open (added,
+  removed, moved and changed branches, per display), and restore it as one undoable step. Changes a host
+  page or an agent sends in (`load`, `patch`) get an automatic version first.
 - **Tune every display**: desktop large (the base), desktop XL, tablet, mobile landscape and mobile
   portrait. Styles cascade: XL and tablet inherit desktop, both mobile displays inherit tablet. The
   inspector edits the current display and shows inherited values as placeholders.

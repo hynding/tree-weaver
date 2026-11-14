@@ -406,4 +406,50 @@ describe('tree-weaver lint', () => {
     expect((await cli(['lint', 'p.json', '-d', 'tv', '--render'], { 'p.json': '{}' })).code).toBe(2);
     expect((await cli(['lint', 'p.json', '-d', 'tablet'], { 'p.json': '{}' })).code).toBe(2);
   });
+
+  it('saves a version before patching, then diffs and restores it', async () => {
+    const files: Record<string, string> = {};
+    await cli(['new', 'p.json', '-T', 'landing', '-n', 'Home'], files);
+    const original = files['p.json'];
+    expect((await cli(['versions', 'p.json'], files)).out).toContain('No versions of p.json yet');
+    expect((await cli(['versions', 'p.json', 'save', '-n', 'First draft'], files)).out).toContain('Saved "First draft"');
+    await cli(['patch', 'p.json', '--ops', '[{"op":"insert","parent":"/","node":{"section":["h2: Pricing"],"name":"Pricing"}}]'], files);
+    expect(files['.tree-weaver/p.json.versions.json']).toBeDefined();
+    const list = JSON.parse((await cli(['versions', 'p.json', '--json'], files)).out);
+    expect(list.versions.map((v: { name: string; auto?: boolean }) => [v.name, !!v.auto])).toEqual([
+      ['First draft', false],
+      ['Before patch', true],
+    ]);
+    const diff = await cli(['versions', 'p.json', 'diff', 'latest'], files);
+    expect(diff.out).toContain('+ Added Pricing');
+    const restored = await cli(['versions', 'p.json', 'restore', 'first draft'], files);
+    expect(restored.code).toBe(0);
+    expect(files['p.json']).toBe(original);
+    // The patched file was kept before the restore, so the restore can be undone.
+    const after = JSON.parse((await cli(['versions', 'p.json', '--json'], files)).out).versions;
+    expect(after.at(-1).name).toBe('Before restoring "First draft"');
+    expect((await cli(['versions', 'p.json', 'restore', 'nope'], files)).code).toBe(1);
+    expect((await cli(['versions', 'p.json', 'fly'], files)).code).toBe(2);
+    await cli(['patch', 'p.json', '--no-version', '--ops', '[{"op":"remove","target":"/0"}]'], files);
+    expect(JSON.parse((await cli(['versions', 'p.json', '--json'], files)).out).versions).toHaveLength(3);
+    // A damaged log is never written over.
+    files['.tree-weaver/p.json.versions.json'] = '{"versions": [';
+    const damaged = await cli(['patch', 'p.json', '--ops', '[{"op":"remove","target":"/0"}]'], files);
+    expect(damaged.code).toBe(1);
+    expect(damaged.err).toContain('damaged');
+    expect(files['.tree-weaver/p.json.versions.json']).toBe('{"versions": [');
+  });
+
+  it('diffs two documents', async () => {
+    const files: Record<string, string> = {};
+    await cli(['new', 'a.json', '-T', 'landing'], files);
+    files['b.json'] = files['a.json'];
+    await cli(['patch', 'b.json', '--no-version', '--ops', '[{"op":"setStyles","target":"/0","styles":{"tablet":{"padding":"1rem"}}},{"op":"remove","target":"/1"}]'], files);
+    const r = await cli(['diff', 'a.json', 'b.json'], files);
+    expect(r.code).toBe(0);
+    expect(r.out).toMatch(/^~ Changed styles on .+$/m);
+    expect(r.out).toMatch(/^- Removed .+$/m);
+    const same = await cli(['diff', 'a.json', 'a.json', '--json'], files);
+    expect(JSON.parse(same.out).empty).toBe(true);
+  });
 });

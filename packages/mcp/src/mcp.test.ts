@@ -222,4 +222,28 @@ describe('Tree Weaver MCP server', () => {
     expect(Buffer.from(images[0].data!, 'base64').subarray(1, 4).toString()).toBe('PNG');
     expect(r.text).toContain('mobile-portrait: 390px wide');
   });
+
+  it('keeps a version before each patch, and diffs and restores it', async () => {
+    const { call } = await connect();
+    await call('create_tree', { path: 'home.json', template: 'landing', name: 'Home' });
+    const original = readFileSync(join(root, 'home.json'), 'utf8');
+    const r = await call('patch_tree', { path: 'home.json', label: 'add pricing', ops: [{ op: 'insert', parent: '/', node: { section: ['h2: Pricing'], name: 'Pricing' } }] });
+    expect(r.text).toContain('restore_version');
+    expect(existsSync(join(root, '.tree-weaver/home.json.versions.json'))).toBe(true);
+    const list = await call('list_versions', { path: 'home.json' });
+    expect(list.text).toContain('Before add pricing (automatic)');
+    const diff = await call('diff_versions', { path: 'home.json' });
+    expect(diff.text).toContain('+ Added Pricing');
+    await call('save_version', { path: 'home.json', name: 'with pricing' });
+    const restored = await call('restore_version', { path: 'home.json', version: '1' });
+    expect(restored.isError).toBeFalsy();
+    expect(readFileSync(join(root, 'home.json'), 'utf8')).toBe(original);
+    const back = await call('diff_versions', { path: 'home.json', version: 'with pricing' });
+    expect(back.text).toContain('- Removed Pricing');
+    const bad = await call('restore_version', { path: 'home.json', version: 'nope' });
+    expect(bad.isError).toBe(true);
+    const both = await call('diff', { before: { path: 'home.json' }, after: { path: 'home.json' } });
+    expect(both.text).toBe('No changes.');
+  });
 });
+

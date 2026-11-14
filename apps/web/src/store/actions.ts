@@ -18,12 +18,15 @@ import {
   findNode,
   findParent,
   History,
+  type ChangeMeta,
+  type TimelineEntry,
   inSvgContext,
   insertNode,
   isBranch,
   isEditableKit,
   moveNode,
   removeNode,
+  replaceTree,
   removeTableColumn,
   removeTableRow,
   parseRulesCss,
@@ -137,17 +140,30 @@ export async function saveNow(): Promise<void> {
   }
 }
 
-/** Replace the forest. Records an undo step unless `record` is false. */
-export function commit(next: Forest, record = true): void {
+/** Replace the forest. Records an undo step unless `record` is false; `meta` says where the change came from (default: the editor). */
+export function commit(next: Forest, record = true, meta: ChangeMeta = {}): void {
   const prev = state.forest;
   if (next === prev) return;
-  if (record && prev) history.push(prev);
+  if (record && prev) history.push(prev, { source: 'editor', ...meta });
   state.forest = next;
   if (!next.trees.some((t) => t.id === state.treeId)) state.treeId = next.trees[0]?.id ?? '';
   const tree = currentTree();
   if (state.selectedId && (!tree || !findNode(tree.root, state.selectedId))) state.selectedId = null;
   syncHistoryFlags();
   scheduleSave();
+}
+
+/** Every state in this session's undo history, oldest first; the open forest is at offset 0. */
+export function historyTimeline(): TimelineEntry<Forest>[] {
+  return state.forest ? history.timeline(state.forest) : [];
+}
+
+/** Jump `offset` steps through the undo history (negative goes back). */
+export function goToHistory(offset: number): void {
+  if (!state.forest) return;
+  const reached = history.go(state.forest, offset);
+  if (reached) commit(withCurrentBreakpoints(reached), false);
+  syncHistoryFlags();
 }
 
 function editTree(fn: (root: Branch) => Branch): void {
@@ -844,7 +860,21 @@ export async function importText(text: string, format?: FormatId, fileName?: str
  * Replace what is open with a document, without keeping the old forest around. Used by
  * the embed API, where the host page owns the data. A tree opens in a forest of its own.
  */
-export async function openDocument(doc: TreeDocument): Promise<{ kind: 'forest' | 'tree'; trees: number }> {
+export async function openDocument(doc: TreeDocument, meta: ChangeMeta = {}): Promise<{ kind: 'forest' | 'tree'; trees: number }> {
+  // A new version of what is open (the host sent back an edited copy) is an undoable change, not a fresh start.
+  const open = state.forest;
+  if (open && doc.kind === 'forest' && doc.forest.id === open.id) {
+    commit(withCurrentBreakpoints(doc.forest), true, meta);
+    await saveNow();
+    return { kind: 'forest', trees: doc.forest.trees.length };
+  }
+  if (open && doc.kind === 'tree' && open.trees.some((t) => t.id === doc.tree.id)) {
+    const added = newKits(doc.kits);
+    commit({ ...replaceTree(open, doc.tree), kits: [...open.kits, ...added] }, true, meta);
+    switchTree(doc.tree.id);
+    await saveNow();
+    return { kind: 'tree', trees: 1 };
+  }
   let forest: Forest;
   if (doc.kind === 'forest') forest = doc.forest;
   else {

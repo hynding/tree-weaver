@@ -29,7 +29,18 @@ export type EmbedDisplay = 'lg' | 'xl' | 'tablet' | 'mobile-landscape' | 'mobile
 
 /** Messages a host page sends to the editor. `id` comes back on the response. */
 export type HostMessage = { source: 'tree-weaver-host'; id?: string } & (
-  | { type: 'load'; document: string | object; format?: EmbedFormat }
+  /** `label` names the change in the editor's history. Reloading what is open is an undoable change, with a version saved first. */
+  | { type: 'load'; document: string | object; format?: EmbedFormat; label?: string }
+  /** Apply patch operations (see the Tree Weaver patch format) to a tree, default the open one, as one undoable change. */
+  | { type: 'patch'; ops: unknown; tree?: string; label?: string }
+  | { type: 'undo' }
+  | { type: 'redo' }
+  | { type: 'saveVersion'; name?: string }
+  | { type: 'listVersions' }
+  /** A version by id or name. */
+  | { type: 'restoreVersion'; version: string }
+  /** What changed from a version (by id or name) to the open forest. */
+  | { type: 'diff'; version: string }
   | { type: 'getDocument'; format?: EmbedFormat; scope?: 'forest' | 'tree' }
   | { type: 'setDisplay'; display: EmbedDisplay }
   | { type: 'selectTree'; tree: string }
@@ -38,6 +49,24 @@ export type HostMessage = { source: 'tree-weaver-host'; id?: string } & (
 
 /** A forest as plain JSON (see the Tree Weaver JSON Schema). */
 export type ForestData = { id: string; name: string; trees: { id: string; name: string; root: object }[]; kits: object[] } & Record<string, unknown>;
+
+/** A saved version of the open forest. */
+export interface EmbedVersion {
+  id: string;
+  name: string;
+  createdAt: string;
+  /** Who saved it, or whose change it was taken before: `editor`, `host`, `agent`, ... */
+  source: string;
+  /** Taken automatically before a host or agent change. */
+  auto: boolean;
+}
+
+/** One change a patch made. */
+export interface EmbedPatchChange {
+  kind: string;
+  id: string;
+  path?: string;
+}
 
 /** Messages the editor sends to its host page. */
 export type EditorMessage = { source: 'tree-weaver-editor' } & (
@@ -126,8 +155,8 @@ export class TreeWeaverEditor extends Base {
   }
 
   /** Open a document: a forest or tree as JSON text, an object, or YAML, XML, HTML, Markdown or SVG text. */
-  async load(document: string | object, options: { format?: EmbedFormat } = {}): Promise<{ kind: 'forest' | 'tree'; trees: number }> {
-    return (await this.request({ type: 'load', document, format: options.format })) as { kind: 'forest' | 'tree'; trees: number };
+  async load(document: string | object, options: { format?: EmbedFormat; label?: string } = {}): Promise<{ kind: 'forest' | 'tree'; trees: number }> {
+    return (await this.request({ type: 'load', document, format: options.format, label: options.label })) as { kind: 'forest' | 'tree'; trees: number };
   }
 
   /** The current forest (or just the open tree, with `scope: 'tree'`) as text in `format` (default JSON). */
@@ -148,6 +177,44 @@ export class TreeWeaverEditor extends Base {
   /** Open a tree of the forest by id or name. */
   async selectTree(tree: string): Promise<void> {
     await this.request({ type: 'selectTree', tree });
+  }
+
+  /**
+   * Apply patch operations to a tree (default the open one) as one undoable change. A version is
+   * saved first, so the change can be compared and rolled back. All or nothing.
+   */
+  async patch(ops: unknown, options: { tree?: string; label?: string } = {}): Promise<{ changes: EmbedPatchChange[]; warnings: unknown[] }> {
+    return (await this.request({ type: 'patch', ops, tree: options.tree, label: options.label })) as { changes: EmbedPatchChange[]; warnings: unknown[] };
+  }
+
+  /** Undo the last change. */
+  async undo(): Promise<{ canUndo: boolean; canRedo: boolean }> {
+    return (await this.request({ type: 'undo' })) as { canUndo: boolean; canRedo: boolean };
+  }
+
+  /** Redo the last undone change. */
+  async redo(): Promise<{ canUndo: boolean; canRedo: boolean }> {
+    return (await this.request({ type: 'redo' })) as { canUndo: boolean; canRedo: boolean };
+  }
+
+  /** Save the open forest as a named version. */
+  async saveVersion(name?: string): Promise<EmbedVersion> {
+    return (await this.request({ type: 'saveVersion', name })) as EmbedVersion;
+  }
+
+  /** The open forest's saved versions, newest first. */
+  async listVersions(): Promise<EmbedVersion[]> {
+    return (await this.request({ type: 'listVersions' })) as EmbedVersion[];
+  }
+
+  /** Bring back a version (by id or name) as one undoable change. */
+  async restoreVersion(version: string): Promise<EmbedVersion> {
+    return (await this.request({ type: 'restoreVersion', version })) as EmbedVersion;
+  }
+
+  /** What changed from a version (by id or name) to the open forest: one line per change. */
+  async diff(version: string): Promise<{ empty: boolean; changes: string[]; text: string }> {
+    return (await this.request({ type: 'diff', version })) as { empty: boolean; changes: string[]; text: string };
   }
 
   /* --------------------------------------------------------------- private */
