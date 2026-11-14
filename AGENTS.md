@@ -64,6 +64,14 @@ npx tree-weaver render home.tree.json -o home.html
 `expand` turns shorthand into a full document, `convert` moves between JSON, YAML, XML, HTML, Markdown and SVG, `kit` lists a stylesheet's
 classes and tokens, and `schema` prints the JSON Schema. Every command takes `--json`.
 
+## Using the MCP server
+
+Agents in MCP clients can use `@tree-weaver/mcp` instead of the CLI: `claude mcp add tree-weaver --
+npx -y @tree-weaver/mcp --root .`, or `{ "command": "npx", "args": ["-y", "@tree-weaver/mcp"] }` in a
+client's `mcpServers`. Tools: `create_tree`, `outline`, `patch_tree`, `validate`, `render_html`,
+`convert`, `screenshot` (a PNG per display), `catalog`, `kit_manifest`. The schemas and guides are
+resources (`tree-weaver://guide/shorthand`, …). Full guide: [`docs/mcp.md`](docs/mcp.md).
+
 ## Using the packages
 
 `npm i tree-weaver` installs the CLI and every library; import from `tree-weaver` or its subpaths
@@ -106,6 +114,9 @@ Useful entry points:
 - Package sources use extensionless relative imports; `scripts/esm-extensions.mjs` adds `.js` to the
   built output so it runs in plain Node. `pnpm smoke` packs every package, installs the tarballs in
   an empty project and runs the libraries and the CLI there.
+- The MCP server lives in `packages/mcp` (`createServer` in `src/server.ts`, handlers in `src/tools.ts`,
+  path confinement in `src/workspace.ts`); its tests drive it through the SDK's in-memory client.
+  Keep `docs/mcp.md` in step with it.
 - The CLI lives in `packages/cli` (published as `tree-weaver`); `run(argv, io)` in `src/run.ts`
   takes an injectable file system, which the tests use. Keep `docs/cli.md` in step with it.
 - Releases: `pnpm release:version x.y.z` sets every package's version, then a GitHub release tagged
