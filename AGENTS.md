@@ -64,6 +64,13 @@ npx tree-weaver render home.tree.json -o home.html
 `expand` turns shorthand into a full document, `convert` moves between JSON, YAML, XML, HTML, Markdown and SVG, `kit` lists a stylesheet's
 classes and tokens, and `schema` prints the JSON Schema. Every command takes `--json`.
 
+## Handing a tree to a person
+
+`npx tree-weaver link page.tree.json` prints an editor link with the document packed into it
+(`#doc=`); `?src=<url>` opens a hosted file. Apps can embed the editor with `<tree-weaver-editor>`
+(`@tree-weaver/embed`, or `https://hynding.github.io/tree-weaver/embed.js`) and read changes back.
+Full guide: [`docs/embed.md`](docs/embed.md).
+
 ## Using the packages
 
 `npm i tree-weaver` installs the CLI and every library; import from `tree-weaver` or its subpaths
@@ -106,6 +113,9 @@ Useful entry points:
 - Package sources use extensionless relative imports; `scripts/esm-extensions.mjs` adds `.js` to the
   built output so it runs in plain Node. `pnpm smoke` packs every package, installs the tarballs in
   an empty project and runs the libraries and the CLI there.
+- The embed bridge is `apps/web/src/store/embed.ts` (links and `postMessage`, on only with `?embed=1`);
+  `packages/embed` is the `<tree-weaver-editor>` element (one file, no imports, copied to `embed.js` on the
+  site). `pnpm e2e:embed` checks both in Chromium after `pnpm build`. Keep `docs/embed.md` in step.
 - The CLI lives in `packages/cli` (published as `tree-weaver`); `run(argv, io)` in `src/run.ts`
   takes an injectable file system, which the tests use. Keep `docs/cli.md` in step with it.
 - Releases: `pnpm release:version x.y.z` sets every package's version, then a GitHub release tagged

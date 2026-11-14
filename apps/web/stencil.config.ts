@@ -30,6 +30,8 @@ export const config: Config = {
         { src: '../../../schema', dest: 'schema' },
         { src: '../../../docs', dest: 'docs' },
         { src: '../../../examples', dest: 'examples' },
+        // <tree-weaver-editor>, for pages that embed the editor (see docs/embed.md).
+        { src: '../../../packages/embed/dist/index.js', dest: 'embed.js' },
       ],
     },
   ],

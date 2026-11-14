@@ -2,6 +2,7 @@ import { Component, Event, EventEmitter, h } from '@stencil/core';
 import { DISPLAYS } from '@tree-weaver/core';
 import { redo, renameForest, setDisplay, switchTree, undo } from '../../store/actions';
 import { state } from '../../store/editor';
+import { isEmbedded } from '../../store/embed-flags';
 import { BrandMark, DisplayIcon, Icon } from '../../utils/icons';
 
 const SAVE_LABEL = { saved: 'Saved locally', saving: 'Saving…', unsaved: 'Unsaved changes', error: 'Save failed' } as const;
@@ -62,9 +63,15 @@ export class TwToolbar {
         <button class="bar-btn" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled={!state.canRedo} onClick={redo}>
           <Icon name="redo" />
         </button>
-        <span class={{ 'save-state': true, 'hide-narrow': true, error: state.saveState === 'error' }} title={`Storage: ${state.storageKind}`}>
-          {SAVE_LABEL[state.saveState]}
-        </span>
+        {isEmbedded() ? (
+          <span class="save-state hide-narrow" title="Embedded: the page around the editor keeps the document">
+            Embedded
+          </span>
+        ) : (
+          <span class={{ 'save-state': true, 'hide-narrow': true, error: state.saveState === 'error' }} title={`Storage: ${state.storageKind}`}>
+            {SAVE_LABEL[state.saveState]}
+          </span>
+        )}
         <button class="bar-btn" title="See the tree as it ships, without the editor" onClick={() => (state.preview = true)}>
           <Icon name="eye" />
           <span class="hide-narrow">Preview</span>

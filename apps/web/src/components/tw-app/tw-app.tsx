@@ -1,6 +1,7 @@
 import { Component, Host, Listen, State, h } from '@stencil/core';
 import { init, toast } from '../../store/actions';
 import { state } from '../../store/editor';
+import { startLinks } from '../../store/embed';
 import { initLibraries } from '../../store/storybook';
 import { handleShortcut } from '../../utils/shortcuts';
 
@@ -13,6 +14,7 @@ export class TwApp {
     try {
       await init();
       void initLibraries();
+      void startLinks();
     } catch (err) {
       console.error(err);
       toast(`Tree Weaver could not start: ${(err as Error).message}`, 'error');
