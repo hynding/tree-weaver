@@ -53,9 +53,9 @@
             "mobile-portrait": { "grid-template-columns": "1fr", "padding": "32px 16px" }
           },
           "children": [
-            { "tag": "article", "classes": ["card"], "children": [{ "tag": "h3", "children": ["Grids"] }, { "tag": "p", "children": ["Three columns on desktop, two on tablet, one on phones."] }] },
-            { "tag": "article", "classes": ["card"], "children": [{ "tag": "h3", "children": ["Flex"] }, { "tag": "p", "children": ["Rows that stack on small screens."] }] },
-            { "tag": "article", "classes": ["card"], "children": [{ "tag": "h3", "children": ["Tables"] }, { "tag": "p", "children": ["Real table markup, styled by your kit."] }] }
+            { "tag": "article", "classes": ["card"], "children": [{ "tag": "h2", "children": ["Grids"] }, { "tag": "p", "children": ["Three columns on desktop, two on tablet, one on phones."] }] },
+            { "tag": "article", "classes": ["card"], "children": [{ "tag": "h2", "children": ["Flex"] }, { "tag": "p", "children": ["Rows that stack on small screens."] }] },
+            { "tag": "article", "classes": ["card"], "children": [{ "tag": "h2", "children": ["Tables"] }, { "tag": "p", "children": ["Real table markup, styled by your kit."] }] }
           ]
         }
       ]

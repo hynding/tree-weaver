@@ -38,7 +38,7 @@ describe('Tree Weaver MCP server', () => {
   it('lists its tools, resources and prompt, with instructions', async () => {
     const { client } = await connect();
     const tools = (await client.listTools()).tools.map((t) => t.name);
-    expect(tools).toEqual(expect.arrayContaining(['create_tree', 'outline', 'patch_tree', 'validate', 'render_html', 'convert', 'screenshot', 'catalog', 'kit_manifest']));
+    expect(tools).toEqual(expect.arrayContaining(['create_tree', 'outline', 'patch_tree', 'validate', 'render_html', 'export_component', 'convert', 'check_layout', 'screenshot', 'catalog', 'kit_manifest']));
     expect(client.getInstructions()).toContain('patch_tree');
     const resources = (await client.listResources()).resources.map((r) => r.uri);
     expect(resources).toContain('tree-weaver://schema/document');
@@ -140,6 +140,33 @@ describe('Tree Weaver MCP server', () => {
     expect(md.text).toContain('keeps the content but not every style');
   });
 
+  it('exports components inline or into a folder', async () => {
+    const { call } = await connect();
+    writeFileSync(join(root, 'p.json'), example('landing-page.tree.json'));
+    const vue = await call('export_component', { path: 'p.json', framework: 'vue', styling: 'tailwind' });
+    expect(vue.isError).toBeFalsy();
+    expect(vue.text).toContain('<template>');
+    expect(vue.structuredContent!.entry).toMatch(/\.vue$/);
+    const react = await call('export_component', { path: 'p.json', framework: 'react', typescript: true, name: 'Home', outputDir: 'src/ui' });
+    expect(react.text).toContain('Wrote src/ui/Home.tsx');
+    expect(readFileSync(join(root, 'src/ui/Home.tsx'), 'utf8')).toContain('export default function Home()');
+    expect(existsSync(join(root, 'src/ui/Home.css'))).toBe(true);
+    const escape = await call('export_component', { path: 'p.json', framework: 'html', outputDir: '../outside' });
+    expect(escape.isError).toBe(true);
+  });
+
+  it('checks layouts with fixes, without a browser', async () => {
+    const { call } = await connect();
+    const doc = JSON.stringify({ tree: { name: 'Bad', root: { tag: 'body', children: [{ kind: 'leaf', type: 'image', value: 'a.png' }, { tag: 'div', styles: { lg: { width: '900px' } }, children: ['x'] }] } } });
+    const r = await call('check_layout', { document: doc, render: false });
+    expect(r.isError).toBeFalsy();
+    expect(r.structuredContent!.ok).toBe(false);
+    expect(r.structuredContent!.rendered).toBe(false);
+    expect(r.text).toContain('error image-alt at /0');
+    expect(r.text).toMatch(/fixed-width at \/1 \[tablet, mobile-landscape, mobile-portrait\]/);
+    expect(r.text).toContain('Fix:');
+  });
+
   it('lists the catalog and kit classes', async () => {
     const { call } = await connect();
     expect((await call('catalog', { kind: 'blueprints' })).text).toContain('- card');
@@ -177,6 +204,14 @@ describe('Tree Weaver MCP server', () => {
     if (!process.env.TW_CHROMIUM_PATH && existsSync('/opt/pw-browsers/chromium')) process.env.TW_CHROMIUM_PATH = '/opt/pw-browsers/chromium';
     return !!process.env.TW_CHROMIUM_PATH || !!process.env.PLAYWRIGHT_BROWSERS_PATH;
   })();
+
+  it.runIf(canScreenshot)('checks a rendered layout on each display', { timeout: 60000 }, async () => {
+    const { call } = await connect();
+    const r = await call('check_layout', { document: example('pricing-table.tree.json'), displays: ['lg', 'mobile-portrait'] });
+    expect(r.isError).toBeFalsy();
+    expect(r.structuredContent!.rendered).toBe(true);
+    expect(r.text).toMatch(/mobile-portrait: 390×844, page 390×\d+/);
+  });
 
   it.runIf(canScreenshot)('screenshots each display as a PNG', { timeout: 60000 }, async () => {
     const { call } = await connect();

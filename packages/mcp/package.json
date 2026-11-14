@@ -38,7 +38,7 @@
   ],
   "sideEffects": false,
   "scripts": {
-    "build": "tsc -p tsconfig.json && node ../../scripts/esm-extensions.mjs dist && node ../../scripts/chmod-bin.mjs dist/bin.js && node ../../scripts/copy-docs.mjs dist/docs format.md shorthand.md patch.md",
+    "build": "tsc -p tsconfig.json && node ../../scripts/esm-extensions.mjs dist && node ../../scripts/chmod-bin.mjs dist/bin.js && node ../../scripts/copy-docs.mjs dist/docs format.md shorthand.md patch.md export.md checks.md",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "prepack": "node ../../scripts/copy-license.mjs"
   },

@@ -1,7 +1,10 @@
 import { createRequire } from 'node:module';
 import {
   applyPatch,
+  checkRendered,
+  checkTree,
   createForest,
+  formatCheckReport,
   DISPLAYS,
   formatIssues,
   isBranch,
@@ -10,6 +13,7 @@ import {
   replaceTree,
   TreeDataError,
   validateDocument,
+  type CheckReport,
   type DesignKit,
   type DisplayId,
   type Tree,
@@ -18,6 +22,7 @@ import {
 } from '@tree-weaver/core';
 import {
   detectFormat,
+  exportComponent,
   exportForest,
   exportTree,
   FORMATS,
@@ -28,6 +33,8 @@ import {
   parseData,
   toEnvelope,
   validateText,
+  type ComponentFramework,
+  type ComponentStyling,
   type FormatId,
   type TreeDocument,
 } from '@tree-weaver/formats';
@@ -235,6 +242,26 @@ export class Tools {
     return this.deliver(args.output, html, `HTML page for "${tree.name}" (${html.length} characters).`, { tree: { id: tree.id, name: tree.name } });
   }
 
+  async exportComponent(
+    args: Source & { framework: ComponentFramework; styling?: ComponentStyling; tree?: string; name?: string; typescript?: boolean; outputDir?: string; kits?: string[] },
+  ): Promise<ToolOutput> {
+    const { doc } = await this.load(args);
+    const tree = pickTree(doc, args.tree);
+    const kits = [...kitsOf(doc)];
+    for (const file of args.kits ?? []) kits.push(kitFromFile(file, await this.ws.read(file)));
+    const out = exportComponent(tree, { framework: args.framework, styling: args.styling, kits, name: args.name, typescript: args.typescript });
+    const summary = `${out.name}: "${tree.name}" as ${args.framework} with ${out.styling === 'tailwind' ? 'Tailwind classes' : 'a CSS file'} (${out.files.length} file${out.files.length === 1 ? '' : 's'}, entry ${out.entry}).`;
+    const meta = { name: out.name, framework: out.framework, styling: out.styling, entry: out.entry };
+    if (args.outputDir) {
+      const dir = args.outputDir.replace(/[\\/]+$/, '');
+      const written: string[] = [];
+      for (const f of out.files) written.push(await this.ws.write(`${dir}/${f.path}`, f.contents));
+      return { text: `${summary}\nWrote ${written.join(', ')}.`, data: { ...meta, files: written } };
+    }
+    const text = out.files.map((f) => `===== ${f.path} =====\n${f.contents}`).join('\n');
+    return { text: `${summary}\n\n${text}`, data: { ...meta, files: out.files.map((f) => f.path) } };
+  }
+
   async convert(args: Source & { to: FormatId; tree?: string; output?: string }): Promise<ToolOutput> {
     const { doc, format } = await this.load(args);
     const to = args.to;
@@ -250,6 +277,31 @@ export class Tools {
     }
     const lossy = getFormat(to).lossless ? '' : ` ${getFormat(to).label} keeps the content but not every style or attribute.`;
     return this.deliver(args.output, data, `Converted ${what} from ${getFormat(format).label} to ${getFormat(to).label}.${lossy}`, { from: format, to });
+  }
+
+  async checkLayout(args: Source & { tree?: string; render?: boolean; displays?: DisplayId[]; kits?: string[] }): Promise<ToolOutput> {
+    const { doc } = await this.load(args);
+    const trees = args.tree === undefined ? treesOf(doc) : [pickTree(doc, args.tree)];
+    const kits = [...kitsOf(doc)];
+    for (const file of args.kits ?? []) kits.push(kitFromFile(file, await this.ws.read(file)));
+    let note = '';
+    const reports: CheckReport[] = [];
+    let browser: Browser | null = null;
+    if (args.render !== false) {
+      try {
+        browser = await launchBrowser();
+      } catch (err) {
+        if (args.render === true) throw err;
+        note = `\nRendered checks skipped: ${(err as Error).message}`;
+      }
+    }
+    try {
+      for (const tree of trees) reports.push(browser ? await checkRendered(tree, { browser, kits, displays: args.displays }) : checkTree(tree));
+    } finally {
+      await browser?.close();
+    }
+    const ok = reports.every((r) => r.ok);
+    return { text: `${reports.map(formatCheckReport).join('\n\n')}${note}`, data: { ok, rendered: !!browser, trees: reports } };
   }
 
   async screenshot(args: Source & { tree?: string; displays?: DisplayId[]; fullPage?: boolean; kits?: string[] }): Promise<ToolOutput> {
@@ -405,7 +457,7 @@ interface Browser {
 }
 interface Page {
   setContent(html: string, opts: { waitUntil: 'load'; timeout: number }): Promise<void>;
-  evaluate(expr: string): Promise<unknown>;
+  evaluate<T = unknown>(expr: string): Promise<T>;
   screenshot(opts: { fullPage: boolean; type: 'png' }): Promise<Uint8Array>;
   close(): Promise<void>;
 }

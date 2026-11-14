@@ -1,9 +1,14 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { dirname } from 'node:path';
 import { parseArgs, type ParseArgsConfig } from 'node:util';
 import {
   applyPatch,
   canHaveChildren,
+  checkRendered,
+  checkTree,
+  DISPLAY_IDS,
+  formatCheckReport,
   createForest,
   formatIssues,
   isBranch,
@@ -17,13 +22,18 @@ import {
   TreeDataError,
   validateDocument,
   type Branch,
+  type CheckBrowser,
+  type CheckReport,
   type DesignKit,
+  type DisplayId,
   type Tree,
   type TreeNode,
   type ValidationResult,
 } from '@tree-weaver/core';
 import {
+  COMPONENT_FRAMEWORKS,
   detectFormat,
+  exportComponent,
   exportForest,
   exportTree,
   FORMATS,
@@ -34,6 +44,7 @@ import {
   parseData,
   toEnvelope,
   validateText,
+  type ComponentFramework,
   type FormatId,
   type TreeDocument,
 } from '@tree-weaver/formats';
@@ -47,6 +58,25 @@ export interface CliIO {
   readStdin(): Promise<string>;
   stdout(text: string): void;
   stderr(text: string): void;
+  /** Start a browser for `lint --render`. Default: Chromium through Playwright, when installed. */
+  launchBrowser?(): Promise<CheckBrowser & { close(): Promise<void> }>;
+}
+
+/** Chromium through Playwright, an optional dependency. TW_CHROMIUM_PATH points at another Chrome. */
+async function launchChromium(): Promise<CheckBrowser & { close(): Promise<void> }> {
+  type Launcher = { chromium: { launch(o: object): Promise<CheckBrowser & { close(): Promise<void> }> } };
+  let pw: Launcher | undefined;
+  try {
+    pw = (await import('playwright' as string)) as Launcher;
+  } catch {
+    try {
+      pw = createRequire(import.meta.url)('playwright') as Launcher;
+    } catch {
+      throw new Error('--render needs Playwright: run "npm i -D playwright" and "npx playwright install chromium", or leave out --render');
+    }
+  }
+  const executablePath = process.env.TW_CHROMIUM_PATH || undefined;
+  return pw.chromium.launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
 }
 
 const nodeIO: CliIO = {
@@ -80,6 +110,8 @@ Commands:
   new [file]               Start a tree (or --forest) from a template
   validate <file...>       Strictly check documents; exits 1 when any has errors
   render <file>            Write a standalone HTML page for a tree
+  export <file>            Write a tree as a React, Vue or Svelte component, or HTML + CSS files
+  lint <file>              Check a tree for layout and accessibility problems (--render: on every display)
   convert <file>           Convert between JSON, YAML, XML, HTML, Markdown and SVG
   add <file> [blueprint]   Insert a blueprint branch or a JSON node into a tree
   patch <file> [ops]       Apply a list of edits (insert, move, setStyles, ...) to a tree
@@ -131,6 +163,39 @@ Write a standalone HTML page (inlined kits and responsive CSS) for a tree.
   -t, --tree <ref>      Tree in a forest: name, id or 1-based number (default: first)
   -k, --kit <css>       Add a CSS file as a design kit (repeatable)
   -F, --from <fmt>      Input format, when the extension doesn't say
+`,
+  export: `Usage: tree-weaver export <file> --framework <name> [options]
+
+Write a tree as source code for a codebase: a component with a CSS file (readable,
+namespaced class names) or with Tailwind classes, plus kits.css for its design kits.
+
+  -f, --framework <name>  ${COMPONENT_FRAMEWORKS.map((f) => f.id).join(', ')} (default: react)
+  -s, --styling <name>    css or tailwind (default: css)
+  -o, --output <dir>      Folder to write the files to (default: print them to stdout)
+  -t, --tree <ref>        Tree in a forest: name, id or 1-based number (default: first)
+  -n, --name <name>       Component name (default: from the tree's name)
+      --ts                React: write a .tsx file
+  -k, --kit <css>         Add a CSS file as a design kit (repeatable)
+  -F, --from <fmt>        Input format, when the extension doesn't say
+      --json              Print { name, entry, files: [{ path, contents }] } (or the paths written)
+`,
+  lint: `Usage: tree-weaver lint <file> [options]
+
+Check a tree for problems you would only see by looking at it on every display:
+missing alt text, heading order, links and buttons without text, form fields
+without labels, duplicate ids, empty branches, fixed widths wider than a display
+and low contrast. Each issue has a path, the displays it shows on and a fix.
+Exits 1 when there are errors (or warnings, with --strict).
+
+      --render            Also render the page in Chromium (needs Playwright) at each
+                          display's size: what overflows sideways, contrast with the
+                          design kits applied, and images that don't load
+  -d, --display <ids>     Displays to render, comma-separated (default: all)
+  -t, --tree <ref>        Tree in a forest: name, id or 1-based number (default: all trees)
+  -k, --kit <css>         Add a CSS file as a design kit (repeatable)
+      --strict            Fail on warnings too
+  -F, --from <fmt>        Input format, when the extension doesn't say
+      --json              Print { ok, trees: [{ tree, ok, counts, issues, rendered }] }
 `,
   convert: `Usage: tree-weaver convert <file> --to <fmt> [options]
 
@@ -435,6 +500,86 @@ async function cmdRender(cli: Cli, args: string[]): Promise<number> {
   return 0;
 }
 
+async function cmdExport(cli: Cli, args: string[]): Promise<number> {
+  const { values, positionals } = parse(args, {
+    framework: { type: 'string', short: 'f' },
+    styling: { type: 'string', short: 's' },
+    output: { type: 'string', short: 'o' },
+    tree: { type: 'string', short: 't' },
+    name: { type: 'string', short: 'n' },
+    ts: { type: 'boolean' },
+    kit: { type: 'string', short: 'k', multiple: true },
+    from: { type: 'string', short: 'F' },
+  });
+  if (positionals.length !== 1) throw new UsageError('export needs one file (or "-" for stdin)');
+  const ids = COMPONENT_FRAMEWORKS.map((f) => f.id) as string[];
+  const framework = (values.framework ?? 'react').toLowerCase();
+  if (!ids.includes(framework)) throw new UsageError(`--framework must be one of ${ids.join(', ')}, not "${values.framework}"`);
+  const styling = (values.styling ?? 'css').toLowerCase();
+  if (styling !== 'css' && styling !== 'tailwind') throw new UsageError(`--styling must be css or tailwind, not "${values.styling}"`);
+  const { doc } = await cli.load(positionals[0], asFormat(values.from, '--from'));
+  const tree = pickTree(cli, doc, values.tree, 'a component holds one tree');
+  const kits = [...kitsOf(doc)];
+  for (const file of values.kit ?? []) kits.push(kitFromFile(file, await cli.read(file)));
+  const out = exportComponent(tree, { framework: framework as ComponentFramework, styling, kits, name: values.name, typescript: !!values.ts });
+  const json = !!values.json;
+  if (values.output && values.output !== '-') {
+    const dir = values.output.replace(/\/+$/, '');
+    const written: string[] = [];
+    for (const f of out.files) {
+      const path = `${dir}/${f.path}`;
+      await cli.io.writeFile(path, f.contents);
+      written.push(path);
+    }
+    cli.report(json, { name: out.name, framework, styling, entry: `${dir}/${out.entry}`, files: written }, `Wrote ${out.name} (${framework}, ${styling}): ${written.join(', ')}`);
+  } else if (json) {
+    cli.report(true, out, '');
+  } else if (out.files.length === 1) {
+    await cli.emit(undefined, out.files[0].contents);
+  } else {
+    await cli.emit(undefined, out.files.map((f) => `===== ${f.path} =====\n${f.contents.replace(/\n$/, '')}\n`).join('\n'));
+  }
+  return 0;
+}
+
+async function cmdLint(cli: Cli, args: string[]): Promise<number> {
+  const { values, positionals } = parse(args, {
+    render: { type: 'boolean' },
+    display: { type: 'string', short: 'd' },
+    tree: { type: 'string', short: 't' },
+    kit: { type: 'string', short: 'k', multiple: true },
+    strict: { type: 'boolean' },
+    from: { type: 'string', short: 'F' },
+  });
+  if (positionals.length !== 1) throw new UsageError('lint needs one file (or "-" for stdin)');
+  let displays: DisplayId[] | undefined;
+  if (values.display) {
+    displays = values.display.split(',').map((d) => d.trim()) as DisplayId[];
+    const bad = displays.filter((d) => !(DISPLAY_IDS as readonly string[]).includes(d));
+    if (bad.length) throw new UsageError(`Unknown display "${bad[0]}". Displays: ${DISPLAY_IDS.join(', ')}`);
+    if (!values.render) throw new UsageError('--display picks the displays to render; add --render');
+  }
+  const { doc } = await cli.load(positionals[0], asFormat(values.from, '--from'));
+  const trees = values.tree === undefined ? treesOf(doc) : [pickTree(cli, doc, values.tree, '')];
+  const kits = [...kitsOf(doc)];
+  for (const file of values.kit ?? []) kits.push(kitFromFile(file, await cli.read(file)));
+  const reports: CheckReport[] = [];
+  if (values.render) {
+    const browser = await (cli.io.launchBrowser ?? launchChromium)();
+    try {
+      for (const tree of trees) reports.push(await checkRendered(tree, { browser, kits, displays }));
+    } finally {
+      await browser.close();
+    }
+  } else {
+    for (const tree of trees) reports.push(checkTree(tree));
+  }
+  const failed = (r: CheckReport) => !r.ok || (!!values.strict && r.counts.warnings > 0);
+  const ok = !reports.some(failed);
+  cli.report(!!values.json, { ok, trees: reports.map((r) => ({ ...r, ok: !failed(r) })) }, reports.map(formatCheckReport).join('\n\n'));
+  return ok ? 0 : 1;
+}
+
 async function cmdConvert(cli: Cli, args: string[]): Promise<number> {
   const { values, positionals } = parse(args, {
     to: { type: 'string', short: 'f' },
@@ -721,17 +866,19 @@ const COMMANDS: Record<string, (cli: Cli, args: string[]) => Promise<number>> = 
   new: cmdNew,
   validate: cmdValidate,
   render: cmdRender,
+  lint: cmdLint,
   convert: cmdConvert,
   add: cmdAdd,
   patch: cmdPatch,
   expand: cmdExpand,
+  export: cmdExport,
   outline: cmdOutline,
   kit: cmdKit,
   schema: cmdSchema,
   link: cmdLink,
 };
 
-const ALIASES: Record<string, string> = { check: 'validate', ls: 'outline', html: 'render', create: 'new', init: 'new' };
+const ALIASES: Record<string, string> = { component: 'export', check: 'validate', ls: 'outline', html: 'render', create: 'new', init: 'new' };
 
 async function version(io: CliIO): Promise<string> {
   try {
