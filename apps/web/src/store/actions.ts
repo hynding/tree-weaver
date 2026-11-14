@@ -942,7 +942,7 @@ export function exportStorybookCurrent(scope: 'tree' | 'forest'): ExportOutput {
   return { text, fileName: `${project.name}.zip`, mime: 'application/zip', bytes: zipStorybook(project) };
 }
 
-/** The current tree as a React, Vue or Svelte component (or HTML + CSS files); several files come as a zip. */
+/** The current tree as a React, Vue, Svelte, SwiftUI or Flutter component (or HTML + CSS files); several files come as a zip. */
 export function exportComponentCurrent(framework: ComponentFramework, styling: ComponentStyling): ExportOutput {
   const tree = currentTree()!;
   // Only the forest's kits: the deployment's stylesheets are the host app's to load.

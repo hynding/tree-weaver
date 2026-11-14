@@ -153,6 +153,12 @@ describe('Tree Weaver MCP server', () => {
     expect(existsSync(join(root, 'src/ui/Home.css'))).toBe(true);
     const escape = await call('export_component', { path: 'p.json', framework: 'html', outputDir: '../outside' });
     expect(escape.isError).toBe(true);
+    const swift = await call('export_component', { path: 'p.json', framework: 'swiftui' });
+    expect(swift.text).toContain('struct LandingPage: View');
+    expect(swift.structuredContent!.entry).toBe('LandingPage.swift');
+    const flutter = await call('export_component', { path: 'p.json', framework: 'flutter', outputDir: 'lib' });
+    expect(flutter.isError).toBeFalsy();
+    expect(readFileSync(join(root, 'lib/landing_page.dart'), 'utf8')).toContain('class LandingPage extends StatelessWidget');
   });
 
   it('checks layouts with fixes, without a browser', async () => {

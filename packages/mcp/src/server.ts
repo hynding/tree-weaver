@@ -165,11 +165,11 @@ export function createServer(options: ServerOptions = {}): McpServer {
     {
       title: 'Export a component',
       description:
-        'Turn a tree into source code for a codebase: a React (.jsx/.tsx), Vue or Svelte component, or an HTML page with CSS files. Styles become a CSS file with readable class names, or Tailwind classes with displays as responsive variants; design kits go to kits.css. Returns every file, or writes them into "outputDir".',
+        'Turn a tree into source code for a codebase: a React (.jsx/.tsx), Vue or Svelte component, an HTML page with CSS files, a SwiftUI view (.swift) or a Flutter widget (.dart). For web frameworks, styles become a CSS file with readable class names, or Tailwind classes with displays as responsive variants; design kits go to kits.css. SwiftUI and Flutter write one file with the styles (and design kit rules on single classes) built in, switching layout by screen width. Returns every file, or writes them into "outputDir".',
       inputSchema: {
         ...source,
-        framework: z.enum(['react', 'vue', 'svelte', 'html']).describe('What to write'),
-        styling: z.enum(['css', 'tailwind']).optional().describe('css (default): a stylesheet with generated classes; tailwind: utility classes'),
+        framework: z.enum(['react', 'vue', 'svelte', 'html', 'swiftui', 'flutter']).describe('What to write'),
+        styling: z.enum(['css', 'tailwind']).optional().describe('css (default): a stylesheet with generated classes; tailwind: utility classes. Ignored for swiftui and flutter'),
         tree: treeRef,
         name: z.string().optional().describe('Component name (default: from the tree name, in PascalCase)'),
         typescript: z.boolean().optional().describe('React only: write .tsx'),

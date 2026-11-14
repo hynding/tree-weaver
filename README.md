@@ -69,7 +69,8 @@ The same words are used in the code (`Forest`, `Tree`, `Branch`, `Leaf`) and in 
   snapshots: open them again after more edits.
 - **Upload and download tree data** as JSON, YAML, XML, HTML, Markdown or SVG (see below).
 - **Export a component** for an app: React, Vue or Svelte, or HTML with CSS files, styled with a
-  stylesheet or with Tailwind classes (see [`docs/export.md`](docs/export.md)).
+  stylesheet or with Tailwind classes, or a native SwiftUI view or Flutter widget that switches
+  layout by screen width (see [`docs/export.md`](docs/export.md)).
 - **Download a Storybook project** for a tree or the whole forest, or **import stories from a built
   Storybook** as palette branches or trees (see [Storybook](#storybook)).
 - **Save locally**: forests autosave to IndexedDB (falling back to `localStorage`), and you can keep
@@ -215,7 +216,7 @@ Tree Weaver data is plain JSON (or YAML) with a published contract, so agents ca
   that `tree-weaver expand` turns into full documents.
 - [`docs/checks.md`](docs/checks.md): layout and accessibility checks per display (overflow, contrast, alt text,
   headings, labels) with `tree-weaver lint`, `check_layout` or `checkTree` / `checkRendered`.
-- [`docs/export.md`](docs/export.md): trees as React, Vue or Svelte components (CSS or Tailwind) with `tree-weaver export`.
+- [`docs/export.md`](docs/export.md): trees as React, Vue or Svelte components (CSS or Tailwind), SwiftUI views or Flutter widgets with `tree-weaver export`.
 - [`docs/patch.md`](docs/patch.md): patches, lists of edits (`insert`, `move`, `setStyles`, …) applied with
   `tree-weaver patch` or `applyPatch`, all or nothing.
 - [`schema/tree-weaver-v1.schema.json`](schema/tree-weaver-v1.schema.json): the JSON Schema (draft 2020-12),

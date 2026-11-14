@@ -69,7 +69,7 @@ npx tree-weaver patch home.tree.json --ops '[{"op":"setText","target":"/1/0","va
 npx tree-weaver validate home.tree.json                 # exits 1 with path + fix hint per error
 npx tree-weaver lint home.tree.json --render            # overflow, contrast, alt text, headings per display
 npx tree-weaver render home.tree.json -o home.html
-npx tree-weaver export home.tree.json -f react -o src/ # React/Vue/Svelte component, CSS or Tailwind
+npx tree-weaver export home.tree.json -f react -o src/ # React/Vue/Svelte component (CSS or Tailwind), or -f swiftui / flutter
 ```
 
 `expand` turns shorthand into a full document, `convert` moves between JSON, YAML, XML, HTML, Markdown and SVG, `kit` lists a stylesheet's
@@ -105,7 +105,7 @@ Useful entry points:
   `resolveRef`, `TREE_WEAVER_PATCH_SCHEMA`; layout checks `checkTree`, `checkRendered`, `formatCheckReport`; `normalizeForest` /
   `normalizeTree` (lenient); `validateDocument` (strict); `renderDocument`; `TREE_WEAVER_SCHEMA`.
 - `@tree-weaver/formats`: `importDocument(text, format?)`, `exportTree`, `exportForest`,
-  `validateText`, `exportStorybook`, `exportComponent` (React, Vue, Svelte, HTML; CSS or Tailwind).
+  `validateText`, `exportStorybook`, `exportComponent` (React, Vue, Svelte, HTML with CSS or Tailwind; SwiftUI, Flutter).
 - `@tree-weaver/branches`: ready-made blueprints (`BLUEPRINTS`, `responsiveGrid`, `flexRow`,
   `card`, …), tree templates (`TEMPLATES`) and the shorthand (`expandShorthand`,
   `expandShorthandDocument`).

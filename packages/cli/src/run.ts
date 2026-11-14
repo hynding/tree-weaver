@@ -41,6 +41,7 @@ import {
 } from '@tree-weaver/core';
 import {
   COMPONENT_FRAMEWORKS,
+  isNativeFramework,
   diffDocuments,
   detectFormat,
   exportComponent,
@@ -180,9 +181,11 @@ Write a standalone HTML page (inlined kits and responsive CSS) for a tree.
 
 Write a tree as source code for a codebase: a component with a CSS file (readable,
 namespaced class names) or with Tailwind classes, plus kits.css for its design kits.
+swiftui and flutter write one native file (a SwiftUI view or a Flutter widget) with
+the styles and design kit rules in it; --styling does not apply to them.
 
   -f, --framework <name>  ${COMPONENT_FRAMEWORKS.map((f) => f.id).join(', ')} (default: react)
-  -s, --styling <name>    css or tailwind (default: css)
+  -s, --styling <name>    css or tailwind (default: css; web frameworks only)
   -o, --output <dir>      Folder to write the files to (default: print them to stdout)
   -t, --tree <ref>        Tree in a forest: name, id or 1-based number (default: first)
   -n, --name <name>       Component name (default: from the tree's name)
@@ -599,7 +602,12 @@ async function cmdExport(cli: Cli, args: string[]): Promise<number> {
       await cli.io.writeFile(path, f.contents);
       written.push(path);
     }
-    cli.report(json, { name: out.name, framework, styling, entry: `${dir}/${out.entry}`, files: written }, `Wrote ${out.name} (${framework}, ${styling}): ${written.join(', ')}`);
+    const native = isNativeFramework(out.framework);
+    cli.report(
+      json,
+      { name: out.name, framework, ...(native ? {} : { styling }), entry: `${dir}/${out.entry}`, files: written },
+      `Wrote ${out.name} (${native ? framework : `${framework}, ${styling}`}): ${written.join(', ')}`,
+    );
   } else if (json) {
     cli.report(true, out, '');
   } else if (out.files.length === 1) {

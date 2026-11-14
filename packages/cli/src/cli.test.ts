@@ -357,7 +357,18 @@ describe('tree-weaver export', () => {
     expect(JSON.parse(r.out).entry).toBe('out/Home.tsx');
     const bad = await cli(['export', 'page.json', '-f', 'angular'], files());
     expect(bad.code).toBe(2);
-    expect(bad.err).toContain('react, vue, svelte, html');
+    expect(bad.err).toContain('react, vue, svelte, html, swiftui, flutter');
+  });
+
+  it('writes SwiftUI and Flutter files', async () => {
+    const swift = await cli(['export', 'page.json', '-f', 'swiftui'], files());
+    expect(swift.code).toBe(0);
+    expect(swift.out).toContain('import SwiftUI');
+    const dart = await cli(['export', 'page.json', '-f', 'flutter', '-n', 'Home', '-o', 'lib', '--json'], files());
+    const report = JSON.parse(dart.out);
+    expect(report.entry).toBe('lib/home.dart');
+    expect(report.styling).toBeUndefined();
+    expect(dart.files['lib/home.dart']).toContain('class Home extends StatelessWidget');
   });
 });
 
