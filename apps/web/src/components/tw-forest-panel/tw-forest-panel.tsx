@@ -3,6 +3,7 @@ import { TEMPLATES } from '@tree-weaver/branches';
 import { countNodes } from '@tree-weaver/core';
 import { addTree, deleteForest, deleteTree, duplicateTree, moveTree, newForest, openForest, renameTree, switchTree } from '../../store/actions';
 import { state } from '../../store/editor';
+import { deleteForestVersions } from '../../store/versions';
 import { Icon } from '../../utils/icons';
 
 const when = (iso: string) => {
@@ -89,7 +90,7 @@ export class TwForestPanel {
             </span>
             {this.confirmForest === f.id ? (
               [
-                <button class="btn small danger" onClick={() => ((this.confirmForest = null), deleteForest(f.id))}>
+                <button class="btn small danger" onClick={() => ((this.confirmForest = null), deleteForest(f.id), void deleteForestVersions(f.id))}>
                   Delete
                 </button>,
                 <button class="btn small" onClick={() => (this.confirmForest = null)}>

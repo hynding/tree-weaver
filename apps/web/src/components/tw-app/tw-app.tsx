@@ -3,6 +3,7 @@ import { init, toast } from '../../store/actions';
 import { state } from '../../store/editor';
 import { startLinks } from '../../store/embed';
 import { initLibraries } from '../../store/storybook';
+import { initVersions } from '../../store/versions';
 import { handleShortcut } from '../../utils/shortcuts';
 
 @Component({ tag: 'tw-app' })
@@ -14,6 +15,7 @@ export class TwApp {
     try {
       await init();
       void initLibraries();
+      initVersions();
       void startLinks();
     } catch (err) {
       console.error(err);

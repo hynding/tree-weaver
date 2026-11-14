@@ -25,7 +25,8 @@ and leaves (text, images, SVG shapes). Styles are keyed by display: "lg" is the 
 Workflow: create_tree (from a template or compact shorthand) -> outline (paths like /1/0 and ids) ->
 patch_tree (small edits by path or id; nodes may be shorthand such as "h2: Pricing" or "@card") ->
 validate -> check_layout (problems per display, with fixes) and screenshot (see each display) or render_html, and export_component to hand the layout to a
-React, Vue or Svelte codebase. Prefer the design kit's classes
+React, Vue or Svelte codebase. Every in-place patch_tree saves the file as a version first: diff_versions shows
+what an edit changed and restore_version rolls it back. Prefer the design kit's classes
 (kit_manifest) over inline styles. Read tree-weaver://guide/shorthand and tree-weaver://guide/patch
 for the full syntax. File paths are relative to the server's workspace folder.`;
 
@@ -129,6 +130,8 @@ export function createServer(options: ServerOptions = {}): McpServer {
         tree: treeRef,
         dryRun: z.boolean().optional().describe('Check and describe the changes without writing'),
         output,
+        label: z.string().optional().describe('What this edit does, e.g. "add pricing section"; names the version saved before it'),
+        keepVersion: z.boolean().optional().describe('Save the file as a version before changing it in place (default true), so restore_version can roll the edit back'),
       },
       annotations: { ...writes, title: 'Edit a tree' },
     },
@@ -223,6 +226,69 @@ export function createServer(options: ServerOptions = {}): McpServer {
       annotations: { ...reads, title: 'Screenshot a tree' },
     },
     wrap((args) => tools.screenshot(args as Parameters<Tools['screenshot']>[0])),
+  );
+
+  server.registerTool(
+    'list_versions',
+    {
+      title: 'List saved versions',
+      description: 'List the saved versions of a workspace file, oldest first. patch_tree saves one automatically before each in-place edit; save_version saves a named one. Versions live in .tree-weaver/<file>.versions.json next to the file.',
+      inputSchema: { path: z.string().describe('A document in the workspace') },
+      annotations: { ...reads, title: 'List saved versions' },
+    },
+    wrap((args) => tools.listVersions(args)),
+  );
+
+  server.registerTool(
+    'save_version',
+    {
+      title: 'Save a version',
+      description: 'Save a workspace file as it is now as a named version, to compare with or come back to later.',
+      inputSchema: { path: z.string().describe('A document in the workspace'), name: z.string().optional().describe('A name, e.g. "before redesign"') },
+      annotations: { ...writes, title: 'Save a version' },
+    },
+    wrap((args) => tools.saveVersion(args)),
+  );
+
+  server.registerTool(
+    'diff_versions',
+    {
+      title: 'Compare versions',
+      description:
+        'List what changed from a saved version to the current file (or to another version): nodes added, removed, moved or changed (styles per display, classes, attributes, text), trees and kits. Default: from the newest version, which after patch_tree shows exactly what the patch did.',
+      inputSchema: {
+        path: z.string().describe('A document in the workspace'),
+        version: z.string().optional().describe('Version to compare from: id, name, "latest", a number from list_versions, or -1, -2... (default: latest)'),
+        against: z.string().optional().describe('Compare with this version instead of the current file'),
+      },
+      annotations: { ...reads, title: 'Compare versions' },
+    },
+    wrap((args) => tools.diffVersions(args)),
+  );
+
+  server.registerTool(
+    'restore_version',
+    {
+      title: 'Restore a version',
+      description: 'Write a saved version back to the file, rolling back later edits. The file as it was is saved as a version first, so a restore can be undone.',
+      inputSchema: { path: z.string().describe('A document in the workspace'), version: z.string().describe('Id, name, "latest", a number from list_versions, or -1, -2...') },
+      annotations: { ...writes, destructiveHint: true, title: 'Restore a version' },
+    },
+    wrap((args) => tools.restoreVersion(args)),
+  );
+
+  server.registerTool(
+    'diff',
+    {
+      title: 'Compare two documents',
+      description: 'List what changed between two documents (files or text): nodes added, removed, moved or changed, trees and kits. Nodes are matched by id.',
+      inputSchema: {
+        before: z.object(source).describe('The older document: { path } or { document }'),
+        after: z.object(source).describe('The newer document: { path } or { document }'),
+      },
+      annotations: { ...reads, title: 'Compare two documents' },
+    },
+    wrap((args) => tools.diff(args)),
   );
 
   server.registerTool(

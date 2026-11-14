@@ -19,6 +19,8 @@ tree-weaver outline home.tree.json                                # see paths an
 tree-weaver add home.tree.json card --parent /2/0/1               # insert a library branch
 tree-weaver add home.tree.json --node '"p.muted: Fine print"'    # shorthand, or full JSON
 tree-weaver patch home.tree.json edits.json                       # several edits, all or nothing
+tree-weaver versions home.tree.json diff latest                   # what the last patch changed
+tree-weaver versions home.tree.json restore latest                # ...and roll it back
 tree-weaver validate home.tree.json                               # strict check, exits 1 on errors
 tree-weaver lint home.tree.json --render                          # layout and accessibility, per display
 tree-weaver render home.tree.json -o home.html                    # standalone HTML page
@@ -44,6 +46,8 @@ or write it in the [shorthand](shorthand.md) and run `expand`.
 | `outline <file>` | Print each tree as an indented list of branches and leaves with their path and id. `--json` gives the same as nested JSON. |
 | `kit <file...>` | Print the classes, design tokens and media queries of `.css` files, or of a document's kits, as JSON. Use the classes instead of inventing inline styles. |
 | `schema` | Print the JSON Schema (draft 2020-12) for documents, or with `--patch` for patches. |
+| `versions <file> [action]` | Saved versions of a file, kept in `.tree-weaver/<file>.versions.json` next to it. `list` (the default), `save -n <name>`, `diff <v> [v2]` (from version `v` to the file, or to `v2`), `restore <v>` (the current file is saved first, so a restore can be undone) and `remove <v>`. A version is an id, a name, `latest`, a number from the list, or `-1`, `-2`… from the newest. `patch` and `add` save the file as a version before changing it in place (`--no-version` skips this), so an agent's edits can always be reviewed and rolled back. |
+| `diff <a> <b>` | What changed between two documents: branches and leaves added, removed, moved or changed (and which part: styles per display, classes, attributes, text), trees and design kits. Nodes are matched by id. `--json` gives the same as data. |
 | `link <file\|url>` | Print a link that opens the document in the editor: a file is packed into the link (`#doc=`, nothing is uploaded), a URL becomes `?src=`. `--editor` points at another deployment. See [embedding](embed.md). |
 
 Aliases: `check` = `validate`, `ls` = `outline`, `html` = `render`, `component` = `export`, `init` / `create` = `new`.

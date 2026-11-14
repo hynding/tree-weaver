@@ -8,6 +8,8 @@ export * from './grid-layouts';
 export * from './render';
 export * from './normalize';
 export * from './history';
+export * from './diff';
+export * from './versions';
 export * from './css';
 export * from './cascade';
 export * from './rules';

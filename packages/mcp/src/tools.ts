@@ -1,6 +1,14 @@
 import { createRequire } from 'node:module';
 import {
+  addVersion,
   applyPatch,
+  findVersion,
+  formatDiff,
+  parseVersionLog,
+  stringifyVersionLog,
+  versionLogPath,
+  type ChangeSource,
+  type VersionLog,
   checkRendered,
   checkTree,
   createForest,
@@ -22,6 +30,7 @@ import {
 } from '@tree-weaver/core';
 import {
   detectFormat,
+  diffDocuments,
   exportComponent,
   exportForest,
   exportTree,
@@ -63,6 +72,8 @@ interface Loaded {
   doc: TreeDocument;
   format: FormatId;
   path?: string;
+  /** The document as read. */
+  text: string;
 }
 
 export class Tools {
@@ -81,7 +92,7 @@ export class Tools {
     const { text, name } = await this.text(src);
     const format = src.format ?? detectFormat(text, name);
     try {
-      return { doc: importDocument(text, format), format, path: src.path };
+      return { doc: importDocument(text, format), format, path: src.path, text };
     } catch (err) {
       if (err instanceof FormatError || err instanceof TreeDataError) throw new ToolError(`${name ?? 'document'}: ${err.message}`);
       throw err;
@@ -99,6 +110,24 @@ export class Tools {
       return { text: `${summary}\nWrote ${written}.`, data: { ...extra, path: written } };
     }
     return { text: `${summary}\n\n${data}`, data: { ...extra, document: data } };
+  }
+
+  private async versions(path: string): Promise<VersionLog> {
+    const logPath = versionLogPath(path);
+    return parseVersionLog((await this.ws.exists(logPath)) ? await this.ws.read(logPath) : null);
+  }
+
+  private async keepVersion(path: string, text: string, format: string, init: { name?: string; source?: ChangeSource; auto?: boolean }) {
+    const { log, version } = addVersion(await this.versions(path), { ...init, document: text, format });
+    await this.ws.write(versionLogPath(path), stringifyVersionLog(log));
+    return version;
+  }
+
+  private versionRef(log: VersionLog, path: string, ref: string | undefined) {
+    if (!ref) throw new ToolError('Give "version": an id, a name, "latest", or a number from list_versions');
+    const v = findVersion(log, ref);
+    if (!v) throw new ToolError(`No version "${ref}" of ${path}. Call list_versions to see them.`);
+    return v;
   }
 
   /* ------------------------------------------------------------------ tools */
@@ -178,7 +207,7 @@ export class Tools {
     return { text, data: { trees: trees.map((t) => ({ id: t.id, name: t.name, root: outlineData(t.root, '/') })) } };
   }
 
-  async patchTree(args: Source & { ops: unknown; tree?: string; dryRun?: boolean; output?: string }): Promise<ToolOutput> {
+  async patchTree(args: Source & { ops: unknown; tree?: string; dryRun?: boolean; output?: string; label?: string; keepVersion?: boolean }): Promise<ToolOutput> {
     const loaded = await this.load(args);
     const tree = pickTree(loaded.doc, args.tree);
     let ops = args.ops;
@@ -208,8 +237,14 @@ export class Tools {
     const serialized = this.serialize(next, loaded.format);
     const output = args.output ?? loaded.path;
     if (output) {
+      // Editing the file in place: keep what it was, so the change can be reviewed (diff_versions) and rolled back (restore_version).
+      let versionNote = '';
+      if (loaded.path && output === loaded.path && args.keepVersion !== false) {
+        const v = await this.keepVersion(loaded.path, loaded.text, loaded.format, { name: args.label ? `Before ${args.label}` : 'Before patch', source: 'agent', auto: true });
+        versionNote = `\nSaved the previous file as version ${v.id} (restore_version to roll back).`;
+      }
       const written = await this.ws.write(output, serialized);
-      return { text: `${summary}\nWrote ${written}.\n\n${outlineText(updated)}`, data: { ...data, path: written } };
+      return { text: `${summary}\nWrote ${written}.${versionNote}\n\n${outlineText(updated)}`, data: { ...data, path: written } };
     }
     return { text: `${summary}\n\n${serialized}`, data: { ...data, document: serialized } };
   }
@@ -366,6 +401,50 @@ export class Tools {
         return { text: `Formats:\n${list.map((f) => `- ${f.id} (.${f.extensions.join(', .')}): ${f.forest ? 'forest or tree' : 'one tree'}${f.lossless ? '' : ', lossy'}`).join('\n')}`, data: { formats: list } };
       }
     }
+  }
+
+  async listVersions(args: { path: string }): Promise<ToolOutput> {
+    const log = await this.versions(args.path);
+    const list = log.versions.map(({ document: _, ...v }, i) => ({ number: i + 1, ...v }));
+    if (!list.length) return { text: `No versions of ${args.path} yet. save_version saves one; patch_tree saves one before it changes the file.`, data: { versions: [] } };
+    const lines = list.map((v) => `${String(v.number).padStart(3)}  ${v.createdAt}  ${v.name}${v.auto ? ' (automatic)' : ''}  ${v.id}`);
+    return { text: `Versions of ${args.path}, oldest first:\n${lines.join('\n')}`, data: { versions: list } };
+  }
+
+  async saveVersion(args: { path: string; name?: string }): Promise<ToolOutput> {
+    const loaded = await this.load({ path: args.path });
+    const v = await this.keepVersion(args.path, loaded.text, loaded.format, { name: args.name, source: 'agent' });
+    return { text: `Saved ${args.path} as "${v.name}" (${v.id}).`, data: { id: v.id, name: v.name, createdAt: v.createdAt } };
+  }
+
+  async diffVersions(args: { path: string; version?: string; against?: string }): Promise<ToolOutput> {
+    const log = await this.versions(args.path);
+    const from = args.version ? this.versionRef(log, args.path, args.version) : log.versions[log.versions.length - 1];
+    if (!from) throw new ToolError(`${args.path} has no saved versions to compare with`);
+    const before = importDocument(from.document, from.format as FormatId);
+    const to = args.against ? this.versionRef(log, args.path, args.against) : null;
+    const after = to ? importDocument(to.document, to.format as FormatId) : (await this.load({ path: args.path })).doc;
+    const diff = diffDocuments(before, after);
+    const target = to ? `"${to.name}"` : `the current ${args.path}`;
+    return { text: `Changes from "${from.name}" (${from.id}) to ${target}:\n${formatDiff(diff)}`, data: { from: { id: from.id, name: from.name }, ...diff } };
+  }
+
+  async restoreVersion(args: { path: string; version: string }): Promise<ToolOutput> {
+    const log = await this.versions(args.path);
+    const v = this.versionRef(log, args.path, args.version);
+    if (await this.ws.exists(args.path)) {
+      const current = await this.ws.read(args.path);
+      if (current !== v.document) await this.keepVersion(args.path, current, detectFormat(current, args.path), { name: `Before restoring "${v.name}"`, source: 'restore', auto: true });
+    }
+    const written = await this.ws.write(args.path, v.document);
+    return { text: `Restored "${v.name}" to ${written}. The file as it was is saved as a version, so this can be undone too.`, data: { restored: { id: v.id, name: v.name }, path: written } };
+  }
+
+  async diff(args: { before: Source; after: Source }): Promise<ToolOutput> {
+    const a = await this.load(args.before ?? {});
+    const b = await this.load(args.after ?? {});
+    const diff = diffDocuments(a.doc, b.doc);
+    return { text: formatDiff(diff), data: { ...diff } };
   }
 
   async kitManifest(args: { paths: string[] }): Promise<ToolOutput> {

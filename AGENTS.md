@@ -43,7 +43,9 @@ Use these words in code, UI text, docs and commit messages:
    `"@card"`) and run `npx tree-weaver expand page.short.yaml -o page.tree.json`.
 7. To change an existing tree, send a [patch](docs/patch.md) instead of rewriting it:
    `npx tree-weaver patch page.tree.json edits.json`, with operations such as
-   `{ "op": "setStyles", "target": "/1", "styles": { "padding": "2rem" } }`.
+   `{ "op": "setStyles", "target": "/1", "styles": { "padding": "2rem" } }`. Each in-place patch saves
+   the file as a version first: `npx tree-weaver versions page.tree.json diff latest` shows what it
+   changed, and `... restore latest` rolls it back.
 8. Open the file in the [live editor](https://hynding.github.io/tree-weaver/) with Upload, or
    render it in code with `exportTree(tree, 'html', kits)` from `@tree-weaver/formats`.
 9. To put the layout into an app, export it as a component: `npx tree-weaver export page.tree.json
@@ -78,7 +80,7 @@ classes and tokens, and `schema` prints the JSON Schema. Every command takes `--
 Agents in MCP clients can use `@tree-weaver/mcp` instead of the CLI: `claude mcp add tree-weaver --
 npx -y @tree-weaver/mcp --root .`, or `{ "command": "npx", "args": ["-y", "@tree-weaver/mcp"] }` in a
 client's `mcpServers`. Tools: `create_tree`, `outline`, `patch_tree`, `validate`, `render_html`,
-`export_component`, `convert`, `check_layout` (problems per display, with fixes), `screenshot` (a PNG per display), `catalog`, `kit_manifest`. The schemas and guides are
+`export_component`, `convert`, `check_layout` (problems per display, with fixes), `screenshot` (a PNG per display), `catalog`, `kit_manifest`, and `list_versions`, `save_version`, `diff_versions`, `restore_version`, `diff` to review and roll back edits. The schemas and guides are
 resources (`tree-weaver://guide/shorthand`, …). Full guide: [`docs/mcp.md`](docs/mcp.md).
 
 ## Handing a tree to a person

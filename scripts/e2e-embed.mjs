@@ -2,7 +2,7 @@
 /**
  * Browser check for the embeddable editor. Serves the built editor (apps/web/www) and a
  * host page on two different origins, then drives <tree-weaver-editor> in Chromium:
- * ready, load, getDocument, change events, the src attribute, ?src= and #doc= links, and
+ * ready, load, getDocument, change events, patch/undo/versions, the src attribute, ?src= and #doc= links, and
  * that a page on a third origin gets nothing back. Needs Playwright with Chromium
  * (set TW_CHROMIUM_PATH to use another Chrome binary). Run after `pnpm build`.
  *
@@ -85,6 +85,24 @@ try {
   await page.evaluate(() => document.getElementById('ed').load({ tree: { name: 'Edit me', root: { tag: 'body', children: ['Hello'] } } }));
   await page.waitForFunction(() => window.changes.some((c) => c.forest.trees[0]?.name === 'Edit me'), null, { timeout: 5000 });
   check(true, 'change events reach the host');
+
+  // History: a patch is one undoable change, with a version saved before it.
+  const patched = await page.evaluate(() => document.getElementById('ed').patch([{ op: 'insert', parent: '/', node: 'h2: Added by an agent' }], { label: 'agent heading' }));
+  check(patched.changes.length === 1, 'patch() applies operations');
+  const versions = await page.evaluate(() => document.getElementById('ed').listVersions());
+  check(versions.length === 1 && versions[0].auto && versions[0].name === 'Before agent heading', 'patch() saves a version first');
+  const diff = await page.evaluate((id) => document.getElementById('ed').diff(id), versions[0].id);
+  check(diff.changes.length === 1 && /Added <h2>/.test(diff.changes[0]), 'diff() shows what the patch changed');
+  await page.evaluate(() => document.getElementById('ed').undo());
+  const undone = await page.evaluate(() => document.getElementById('ed').getForest());
+  check(undone.trees[0].root.children.length === 1, 'undo() rolls the patch back');
+  await page.evaluate(() => document.getElementById('ed').redo());
+  await page.evaluate(() => document.getElementById('ed').saveVersion('With heading'));
+  await page.evaluate((id) => document.getElementById('ed').restoreVersion(id), versions[0].id);
+  const restored = await page.evaluate(() => document.getElementById('ed').getForest());
+  check(restored.trees[0].root.children.length === 1, 'restoreVersion() brings a version back');
+  const again = await page.evaluate(() => document.getElementById('ed').diff('With heading'));
+  check(again.changes.length === 1 && /^Removed/.test(again.changes[0]), 'versions can be found by name');
 
   await page.goto('http://localhost:4812/src.html');
   const names = await page.evaluate(async () => {

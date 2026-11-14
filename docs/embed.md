@@ -31,11 +31,17 @@ the element) or `import { TreeWeaverEditor, defineTreeWeaverEditor } from '@tree
 | Method / property | Does |
 | --- | --- |
 | `ready` | A promise that resolves when the editor can take calls. |
-| `load(document, { format? })` | Open a forest or tree: an object, JSON text, or YAML, XML, HTML, Markdown or SVG text. Replaces what is open. Resolves to `{ kind, trees }`. |
+| `load(document, { format?, label? })` | Open a forest or tree: an object, JSON text, or YAML, XML, HTML, Markdown or SVG text. Replaces what is open. Loading a new copy of what is open (same forest id, or a tree already in it) is an undoable change instead, with a version saved first; `label` names it in the editor's history. Resolves to `{ kind, trees }`. |
 | `getDocument({ format?, scope? })` | The forest (or `scope: 'tree'` for the open tree) as text in `format` (default `json`). HTML, Markdown and SVG always give the open tree. |
 | `getForest()` | The forest as plain JSON. |
 | `setDisplay(id)` | Show `lg`, `xl`, `tablet`, `mobile-landscape` or `mobile-portrait`. |
 | `selectTree(idOrName)` | Open a tree of the forest. |
+| `patch(ops, { tree?, label? })` | Apply [patch operations](patch.md) to a tree (default the open one) as one undoable change, all or nothing. A version is saved first. Resolves to `{ changes, warnings }`. |
+| `undo()`, `redo()` | Step through the editor's history. Resolve to `{ canUndo, canRedo }`. |
+| `saveVersion(name?)` | Save the open forest as a version. Resolves to `{ id, name, createdAt, source, auto }`. |
+| `listVersions()` | The open forest's versions, newest first, including the automatic ones taken before `load` and `patch` changes. |
+| `diff(version)` | What changed from a version (id or name) to the open forest: `{ empty, changes, text }`, one line per change. |
+| `restoreVersion(version)` | Bring a version back as one undoable change. |
 | `forest` | The latest forest from a `change` event. |
 
 Events: `ready`, `change` (`detail: { forest, treeId }`), `error` (`detail: { message }`, when a call fails).
@@ -75,9 +81,26 @@ someone's saved forests.
 ```
 
 Host messages: `{ source: 'tree-weaver-host', id?, type }` with `type` one of `load` (`document`,
-`format?`), `getDocument` (`format?`, `scope?`), `setDisplay` (`display`), `selectTree` (`tree`) and
-`ping`. Every message with an `id` gets a `response` with the same `id` and either `ok: true, result`
+`format?`, `label?`), `getDocument` (`format?`, `scope?`), `setDisplay` (`display`), `selectTree` (`tree`),
+`patch` (`ops`, `tree?`, `label?`), `undo`, `redo`, `saveVersion` (`name?`), `listVersions`,
+`restoreVersion` (`version`), `diff` (`version`) and `ping`. Every message with an `id` gets a `response` with the same `id` and either `ok: true, result`
 or `ok: false, error`. The TypeScript types are `HostMessage` and `EditorMessage` in `@tree-weaver/embed`.
+
+## Reviewing an agent's changes
+
+Changes that come from the host page are marked in the editor's **History** tab: each `load` of
+the open forest and each `patch` is one step, tagged *Host page* or *Agent*, so the person can see
+what changed, undo it, or go back to the automatic version taken just before it. A host can do the
+same from code:
+
+```js
+await editor.patch([{ op: 'setText', target: 'title', value: 'Spring sale' }], { label: 'agent: retitle' });
+const { text } = await editor.diff((await editor.listVersions())[0].id); // what the patch changed
+if (!confirm(text)) await editor.undo();
+```
+
+In embed mode versions live in memory with the document; in the plain editor they are kept in
+the browser (IndexedDB) next to the forests.
 
 ## Links that open a document
 

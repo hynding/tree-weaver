@@ -18,6 +18,15 @@ import {
   replaceTree,
   resolveRef,
   TREE_WEAVER_PATCH_SCHEMA,
+  addVersion,
+  findVersion,
+  formatDiff,
+  parseVersionLog,
+  removeVersion,
+  stringifyVersionLog,
+  versionLogPath,
+  type ChangeSource,
+  type VersionLog,
   TREE_WEAVER_SCHEMA,
   TreeDataError,
   validateDocument,
@@ -32,6 +41,7 @@ import {
 } from '@tree-weaver/core';
 import {
   COMPONENT_FRAMEWORKS,
+  diffDocuments,
   detectFormat,
   exportComponent,
   exportForest,
@@ -120,6 +130,8 @@ Commands:
   kit <file...>            List the classes and tokens of CSS files or a document's kits
   schema                   Print the JSON Schema for Tree Weaver documents
   link <file|url>          Print a link that opens a document in the live editor
+  versions <file> [action] List, save, compare and restore saved versions of a file
+  diff <a> <b>             Show what changed between two documents
 
 Common options:
   -o, --output <file>      Write here instead of stdout (format from the extension)
@@ -220,6 +232,7 @@ and write the document back in its own format.
   -t, --tree <ref>      Tree in a forest (default: first)
   -o, --output <file>   Write here instead of back to <file>
       --list            List the blueprints
+      --no-version      Don't save the file as a version before changing it
       --json            Print { id, path, parent, tree, output }
 `,
   outline: `Usage: tree-weaver outline <file> [options]
@@ -251,6 +264,7 @@ setText. Example:
   -t, --tree <ref>      Tree in a forest (default: first)
   -o, --output <file>   Write here instead of back to <file>
       --dry-run         Check the patch and print the result instead of writing it
+      --no-version      Don't save the file as a version before changing it
       --json            Print { changes: [{ op, kind, id, path }], warnings, output }
 `,
   expand: `Usage: tree-weaver expand <file> [options]
@@ -278,6 +292,32 @@ must allow cross-origin requests).
       --editor <url>    Editor to link to (default: ${EDITOR_URL})
   -F, --from <fmt>      Input format, when the extension doesn't say
       --json            Print { url, length }
+`,
+  versions: `Usage: tree-weaver versions <file> [list|save|diff|restore|remove] [version] [options]
+
+Saved versions of a document, kept next to it in .tree-weaver/<file>.versions.json.
+"patch" and "add" save one automatically before they change a file (unless
+--no-version), so an agent's edits can be reviewed and rolled back.
+
+  versions <file>                   List versions, oldest first, numbered
+  versions <file> save [-n name]    Save the file as it is now
+  versions <file> diff <v> [v2]     What changed from version v to the file (or to v2)
+  versions <file> restore <v>       Write version v back (the current file is saved first)
+  versions <file> remove <v>        Forget a version
+
+A version is an id, a name, "latest", a number from the list, or -1, -2... from the newest.
+
+  -n, --name <name>     Name for "save"
+      --json            Machine-readable output
+`,
+  diff: `Usage: tree-weaver diff <before> <after> [options]
+
+List what changed between two documents: branches and leaves added, removed, moved
+or changed (with which part: styles per display, classes, attributes, text), trees
+and design kits. Nodes are matched by id.
+
+  -F, --from <fmt>      Input format, when the extension doesn't say
+      --json            Print { trees: [{ id, name, status, changes }], kits, empty }
 `,
   schema: `Usage: tree-weaver schema [--patch] [-o file]
 
@@ -388,7 +428,24 @@ function resolveNode(root: Branch, ref: string | undefined): { node: TreeNode; p
 }
 
 /** Put an updated tree back into its document and write it, in the document's own format. */
-async function writeTree(cli: Cli, loaded: Loaded, file: string, tree: Tree, output: string | undefined): Promise<string | undefined> {
+/* ---------------------------------------------------------------- versions */
+
+async function readVersions(cli: Cli, file: string): Promise<VersionLog> {
+  try {
+    return parseVersionLog(await cli.io.readFile(versionLogPath(file)));
+  } catch {
+    return parseVersionLog(null);
+  }
+}
+
+/** Save `text` (the file as it is now) as a version of `file`. */
+async function keepVersion(cli: Cli, file: string, text: string, format: FormatId, init: { name?: string; source?: ChangeSource; auto?: boolean }) {
+  const { log, version } = addVersion(await readVersions(cli, file), { ...init, document: text, format });
+  await cli.io.writeFile(versionLogPath(file), stringifyVersionLog(log));
+  return version;
+}
+
+async function writeTree(cli: Cli, loaded: Loaded, file: string, tree: Tree, output: string | undefined, versionAs?: string): Promise<string | undefined> {
   const { doc, format } = loaded;
   let next: TreeDocument;
   if (doc.kind === 'forest') next = { kind: 'forest', forest: { ...replaceTree(doc.forest, tree), updatedAt: now() } };
@@ -396,6 +453,8 @@ async function writeTree(cli: Cli, loaded: Loaded, file: string, tree: Tree, out
   if (!getFormat(format).lossless) cli.note(`${file} is ${getFormat(format).label}, which doesn't keep every style or attribute; consider converting it to JSON first`);
   const data = next.kind === 'forest' ? exportForest(next.forest, format) : exportTree(next.tree, format, next.kits);
   const target = output ?? (file === '-' ? undefined : file);
+  // Overwriting the file: keep what it was, so "versions restore" can bring it back.
+  if (versionAs && target && target === file && loaded.text !== data) await keepVersion(cli, file, loaded.text, format, { name: versionAs, source: 'agent', auto: true });
   await cli.emit(target, data);
   return target;
 }
@@ -616,6 +675,7 @@ async function cmdAdd(cli: Cli, args: string[]): Promise<number> {
     output: { type: 'string', short: 'o' },
     from: { type: 'string', short: 'F' },
     list: { type: 'boolean' },
+    'no-version': { type: 'boolean' },
   });
   const json = !!values.json;
   if (values.list) {
@@ -671,7 +731,7 @@ async function cmdAdd(cli: Cli, args: string[]): Promise<number> {
   } catch (err) {
     throw new Error((err as Error).message.replace(/^ops\[0\]: /, '').replace(/ops\[0\]\.node/g, 'node'));
   }
-  const output = await writeTree(cli, loaded, file, updated, values.output);
+  const output = await writeTree(cli, loaded, file, updated, values.output, values['no-version'] ? undefined : 'Before add');
   if (output) {
     const path = pathOf(updated.root, node.id) ?? '?';
     const label = isBranch(node) ? `<${node.tag}>${node.name ? ` "${node.name}"` : ''}` : `${node.type} leaf`;
@@ -687,6 +747,7 @@ async function cmdPatch(cli: Cli, args: string[]): Promise<number> {
     output: { type: 'string', short: 'o' },
     from: { type: 'string', short: 'F' },
     'dry-run': { type: 'boolean' },
+    'no-version': { type: 'boolean' },
   });
   const [file, patchFile, ...rest] = positionals;
   if (!file || rest.length) throw new UsageError('patch needs a file, and a patch file or --ops');
@@ -718,7 +779,7 @@ async function cmdPatch(cli: Cli, args: string[]): Promise<number> {
     else cli.io.stdout(doc.kind === 'forest' ? exportForest(doc.forest, loaded.format) : exportTree(doc.tree, loaded.format, doc.kits));
     return 0;
   }
-  const output = await writeTree(cli, loaded, file, updated, values.output);
+  const output = await writeTree(cli, loaded, file, updated, values.output, values['no-version'] ? undefined : 'Before patch');
   if (output) {
     const lines = result.changes.map((c) => `  ${c.kind.padEnd(10)} ${c.path ?? '(removed)'}  #${c.id}`);
     cli.report(json, { changes: result.changes, warnings: result.warnings, tree: { id: tree.id, name: tree.name }, output }, `Applied ${result.changes.length} op${result.changes.length === 1 ? '' : 's'} to ${output}\n${lines.join('\n')}`);
@@ -862,7 +923,84 @@ async function cmdLink(cli: Cli, args: string[]): Promise<number> {
   return 0;
 }
 
+const when = (iso: string) => iso.replace('T', ' ').replace(/\.\d+Z$/, 'Z');
+
+async function cmdVersions(cli: Cli, args: string[]): Promise<number> {
+  const { values, positionals } = parse(args, {
+    name: { type: 'string', short: 'n' },
+    from: { type: 'string', short: 'F' },
+  });
+  const [file, action = 'list', ref, ref2, ...rest] = positionals;
+  if (!file || file === '-') throw new UsageError('versions needs a file');
+  if (rest.length) throw new UsageError(`Unexpected "${rest[0]}"`);
+  const json = !!values.json;
+  const log = await readVersions(cli, file);
+  const need = (r: string | undefined) => {
+    if (!r) throw new UsageError(`versions ${action} needs a version: an id, a name, "latest", or a number from "versions ${file}"`);
+    const v = findVersion(log, r);
+    if (!v) throw new Error(`No version "${r}" of ${file} (see "tree-weaver versions ${file}")`);
+    return v;
+  };
+  switch (action) {
+    case 'list': {
+      const list = log.versions.map(({ document: _, ...v }, i) => ({ number: i + 1, ...v }));
+      cli.report(
+        json,
+        { file, log: versionLogPath(file), versions: list },
+        list.length
+          ? list.map((v) => `${String(v.number).padStart(3)}  ${when(v.createdAt)}  ${v.name}${v.auto ? ' (automatic)' : ''}  ${v.id}`).join('\n')
+          : `No versions of ${file} yet. "tree-weaver versions ${file} save -n <name>" saves one; patch and add save one before they change the file.`,
+      );
+      return 0;
+    }
+    case 'save': {
+      const loaded = await cli.load(file, asFormat(values.from, '--from'));
+      const v = await keepVersion(cli, file, loaded.text, loaded.format, { name: values.name ?? ref, source: 'editor' });
+      cli.report(json, { id: v.id, name: v.name, createdAt: v.createdAt, log: versionLogPath(file) }, `Saved "${v.name}" (${v.id})`);
+      return 0;
+    }
+    case 'restore': {
+      const v = need(ref);
+      const current = await cli.read(file).catch(() => null);
+      if (current !== null && current !== v.document) await keepVersion(cli, file, current, detectFormat(current, file), { name: `Before restoring "${v.name}"`, source: 'restore', auto: true });
+      await cli.io.writeFile(file, v.document);
+      cli.report(json, { restored: { id: v.id, name: v.name }, file }, `Restored "${v.name}" to ${file}`);
+      return 0;
+    }
+    case 'diff': {
+      const a = need(ref);
+      const before = importDocument(a.document, a.format as FormatId);
+      const label = ref2 ? need(ref2).name : file;
+      const after = ref2 ? (({ document, format }) => importDocument(document, format as FormatId))(need(ref2)) : (await cli.load(file, asFormat(values.from, '--from'))).doc;
+      const diff = diffDocuments(before, after);
+      cli.report(json, { from: a.name, to: label, ...diff }, `Changes from "${a.name}" to ${ref2 ? `"${label}"` : label}:\n${formatDiff(diff)}`);
+      return 0;
+    }
+    case 'remove': {
+      const v = need(ref);
+      await cli.io.writeFile(versionLogPath(file), stringifyVersionLog(removeVersion(log, v.id)));
+      cli.report(json, { removed: { id: v.id, name: v.name } }, `Removed "${v.name}"`);
+      return 0;
+    }
+    default:
+      throw new UsageError(`Unknown action "${action}": use list, save, restore, diff or remove`);
+  }
+}
+
+async function cmdDiff(cli: Cli, args: string[]): Promise<number> {
+  const { values, positionals } = parse(args, { from: { type: 'string', short: 'F' } });
+  const [a, b, ...rest] = positionals;
+  if (!a || !b || rest.length) throw new UsageError('diff needs two files');
+  if (a === '-' && b === '-') throw new UsageError('Only one file can come from stdin');
+  const from = asFormat(values.from, '--from');
+  const diff = diffDocuments((await cli.load(a, from)).doc, (await cli.load(b, from)).doc);
+  cli.report(!!values.json, diff, formatDiff(diff));
+  return 0;
+}
+
 const COMMANDS: Record<string, (cli: Cli, args: string[]) => Promise<number>> = {
+  versions: cmdVersions,
+  diff: cmdDiff,
   new: cmdNew,
   validate: cmdValidate,
   render: cmdRender,

@@ -8,6 +8,7 @@ const TABS: { id: SidebarTab; label: string }[] = [
   { id: 'classes', label: 'Classes' },
   { id: 'kits', label: 'Kits' },
   { id: 'forest', label: 'Forest' },
+  { id: 'history', label: 'History' },
 ];
 
 @Component({ tag: 'tw-sidebar' })
@@ -27,6 +28,7 @@ export class TwSidebar {
         {state.tab === 'classes' && <tw-classes-panel />}
         {state.tab === 'kits' && <tw-kits-panel />}
         {state.tab === 'forest' && <tw-forest-panel />}
+        {state.tab === 'history' && <tw-history-panel />}
       </div>,
     ];
   }

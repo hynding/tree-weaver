@@ -51,6 +51,10 @@ or set `TW_CHROMIUM_PATH` to a Chrome or Chromium binary. Every other tool works
 | `create_tree` | Start a tree from a template (`landing`, `dashboard`, `article`, `drawing`, `blank`) or from [shorthand](shorthand.md), with the Weaver Basic starter kit. Writes `path` (never overwrites unless `overwrite: true`) or returns the document. The result includes the outline. |
 | `outline` | Every branch and leaf with its path (`/1/0`) and id (`#b_…`). |
 | `patch_tree` | Apply [patch operations](patch.md) in order, all or nothing: `insert`, `replace`, `remove`, `move`, `duplicate`, `wrap`, `update`, `setStyles`, `setText`. Nodes may be shorthand. Writes the file back, or returns the result for an inline `document`. `dryRun` describes the changes without writing. |
+| `list_versions`, `save_version` | Saved versions of a workspace file, kept in `.tree-weaver/<file>.versions.json` next to it. `patch_tree` saves one before every in-place edit (named after its `label`; `keepVersion: false` skips it). |
+| `diff_versions` | What changed from a version (default the newest) to the file, or to another version: nodes added, removed, moved or changed, trees and kits. Right after `patch_tree` it shows exactly what the patch did. |
+| `restore_version` | Write a version back. The file as it was is saved first, so a restore can be undone. |
+| `diff` | What changed between two documents (`before` and `after`, each a `path` or `document`). |
 | `validate` | The strict check, with a path and a fix hint for every problem. |
 | `render_html` | A standalone HTML page with kits and responsive CSS inlined. |
 | `export_component` | A tree as a React, Vue or Svelte component, or HTML with CSS files, styled with a CSS file or Tailwind classes. Returns every file, or writes them into `outputDir`. See [exporting components](export.md). |
