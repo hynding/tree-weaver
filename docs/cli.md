@@ -40,6 +40,7 @@ or write it in the [shorthand](shorthand.md) and run `expand`.
 | `outline <file>` | Print each tree as an indented list of branches and leaves with their path and id. `--json` gives the same as nested JSON. |
 | `kit <file...>` | Print the classes, design tokens and media queries of `.css` files, or of a document's kits, as JSON. Use the classes instead of inventing inline styles. |
 | `schema` | Print the JSON Schema (draft 2020-12) for documents, or with `--patch` for patches. |
+| `link <file\|url>` | Print a link that opens the document in the editor: a file is packed into the link (`#doc=`, nothing is uploaded), a URL becomes `?src=`. `--editor` points at another deployment. See [embedding](embed.md). |
 
 Aliases: `check` = `validate`, `ls` = `outline`, `html` = `render`, `init` / `create` = `new`.
 

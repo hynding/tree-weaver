@@ -310,3 +310,22 @@ describe('tree-weaver CLI', () => {
   });
 });
 
+
+describe('tree-weaver link', () => {
+  it('packs a file into an editor link that decodes back to the document', async () => {
+    const files = { 'm.json': example('minimal.tree.json') };
+    const r = await cli(['link', 'm.json', '--json'], files);
+    expect(r.code).toBe(0);
+    const { url } = JSON.parse(r.out);
+    expect(url).toMatch(/^https:\/\/hynding\.github\.io\/tree-weaver\/#doc=[A-Za-z0-9_-]+$/);
+    const doc = JSON.parse(Buffer.from(url.split('#doc=')[1], 'base64url').toString('utf8'));
+    expect(doc.format).toBe('tree-weaver');
+    expect(doc.tree.root.tag).toBe('body');
+  });
+
+  it('passes URLs as ?src= and takes another editor', async () => {
+    const r = await cli(['link', 'https://example.com/a b.tree.json', '--editor', 'http://localhost:3333/']);
+    expect(r.out.trim()).toBe('http://localhost:3333/?src=https%3A%2F%2Fexample.com%2Fa+b.tree.json');
+    expect((await cli(['link', 'x.json', '--editor', 'nope'])).code).toBe(2);
+  });
+});

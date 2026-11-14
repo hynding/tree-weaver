@@ -69,6 +69,9 @@ class UsageError extends Error {}
 
 const FORMAT_IDS = FORMATS.map((f) => f.id);
 
+/** The hosted editor. */
+const EDITOR_URL = 'https://hynding.github.io/tree-weaver/';
+
 const HELP = `tree-weaver: create, check, edit and render Tree Weaver forests and trees
 
 Usage: tree-weaver <command> [options]
@@ -84,6 +87,7 @@ Commands:
   outline <file>           List a tree's branches and leaves with their ids and paths
   kit <file...>            List the classes and tokens of CSS files or a document's kits
   schema                   Print the JSON Schema for Tree Weaver documents
+  link <file|url>          Print a link that opens a document in the live editor
 
 Common options:
   -o, --output <file>      Write here instead of stdout (format from the extension)
@@ -199,6 +203,16 @@ list of nodes for the page body. Canonical nodes pass through unchanged.
   -f, --to <fmt>        Output format: ${FORMAT_IDS.join(', ')}
   -n, --name <name>     Name of the tree, when the file doesn't give one
       --json            Print { output, valid, errors, warnings } (with -o)
+`,
+  link: `Usage: tree-weaver link <file|url> [options]
+
+Print a link that opens a document in the editor. A file is packed into the link
+itself (#doc=, nothing is uploaded); an http(s) URL is passed as ?src= (the server
+must allow cross-origin requests).
+
+      --editor <url>    Editor to link to (default: ${EDITOR_URL})
+  -F, --from <fmt>      Input format, when the extension doesn't say
+      --json            Print { url, length }
 `,
   schema: `Usage: tree-weaver schema [--patch] [-o file]
 
@@ -677,6 +691,32 @@ async function cmdSchema(cli: Cli, args: string[]): Promise<number> {
   return 0;
 }
 
+async function cmdLink(cli: Cli, args: string[]): Promise<number> {
+  const { values, positionals } = parse(args, { editor: { type: 'string' }, from: { type: 'string', short: 'F' } });
+  if (positionals.length !== 1) throw new UsageError('link needs one file or http(s) URL');
+  const target = positionals[0];
+  let editor: URL;
+  try {
+    editor = new URL(values.editor ?? EDITOR_URL);
+  } catch {
+    throw new UsageError(`--editor is not a URL: ${values.editor}`);
+  }
+  let url: string;
+  if (/^https?:\/\//i.test(target)) {
+    editor.searchParams.set('src', target);
+    url = editor.href;
+  } else {
+    const { doc } = await cli.load(target, asFormat(values.from, '--from'));
+    const json = doc.kind === 'forest' ? exportForest(doc.forest, 'json') : exportTree(doc.tree, 'json', doc.kits);
+    const packed = Buffer.from(JSON.stringify(JSON.parse(json))).toString('base64url');
+    editor.hash = `doc=${packed}`;
+    url = editor.href;
+    if (url.length > 32000) cli.note(`The link is ${url.length} characters; some apps cut long links. Host the file and link its URL instead.`);
+  }
+  cli.report(!!values.json, { url, length: url.length }, url);
+  return 0;
+}
+
 const COMMANDS: Record<string, (cli: Cli, args: string[]) => Promise<number>> = {
   new: cmdNew,
   validate: cmdValidate,
@@ -688,6 +728,7 @@ const COMMANDS: Record<string, (cli: Cli, args: string[]) => Promise<number>> = 
   outline: cmdOutline,
   kit: cmdKit,
   schema: cmdSchema,
+  link: cmdLink,
 };
 
 const ALIASES: Record<string, string> = { check: 'validate', ls: 'outline', html: 'render', create: 'new', init: 'new' };

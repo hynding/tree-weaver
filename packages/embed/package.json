@@ -1,0 +1,37 @@
+{
+  "name": "@tree-weaver/embed",
+  "version": "0.1.0",
+  "description": "Embed the Tree Weaver editor in any page: a <tree-weaver-editor> custom element with load(), getDocument() and change events.",
+  "license": "MIT",
+  "keywords": ["tree-weaver", "embed", "custom-element", "web-component", "page-builder", "layout"],
+  "homepage": "https://github.com/hynding/tree-weaver/blob/main/docs/embed.md",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hynding/tree-weaver.git",
+    "directory": "packages/embed"
+  },
+  "bugs": "https://github.com/hynding/tree-weaver/issues",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "src", "!src/**/*.test.ts"],
+  "sideEffects": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepack": "node ../../scripts/copy-license.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -14,6 +14,9 @@ importers:
       fake-indexeddb:
         specifier: ^6.2.5
         version: 6.2.5
+      playwright:
+        specifier: ^1.65.1
+        version: 1.65.1
       typescript:
         specifier: ~5.9.3
         version: 5.9.3
@@ -45,6 +48,9 @@ importers:
       '@stencil/store':
         specifier: ^2.2.5
         version: 2.2.5(@stencil/core@4.45.2)
+      '@tree-weaver/embed':
+        specifier: workspace:*
+        version: link:../../packages/embed
 
   packages/branches:
     dependencies:
@@ -75,6 +81,8 @@ importers:
         version: 22.20.5
 
   packages/core: {}
+
+  packages/embed: {}
 
   packages/formats:
     dependencies:

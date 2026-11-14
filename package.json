@@ -16,11 +16,13 @@
     "typecheck": "pnpm -r typecheck",
     "schema": "UPDATE_SCHEMA=1 vitest run packages/core/src/schema.test.ts",
     "smoke": "node scripts/smoke-pack.mjs",
-    "release:version": "node scripts/set-version.mjs"
+    "release:version": "node scripts/set-version.mjs",
+    "e2e:embed": "node scripts/e2e-embed.mjs"
   },
   "devDependencies": {
     "ajv": "^8.20.0",
     "fake-indexeddb": "^6.2.5",
+    "playwright": "^1.65.1",
     "typescript": "~5.9.3",
     "vitest": "^4.1.12"
   }

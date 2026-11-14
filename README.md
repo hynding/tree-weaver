@@ -190,6 +190,8 @@ Tree Weaver data is plain JSON (or YAML) with a published contract, so agents ca
 
 - The **MCP server** ([`docs/mcp.md`](docs/mcp.md)): `npx -y @tree-weaver/mcp` gives Claude, Cursor, VS Code and other MCP clients
   tools to create, patch, validate, render and screenshot trees.
+- **Embedding and links** ([`docs/embed.md`](docs/embed.md)): a `<tree-weaver-editor>` element for other apps, and editor links
+  that open a document (`?src=<url>`, or `#doc=` from `npx tree-weaver link file.json`).
 - The **`tree-weaver` CLI** ([`docs/cli.md`](docs/cli.md)): `npx tree-weaver new | validate | render | convert | add | patch | expand | outline | kit | schema`,
   with `--json` reports. `npm i tree-weaver` also installs every library (`@tree-weaver/core`, `formats`, `kits`, `branches`, `storage`).
 
@@ -214,6 +216,7 @@ apps/
 packages/
   cli/                 The `tree-weaver` CLI, and one package that re-exports every library
   mcp/                 The MCP server (@tree-weaver/mcp)
+  embed/               The <tree-weaver-editor> element (@tree-weaver/embed), also served as /embed.js
   core/                Tree model, immutable operations, displays, CSS/HTML rendering, validation
   formats/             JSON, YAML, XML, HTML, Markdown and SVG import/export, Storybook export and import
   storage/             IndexedDB / localStorage / memory forest stores and preferences

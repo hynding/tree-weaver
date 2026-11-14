@@ -54,10 +54,11 @@ import {
   type Tree,
   type TreeNode,
 } from '@tree-weaver/core';
-import { exportForest, exportStorybook, exportTree, getFormat, importDocument, suggestFileName, zipStorybook, type FormatId } from '@tree-weaver/formats';
-import { createEnvKits, createStarterKit, fetchKitCss } from '@tree-weaver/kits';
+import { exportForest, exportStorybook, exportTree, getFormat, importDocument, suggestFileName, zipStorybook, type FormatId, type TreeDocument } from '@tree-weaver/formats';
+import { createEnvKits, createStarterKit, fetchKitCss, isEnvKit } from '@tree-weaver/kits';
 import { DISPLAYS_LOCKED, ENV_CSS_URLS, ENV_DISPLAYS } from '../config';
-import { createForestStore, Preferences, type ForestStore } from '@tree-weaver/storage';
+import { createForestStore, MemoryForestStore, Preferences, type ForestStore } from '@tree-weaver/storage';
+import { isEmbedded } from './embed-flags';
 import { state, type SidebarTab, type Toast } from './editor';
 
 /* ------------------------------------------------------------- selectors */
@@ -157,7 +158,8 @@ function freshForest(name = 'My forest'): Forest {
 export async function init(): Promise<void> {
   state.envKits = createEnvKits(ENV_CSS_URLS);
   void Promise.all(state.envKits.map((k) => refreshKit(k.id, true)));
-  store = await createForestStore();
+  // Embedded editors keep documents in memory only: the host page owns them.
+  store = isEmbedded() ? new MemoryForestStore() : await createForestStore();
   state.storageKind = store.kind;
   const saved = prefs.read();
   state.displaySettings = cleanDisplaySettings(saved.displays);
@@ -822,6 +824,22 @@ export async function importText(text: string, format?: FormatId, fileName?: str
   switchTree(tree.id);
   const kitNote = added.length ? ` and ${added.length} design kit${added.length === 1 ? '' : 's'}` : '';
   return { summary: `Added tree “${tree.name}”${kitNote}` };
+}
+
+/**
+ * Replace what is open with a document, without keeping the old forest around. Used by
+ * the embed API, where the host page owns the data. A tree opens in a forest of its own.
+ */
+export async function openDocument(doc: TreeDocument): Promise<{ kind: 'forest' | 'tree'; trees: number }> {
+  let forest: Forest;
+  if (doc.kind === 'forest') forest = doc.forest;
+  else {
+    forest = createForest(doc.tree.name, [doc.tree]);
+    forest.kits = doc.kits.filter((k) => !isEnvKit(k));
+  }
+  openLoaded(forest, '');
+  await saveNow();
+  return { kind: doc.kind, trees: forest.trees.length };
 }
 
 export interface ExportOutput {

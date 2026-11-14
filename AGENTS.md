@@ -72,6 +72,13 @@ client's `mcpServers`. Tools: `create_tree`, `outline`, `patch_tree`, `validate`
 `convert`, `screenshot` (a PNG per display), `catalog`, `kit_manifest`. The schemas and guides are
 resources (`tree-weaver://guide/shorthand`, …). Full guide: [`docs/mcp.md`](docs/mcp.md).
 
+## Handing a tree to a person
+
+`npx tree-weaver link page.tree.json` prints an editor link with the document packed into it
+(`#doc=`); `?src=<url>` opens a hosted file. Apps can embed the editor with `<tree-weaver-editor>`
+(`@tree-weaver/embed`, or `https://hynding.github.io/tree-weaver/embed.js`) and read changes back.
+Full guide: [`docs/embed.md`](docs/embed.md).
+
 ## Using the packages
 
 `npm i tree-weaver` installs the CLI and every library; import from `tree-weaver` or its subpaths
@@ -117,6 +124,9 @@ Useful entry points:
 - The MCP server lives in `packages/mcp` (`createServer` in `src/server.ts`, handlers in `src/tools.ts`,
   path confinement in `src/workspace.ts`); its tests drive it through the SDK's in-memory client.
   Keep `docs/mcp.md` in step with it.
+- The embed bridge is `apps/web/src/store/embed.ts` (links and `postMessage`, on only with `?embed=1`);
+  `packages/embed` is the `<tree-weaver-editor>` element (one file, no imports, copied to `embed.js` on the
+  site). `pnpm e2e:embed` checks both in Chromium after `pnpm build`. Keep `docs/embed.md` in step.
 - The CLI lives in `packages/cli` (published as `tree-weaver`); `run(argv, io)` in `src/run.ts`
   takes an injectable file system, which the tests use. Keep `docs/cli.md` in step with it.
 - Releases: `pnpm release:version x.y.z` sets every package's version, then a GitHub release tagged
