@@ -252,6 +252,17 @@ export function writeForest(doc: Y.Doc, prev: Forest | null, next: Forest, origi
   }, origin);
 }
 
+/**
+ * Remove nodes whose tree is gone (someone deleted the tree while someone else was adding to it),
+ * so they don't pile up in the document. Returns how many were removed.
+ */
+export function pruneStrays(doc: Y.Doc, origin: unknown = 'tree-weaver-prune'): number {
+  const m = maps(doc);
+  const stray = [...m.nodes.entries()].filter(([, n]) => !m.trees.has(n.get('tree') as string)).map(([id]) => id);
+  if (stray.length) doc.transact(() => stray.forEach((id) => m.nodes.delete(id)), origin);
+  return stray.length;
+}
+
 /* ---------------------------------------------------------------------- reading */
 
 const parse = <T>(v: unknown, fallback: T): T => {

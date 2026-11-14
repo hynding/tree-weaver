@@ -1,9 +1,9 @@
-import { hasForest, LOCAL_ORIGIN, newRoom, parseRoomHash, readForest, roomHash, sharedTypes, writeForest, Y, type CollabRoom } from '@tree-weaver/collab';
-import type { Forest } from '@tree-weaver/core';
+import { hasForest, pruneStrays, LOCAL_ORIGIN, newRoom, parseRoomHash, readForest, roomHash, sharedTypes, writeForest, Y, type CollabRoom } from '@tree-weaver/collab';
 import { createRecordStore, type RecordStore } from '@tree-weaver/storage';
 import { WebrtcProvider } from 'y-webrtc';
 import { COLLAB_ENABLED, COLLAB_ICE_SERVERS, COLLAB_SIGNALING } from '../config';
-import { commit, openDocument, setHistoryOverride, toast } from './actions';
+import { diffForests, isEditableKit, type Forest } from '@tree-weaver/core';
+import { commit, openDocument, setHistoryOverride, toast, withCurrentBreakpoints } from './actions';
 import { onChange, state, type CollabPeer } from './editor';
 import { isEmbedded } from './embed-flags';
 
@@ -21,6 +21,7 @@ import { isEmbedded } from './embed-flags';
  */
 
 const COLORS = 8;
+const PRUNE_ORIGIN = 'tree-weaver-prune';
 const NAME_KEY = 'tree-weaver:collab-name';
 
 interface Session {
@@ -125,7 +126,14 @@ function readPeers(): void {
     if (id === aw.clientID) return;
     const u = (s as { user?: Partial<CollabPeer> }).user;
     if (!u) return;
-    peers.push({ id, name: String(u.name ?? 'Someone').slice(0, 40), color: Number(u.color) % COLORS || 0, selectedId: u.selectedId ?? null, treeId: u.treeId ?? '' });
+    const color = Math.trunc(Number(u.color));
+    peers.push({
+      id,
+      name: String(u.name ?? 'Someone').slice(0, 40),
+      color: Number.isFinite(color) ? ((color % COLORS) + COLORS) % COLORS : 0,
+      selectedId: typeof u.selectedId === 'string' ? u.selectedId : null,
+      treeId: typeof u.treeId === 'string' ? u.treeId : '',
+    });
   });
   state.collabPeers = peers.sort((a, b) => a.id - b.id);
 }
@@ -140,8 +148,16 @@ function syncFlags(): void {
 function pull(origin: unknown): void {
   const s = session;
   if (!s) return;
-  const next = readForest(s.doc);
-  if (!next) return;
+  pruneStrays(s.doc, PRUNE_ORIGIN);
+  const read = readForest(s.doc);
+  if (!read) return;
+  // Kit CSS generated from rules follows this browser's breakpoints; it is never shared (see `sharable`).
+  const next = withCurrentBreakpoints(read);
+  // Nothing visible changed (e.g. only tidying): keep the forest as it is.
+  if (state.forest && state.forest.id === next.id && diffForests(state.forest, next).empty) {
+    s.synced = state.forest;
+    return;
+  }
   s.synced = next;
   commit(next, true, origin === s.undo ? { source: 'editor', label: lastUndoAction } : { source: 'collab' });
 }
@@ -149,14 +165,30 @@ function pull(origin: unknown): void {
 /** Write a change made here into the shared document. */
 function push(forest: Forest | null): void {
   const s = session;
-  if (!s || !forest || forest === s.synced) return;
+  // While joining, the forest open here is not the shared one; nothing to send.
+  if (!s || !s.synced || !forest || forest === s.synced) return;
   if (forest.id !== s.synced?.id) {
     // Another forest was opened: this one is no longer shared from here.
     stopSharing(`Stopped sharing “${s.synced?.name ?? 'the forest'}”`);
     return;
   }
-  writeForest(s.doc, s.synced, forest, LOCAL_ORIGIN);
+  writeForest(s.doc, sharable(s.synced), sharable(forest), LOCAL_ORIGIN);
   s.synced = forest;
+}
+
+/**
+ * The forest as shared: an editable kit's CSS is generated from its rules with each browser's own
+ * breakpoints, so only the rules are shared and each browser makes its own CSS. Kept by object
+ * identity per forest, so unchanged forests compare equal node for node.
+ */
+const sharableCache = new WeakMap<Forest, Forest>();
+function sharable(forest: Forest): Forest {
+  let out = sharableCache.get(forest);
+  if (!out) {
+    out = forest.kits.some(isEditableKit) ? { ...forest, kits: forest.kits.map((k) => (isEditableKit(k) ? { ...k, css: '' } : k)) } : forest;
+    sharableCache.set(forest, out);
+  }
+  return out;
 }
 
 function connect(room: CollabRoom, doc: Y.Doc, synced: Forest | null): Session {
@@ -171,7 +203,7 @@ function connect(room: CollabRoom, doc: Y.Doc, synced: Forest | null): Session {
   let pending: unknown = undefined;
   let scheduled = false;
   const onUpdate = (_u: Uint8Array, origin: unknown) => {
-    if (origin === LOCAL_ORIGIN) return;
+    if (origin === LOCAL_ORIGIN || origin === PRUNE_ORIGIN) return;
     pending = origin;
     if (scheduled) return;
     scheduled = true;
@@ -188,7 +220,7 @@ function connect(room: CollabRoom, doc: Y.Doc, synced: Forest | null): Session {
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
   const onAnyUpdate = () => {
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => void saveRoom(s), 800);
+    saveTimer = setTimeout(() => void saveRoom(s), 250);
   };
   doc.on('update', onAnyUpdate);
   s.stop.push(() => {
@@ -207,8 +239,9 @@ function connect(room: CollabRoom, doc: Y.Doc, synced: Forest | null): Session {
 }
 
 async function openShared(s: Session): Promise<void> {
-  const forest = readForest(s.doc);
-  if (!forest) return;
+  const read = readForest(s.doc);
+  if (!read) return;
+  const forest = withCurrentBreakpoints(read);
   s.synced = forest;
   state.collabStatus = 'live';
   await openDocument({ kind: 'forest', forest });
@@ -242,7 +275,7 @@ export function startSharing(): string | null {
   if (!forest) return null;
   const room = newRoom();
   const doc = new Y.Doc();
-  writeForest(doc, null, forest, 'setup');
+  writeForest(doc, null, sharable(forest), 'setup');
   session = connect(room, doc, forest);
   state.collabLink = shareLink(room);
   state.collabStatus = 'live';
@@ -266,9 +299,12 @@ export function stopSharing(message = 'Stopped sharing'): void {
   state.collabStatus = 'off';
   state.collabLink = '';
   state.collabPeers = [];
-  const url = new URL(location.href);
-  url.hash = url.hash.replace(/(^#|&)collab=[^&]*/, '$1').replace(/^#&?$/, '');
-  history.replaceState(history.state, '', url.href);
+  // Take this room's link out of the address bar (but not another room's, when following a new link).
+  if (parseRoomHash(location.hash)?.room === s.room.room) {
+    const url = new URL(location.href);
+    url.hash = url.hash.replace(/(^#|&)collab=[^&]*/, '$1').replace(/^#&?$/, '');
+    history.replaceState(history.state, '', url.href);
+  }
   toast(message);
 }
 
@@ -276,22 +312,32 @@ export function stopSharing(message = 'Stopped sharing'): void {
 export function startCollab(): void {
   state.collabName = myName();
   state.collabColor = Math.floor(Math.random() * COLORS);
+  let joining = '';
   const join = async () => {
     const room = parseRoomHash(location.hash);
     if (!room || !COLLAB_ENABLED || isEmbedded()) return;
-    if (session?.room.room === room.room) return;
+    if (session?.room.room === room.room || joining === room.room) return;
     if (session) stopSharing();
+    joining = room.room;
     state.collabStatus = 'joining';
     state.collabLink = shareLink(room);
     const doc = new Y.Doc();
     // Rejoining: start from what this device kept, so the forest opens at once (even with nobody else online).
     await loadRoom(room, doc);
+    // Another link was followed meanwhile: that join wins.
+    if (joining !== room.room) {
+      doc.destroy();
+      return;
+    }
+    joining = '';
+    if (session) stopSharing();
     session = connect(room, doc, null);
     if (hasForest(doc)) await openShared(session);
     else state.dialog = 'share';
   };
   void join();
   window.addEventListener('hashchange', () => void join());
+  // Best effort: IndexedDB writes may not finish while a page unloads, which is why saves are frequent.
   window.addEventListener('beforeunload', () => {
     if (session) void saveRoom(session);
     session?.provider.destroy();

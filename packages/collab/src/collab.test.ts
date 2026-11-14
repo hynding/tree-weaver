@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createBranch, createForest, createKit, createTree, insertNode, moveNode, removeNode, setStyle, text, type Branch, type Forest, type Tree } from '@tree-weaver/core';
-import { keyBetween, LOCAL_ORIGIN, newRoom, orderKeys, parseRoomHash, readForest, roomHash, sharedTypes, writeForest, Y } from './index';
+import { keyBetween, pruneStrays, LOCAL_ORIGIN, newRoom, orderKeys, parseRoomHash, readForest, roomHash, sharedTypes, writeForest, Y } from './index';
 
 const b = (id: string, init: Parameters<typeof createBranch>[0]): Branch => ({ ...createBranch(init), id });
 
@@ -155,6 +155,23 @@ describe('forest documents', () => {
     expect(r.kits.map((k) => k.id)).toEqual(['k1', 'k2']);
     writeForest(a, next, { ...next, trees: [f.trees[0]] });
     expect(readForest(c)!.trees.map((t) => t.id)).toEqual(['t1']);
+  });
+
+  it('prunes nodes added to a tree someone else deleted', () => {
+    const { a, c, sync } = offline();
+    const f = sample();
+    const extra = { ...createTree('About'), id: 't2' };
+    const both = { ...f, trees: [...f.trees, extra] };
+    writeForest(a, null, both);
+    sync();
+    const fa = readForest(a)!;
+    const fc = readForest(c)!;
+    writeForest(a, fa, { ...fa, trees: [fa.trees[0]] });
+    writeForest(c, fc, { ...fc, trees: [fc.trees[0], { ...fc.trees[1], root: insertNode(fc.trees[1].root, fc.trees[1].root.id, b('late', { tag: 'p' })) }] });
+    sync();
+    expect(readForest(a)!.trees).toHaveLength(1);
+    expect(pruneStrays(a)).toBe(1);
+    expect(pruneStrays(a)).toBe(0);
   });
 
   it('undoes only local changes', () => {

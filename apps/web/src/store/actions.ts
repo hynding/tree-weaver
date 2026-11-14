@@ -287,7 +287,7 @@ export const isDisplayFieldLocked = (id: DisplayId, field: DisplayField): boolea
   DISPLAYS_LOCKED || ENV_DISPLAYS.settings[id]?.[field] !== undefined;
 
 /** Editable kits store CSS generated from their rules; regenerate it so it uses the current breakpoints. */
-function withCurrentBreakpoints(forest: Forest): Forest {
+export function withCurrentBreakpoints(forest: Forest): Forest {
   let changed = false;
   const kits = forest.kits.map((k) => {
     if (!isEditableKit(k)) return k;

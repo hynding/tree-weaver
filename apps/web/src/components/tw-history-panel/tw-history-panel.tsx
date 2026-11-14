@@ -160,6 +160,9 @@ export class TwHistoryPanel {
           })}
         </ol>
         {timeline.length <= 1 && <p class="hint">Your changes show here as you make them. Click one to go back to it.</p>}
+        {state.collabStatus === 'live' && timeline.length > 1 && (
+          <p class="hint">Shared: going back to a step brings the whole forest back to it, collaborators’ later changes included. Undo takes back only yours.</p>
+        )}
       </section>,
     ];
   }

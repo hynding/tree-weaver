@@ -269,10 +269,7 @@ export class TwCanvas {
     for (const p of state.collabPeers) {
       if (p.treeId !== state.treeId || !p.selectedId) continue;
       const el = this.find(p.selectedId);
-      if (el) {
-        el.setAttribute('data-tw-peer', String(p.color));
-        el.setAttribute('data-tw-peer-name', p.name);
-      }
+      el?.setAttribute('data-tw-peer', String(p.color));
     }
   }
 

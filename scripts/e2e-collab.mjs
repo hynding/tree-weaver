@@ -79,6 +79,7 @@ try {
   await b.waitForFunction(() => [...document.querySelectorAll('.toast')].some((t) => /Joined/.test(t.textContent)), null, { timeout: 30000 });
   check(true, 'a second browser joins with the link and gets the forest');
   check((await canvasText(b)).includes('Weave layouts that fit every screen'), 'the joined forest shows on the canvas');
+  check(await b.isDisabled('button[aria-label="Undo"]'), 'joining adds nothing to undo');
 
   // Presence.
   await a.waitForFunction(() => /Live · 2/.test(document.querySelector('tw-toolbar')?.textContent ?? ''), null, { timeout: 15000 });
