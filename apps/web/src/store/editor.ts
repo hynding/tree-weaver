@@ -4,7 +4,17 @@ import type { LibraryBranch } from '@tree-weaver/formats';
 
 export type SidebarTab = 'branches' | 'outline' | 'classes' | 'kits' | 'forest' | 'history';
 export type SaveState = 'saved' | 'saving' | 'unsaved' | 'error';
-export type DialogKind = null | 'export' | 'import' | 'displays' | 'storybook';
+export type DialogKind = null | 'export' | 'import' | 'displays' | 'storybook' | 'share';
+
+/** Someone else in a shared forest. */
+export interface CollabPeer {
+  id: number;
+  name: string;
+  /** Index into the collaborator colours. */
+  color: number;
+  selectedId: string | null;
+  treeId: string;
+}
 
 /**
  * Branches imported from a Storybook, kept in this browser (not in a forest) and offered in
@@ -79,6 +89,13 @@ export interface EditorState {
   librariesLoading: string[];
   /** Saved versions of the open forest, newest first. */
   versions: ForestVersion[];
+  /** Live collaboration: off, joining a room from a link, or sharing. */
+  collabStatus: 'off' | 'joining' | 'live';
+  collabLink: string;
+  collabPeers: CollabPeer[];
+  /** The name and colour others see. */
+  collabName: string;
+  collabColor: number;
 }
 
 export const { state, onChange, reset } = createStore<EditorState>({
@@ -107,4 +124,9 @@ export const { state, onChange, reset } = createStore<EditorState>({
   libraries: [],
   librariesLoading: [],
   versions: [],
+  collabStatus: 'off',
+  collabLink: '',
+  collabPeers: [],
+  collabName: '',
+  collabColor: 0,
 });

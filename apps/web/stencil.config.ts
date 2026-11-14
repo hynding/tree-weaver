@@ -14,6 +14,9 @@ export const config: Config = {
     TW_STORYBOOK_URLS: process.env.TW_STORYBOOK_URLS ?? '',
     TW_STORYBOOK_INCLUDE: process.env.TW_STORYBOOK_INCLUDE ?? '',
     TW_DISABLE_STORYBOOK_IMPORT: process.env.TW_DISABLE_STORYBOOK_IMPORT ?? '',
+    TW_DISABLE_COLLAB: process.env.TW_DISABLE_COLLAB ?? '',
+    TW_COLLAB_SIGNALING: process.env.TW_COLLAB_SIGNALING ?? '',
+    TW_COLLAB_ICE: process.env.TW_COLLAB_ICE ?? '',
   },
   outputTargets: [
     {

@@ -37,6 +37,9 @@ jobs:
           TW_STORYBOOK_URLS: ${{ vars.TW_STORYBOOK_URLS }}
           TW_STORYBOOK_INCLUDE: ${{ vars.TW_STORYBOOK_INCLUDE }}
           TW_DISABLE_STORYBOOK_IMPORT: ${{ vars.TW_DISABLE_STORYBOOK_IMPORT }}
+          TW_DISABLE_COLLAB: ${{ vars.TW_DISABLE_COLLAB }}
+          TW_COLLAB_SIGNALING: ${{ vars.TW_COLLAB_SIGNALING }}
+          TW_COLLAB_ICE: ${{ vars.TW_COLLAB_ICE }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -62,6 +62,11 @@ export namespace Components {
      */
     interface TwPreview {
     }
+    /**
+     * Share the open forest by link and see who is editing it.
+     */
+    interface TwShareDialog {
+    }
     interface TwSidebar {
     }
     /**
@@ -178,6 +183,15 @@ declare global {
         prototype: HTMLTwPreviewElement;
         new (): HTMLTwPreviewElement;
     };
+    /**
+     * Share the open forest by link and see who is editing it.
+     */
+    interface HTMLTwShareDialogElement extends Components.TwShareDialog, HTMLStencilElement {
+    }
+    var HTMLTwShareDialogElement: {
+        prototype: HTMLTwShareDialogElement;
+        new (): HTMLTwShareDialogElement;
+    };
     interface HTMLTwSidebarElement extends Components.TwSidebar, HTMLStencilElement {
     }
     var HTMLTwSidebarElement: {
@@ -224,6 +238,7 @@ declare global {
         "tw-outline": HTMLTwOutlineElement;
         "tw-palette": HTMLTwPaletteElement;
         "tw-preview": HTMLTwPreviewElement;
+        "tw-share-dialog": HTMLTwShareDialogElement;
         "tw-sidebar": HTMLTwSidebarElement;
         "tw-storybook-import": HTMLTwStorybookImportElement;
         "tw-toolbar": HTMLTwToolbarElement;
@@ -286,6 +301,11 @@ declare namespace LocalJSX {
      */
     interface TwPreview {
     }
+    /**
+     * Share the open forest by link and see who is editing it.
+     */
+    interface TwShareDialog {
+    }
     interface TwSidebar {
     }
     /**
@@ -315,6 +335,7 @@ declare namespace LocalJSX {
         "tw-outline": TwOutline;
         "tw-palette": TwPalette;
         "tw-preview": TwPreview;
+        "tw-share-dialog": TwShareDialog;
         "tw-sidebar": TwSidebar;
         "tw-storybook-import": TwStorybookImport;
         "tw-toolbar": TwToolbar;
@@ -364,6 +385,10 @@ declare module "@stencil/core" {
              * A full-window view of a tree as it ships: no outlines, handles or panels.
              */
             "tw-preview": LocalJSX.IntrinsicElements["tw-preview"] & JSXBase.HTMLAttributes<HTMLTwPreviewElement>;
+            /**
+             * Share the open forest by link and see who is editing it.
+             */
+            "tw-share-dialog": LocalJSX.IntrinsicElements["tw-share-dialog"] & JSXBase.HTMLAttributes<HTMLTwShareDialogElement>;
             "tw-sidebar": LocalJSX.IntrinsicElements["tw-sidebar"] & JSXBase.HTMLAttributes<HTMLTwSidebarElement>;
             /**
              * Import stories from a compiled Storybook as static snapshots: as branches in the palette,

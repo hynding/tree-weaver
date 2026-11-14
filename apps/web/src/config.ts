@@ -37,3 +37,37 @@ export const ENV_STORYBOOK_INCLUDE: string[] = parseTitleGlobs(Env.TW_STORYBOOK_
 
 /** `TW_DISABLE_STORYBOOK_IMPORT`: when true, there is no Storybook import. */
 export const STORYBOOK_IMPORT_ENABLED: boolean = !/^(1|true|yes|on)$/i.test((Env.TW_DISABLE_STORYBOOK_IMPORT ?? '').trim());
+
+/** `TW_DISABLE_COLLAB`: when true, there is no Share button and `#collab=` links are ignored. */
+export const COLLAB_ENABLED: boolean = !/^(1|true|yes|on)$/i.test((Env.TW_DISABLE_COLLAB ?? '').trim());
+
+/**
+ * `TW_COLLAB_SIGNALING`: WebSocket signaling servers that introduce collaborators to each other
+ * (comma or space separated). They see only encrypted room names and connection offers; edits go
+ * browser to browser. Default: the public y-webrtc server.
+ */
+export const COLLAB_SIGNALING: string[] = (Env.TW_COLLAB_SIGNALING ?? '')
+  .split(/[\s,]+/)
+  .map((u) => u.trim())
+  .filter((u) => /^wss?:\/\//.test(u));
+// Tests point the editor at a local server before it starts (scripts/e2e-collab.mjs).
+const testSignaling = (globalThis as { __TW_COLLAB_SIGNALING__?: unknown }).__TW_COLLAB_SIGNALING__;
+if (Array.isArray(testSignaling)) COLLAB_SIGNALING.splice(0, COLLAB_SIGNALING.length, ...testSignaling.map(String));
+if (!COLLAB_SIGNALING.length) COLLAB_SIGNALING.push('wss://y-webrtc-eu.fly.dev');
+
+/**
+ * `TW_COLLAB_ICE`: STUN/TURN servers for WebRTC as JSON, e.g.
+ * `[{"urls":"turn:turn.example.com","username":"u","credential":"p"}]`. A TURN server lets
+ * people behind strict firewalls connect. Default: the browser's own STUN defaults.
+ */
+export const COLLAB_ICE_SERVERS: RTCIceServer[] = (() => {
+  const raw = (Env.TW_COLLAB_ICE ?? '').trim();
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? (parsed as RTCIceServer[]) : [];
+  } catch {
+    console.warn('TW_COLLAB_ICE is not valid JSON; using the default ICE servers');
+    return [];
+  }
+})();

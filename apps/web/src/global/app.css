@@ -237,7 +237,7 @@ tw-toolbar {
   border-left: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 0 6px 6px 0;
 }
-@media (max-width: 1280px) {
+@media (max-width: 1480px) {
   .displays .label {
     display: none;
   }
@@ -1877,4 +1877,42 @@ details.areas .hint {
 .source-import {
   background: var(--accent-soft);
   color: var(--accent);
+}
+
+/* ----------------------------------------------------------- collaboration */
+
+.peer-dot {
+  display: inline-block;
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--bar);
+}
+.peer-stack {
+  display: inline-flex;
+  align-items: center;
+}
+.peer-stack .peer-dot + .peer-dot {
+  margin-left: -3px;
+}
+.bar-btn.sharing {
+  color: #fff;
+}
+.share-dialog {
+  max-width: 560px;
+}
+.share-dialog .people {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.share-dialog .people li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+.share-dialog .people .peer-dot {
+  box-shadow: none;
 }

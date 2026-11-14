@@ -17,7 +17,8 @@
     "schema": "UPDATE_SCHEMA=1 vitest run packages/core/src/schema.test.ts",
     "smoke": "node scripts/smoke-pack.mjs",
     "release:version": "node scripts/set-version.mjs",
-    "e2e:embed": "node scripts/e2e-embed.mjs"
+    "e2e:embed": "node scripts/e2e-embed.mjs",
+    "e2e:collab": "node scripts/e2e-collab.mjs"
   },
   "devDependencies": {
     "ajv": "^8.20.0",

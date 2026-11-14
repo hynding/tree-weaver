@@ -11,6 +11,7 @@ export default defineConfig({
       '@tree-weaver/storage': pkg('storage'),
       '@tree-weaver/kits': pkg('kits'),
       '@tree-weaver/branches': pkg('branches'),
+      '@tree-weaver/collab': pkg('collab'),
     },
   },
   test: {
