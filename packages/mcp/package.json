@@ -3,6 +3,21 @@
   "version": "0.1.0",
   "description": "MCP server for Tree Weaver: lets AI agents create, patch, validate, render and screenshot layout trees.",
   "license": "MIT",
+  "keywords": [
+    "tree-weaver",
+    "mcp",
+    "model-context-protocol",
+    "ai-agents",
+    "layout",
+    "page-builder"
+  ],
+  "homepage": "https://github.com/hynding/tree-weaver/blob/main/docs/mcp.md",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hynding/tree-weaver.git",
+    "directory": "packages/mcp"
+  },
+  "bugs": "https://github.com/hynding/tree-weaver/issues",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -16,7 +31,11 @@
     },
     "./package.json": "./package.json"
   },
-  "files": ["dist", "src", "!src/**/*.test.ts"],
+  "files": [
+    "dist",
+    "src",
+    "!src/**/*.test.ts"
+  ],
   "sideEffects": false,
   "scripts": {
     "build": "tsc -p tsconfig.json && node ../../scripts/esm-extensions.mjs dist && node ../../scripts/chmod-bin.mjs dist/bin.js && node ../../scripts/copy-docs.mjs dist/docs format.md shorthand.md patch.md",
