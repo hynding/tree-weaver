@@ -188,6 +188,8 @@ HTML and CSS written with the default breakpoints still maps back to the right d
 
 Tree Weaver data is plain JSON (or YAML) with a published contract, so agents can write it directly:
 
+- The **MCP server** ([`docs/mcp.md`](docs/mcp.md)): `npx -y @tree-weaver/mcp` gives Claude, Cursor, VS Code and other MCP clients
+  tools to create, patch, validate, render and screenshot trees.
 - The **`tree-weaver` CLI** ([`docs/cli.md`](docs/cli.md)): `npx tree-weaver new | validate | render | convert | add | patch | expand | outline | kit | schema`,
   with `--json` reports. `npm i tree-weaver` also installs every library (`@tree-weaver/core`, `formats`, `kits`, `branches`, `storage`).
 
@@ -211,6 +213,7 @@ apps/
   web/                 Stencil editor app (@tree-weaver/web)
 packages/
   cli/                 The `tree-weaver` CLI, and one package that re-exports every library
+  mcp/                 The MCP server (@tree-weaver/mcp)
   core/                Tree model, immutable operations, displays, CSS/HTML rendering, validation
   formats/             JSON, YAML, XML, HTML, Markdown and SVG import/export, Storybook export and import
   storage/             IndexedDB / localStorage / memory forest stores and preferences

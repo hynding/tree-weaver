@@ -30,7 +30,7 @@ console.log(tarballs);
 execFileSync('mkdir', ['-p', app]);
 writeFileSync(
   join(app, 'package.json'),
-  JSON.stringify({ name: 'smoke', private: true, type: 'module', dependencies: { 'tree-weaver': tarballs['tree-weaver'] }, overrides: tarballs }, null, 2),
+  JSON.stringify({ name: 'smoke', private: true, type: 'module', dependencies: { 'tree-weaver': tarballs['tree-weaver'], '@tree-weaver/mcp': tarballs['@tree-weaver/mcp'] }, overrides: tarballs }, null, 2),
 );
 sh('npm', ['install', '--no-audit', '--no-fund', '--loglevel=error']);
 
@@ -63,3 +63,21 @@ console.log(sh(bin, ['validate', 'home.tree.json', join(repo, 'examples', 'site.
 sh(bin, ['render', 'home.tree.json', '-o', 'home.html']);
 if (!readFileSync(join(app, 'home.html'), 'utf8').startsWith('<!doctype html>')) throw new Error('render');
 console.log(`cli ok (tree-weaver ${sh(bin, ['--version']).trim()})`);
+
+// The MCP server: start the installed bin over stdio and call a tool.
+writeFileSync(
+  join(app, 'mcp.mjs'),
+  `import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+const client = new Client({ name: 'smoke', version: '1' });
+await client.connect(new StdioClientTransport({ command: ${JSON.stringify(join(app, 'node_modules', '.bin', 'tree-weaver-mcp'))}, args: ['--root', '.'], stderr: 'ignore' }));
+const tools = (await client.listTools()).tools.length;
+const r = await client.callTool({ name: 'validate', arguments: { path: 'home.tree.json' } });
+if (r.isError || !r.structuredContent.valid) throw new Error('mcp validate: ' + r.content[0].text);
+const guide = await client.readResource({ uri: 'tree-weaver://guide/patch' });
+if (!guide.contents[0].text.startsWith('#')) throw new Error('mcp guide missing from the package');
+await client.close();
+console.log('mcp ok (' + tools + ' tools)');
+`,
+);
+console.log(sh('node', ['mcp.mjs']).trim());
