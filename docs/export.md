@@ -1,8 +1,9 @@
 # Exporting components
 
 Tree Weaver can hand a tree to a codebase as source code: a **React**, **Vue** or **Svelte**
-component, or an **HTML page with separate CSS files**. Use it when a layout built in the editor (or
-by an agent) should become part of an app, rather than a standalone page.
+component, an **HTML page with separate CSS files**, or native code for apps: a **SwiftUI** view or a
+**Flutter** widget. Use it when a layout built in the editor (or by an agent) should become part of
+an app, rather than a standalone page.
 
 - **Editor:** Export → **Component**, then pick the framework and the styling. A single file
   downloads as is; several files download as a zip.
@@ -18,6 +19,8 @@ by an agent) should become part of an app, rather than a standalone page.
 | `vue` | `Home.vue` (template plus a `<style>` block; `kits.css` linked with `<style src>`), `kits.css` |
 | `svelte` | `Home.svelte` (markup plus a `<style>` block of `:global` rules; `kits.css` imported), `kits.css` |
 | `html` | `index.html`, `base.css` (the editor's base styles), `Home.css`, `kits.css` |
+| `swiftui` | `Home.swift`, one file with the styles built in (see [native apps](#native-apps-swiftui-and-flutter)) |
+| `flutter` | `home.dart`, one file with the styles built in (see [native apps](#native-apps-swiftui-and-flutter)) |
 
 `kits.css` holds the forest's enabled design kits: kits with CSS are copied in, and linked kits
 (with a URL) become `@import url(...)`. It is left out when there are no kits. The deployment's own
@@ -56,8 +59,46 @@ Common keyword values map to named utilities (`display: flex` → `flex`, `text-
 This needs Tailwind CSS v3.4 or later (for `max-*` variants), or v4. Make sure Tailwind scans the
 exported files. If the forest's display settings use other breakpoints, the variants follow them.
 
+## Native apps: SwiftUI and Flutter
+
+`--framework swiftui` writes a SwiftUI `View` (iOS 16, iPadOS 16, macOS 13 or later);
+`--framework flutter` writes a Flutter `StatelessWidget` (Flutter 3.27 or later). Each is one file
+with the layout and its styles in it; `--styling` doesn't apply. The page scrolls vertically.
+
+The tree is read into native building blocks rather than translated tag by tag:
+
+| In the tree | SwiftUI | Flutter |
+| --- | --- | --- |
+| Branches (flex column, block) | `VStack` | `Flex` (vertical) |
+| Flex rows | `HStack` (`Spacer` for `space-between`) | `Wrap`, or `Flex` with `Flexible` children |
+| Grids (`repeat(3, …)`, `auto-fit`) | `LazyVGrid` | `_Grid`, a small helper written into the file |
+| Headings, paragraphs, inline text | `Text` with `.largeTitle` … `.subheadline` | `Text` with the theme's `headlineLarge` … `titleSmall` |
+| Links | `Link` (web, mail, phone) or `Button` | `TextButton` |
+| Buttons | `Button` | `FilledButton` |
+| Images | `AsyncImage` with the alt text as its accessibility label | `Image.network` with `semanticLabel` |
+| Inputs, text areas | `TextField` | `TextField` |
+| Lists, tables, `hr` | bulleted or numbered rows, `Grid`, `Divider` | rows, `Table`, `Divider` |
+
+**Styles that carry over:** padding, gap, background, text colour, font size and weight, text
+alignment, corner radius, border, width and height (in points: 1px = 1pt, 1rem = 16), opacity and
+`margin: 0 auto` centring. Design kit rules on a single class (`.card { … }`) apply to branches with
+that class, and `var(--token)` values are resolved from the kit's `:root`. Other selectors, web
+fonts, shadows, transitions and positioning don't carry over.
+
+**Displays become screen widths.** SwiftUI uses the desktop styles in a regular-width size class
+(iPad full screen, Mac) and the mobile portrait styles in a compact one (iPhone). Flutter switches at
+the tablet and mobile portrait breakpoints (`phone` and `tablet` booleans from the screen width), so
+it has three layouts. What changes between displays changes in the app: a grid that goes from 3
+columns to 1, a row that stacks into a column, padding and font sizes, and branches hidden with
+`display: none` on some displays.
+
+SVG trees and SVG branches become a placeholder comment: export the drawing as `.svg` and add it
+to the app as an image asset. Links and buttons get empty actions to fill in.
+
 ## Limits
 
 - One tree per component. To export a forest, export each tree.
-- The output is static markup. Wire up data, state and events in the app.
+- The output is static markup (or static views). Wire up data, state and events in the app.
+- Native exports are a starting point that looks like the layout, not a pixel-exact copy: check it in
+  Xcode or with `flutter run`, then refine.
 - Images keep their URLs; copy any images the app should host itself.

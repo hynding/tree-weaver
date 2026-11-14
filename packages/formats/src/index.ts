@@ -47,12 +47,14 @@ export {
   tailwindVariant,
   jsxAttrName,
   COMPONENT_FRAMEWORKS,
+  isNativeFramework,
   type ComponentExport,
   type ComponentFile,
   type ComponentFramework,
   type ComponentOptions,
   type ComponentStyling,
 } from './components';
+export { exportSwiftUI, exportFlutter, dartFileName, nativeTypeName, cssColor, cssLength, type NativeFramework, type NativeOptions } from './native';
 
 /** Format for a file name, from its extension. */
 export function formatFromFileName(fileName: string): FormatId | null {

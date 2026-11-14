@@ -32,6 +32,7 @@ import {
   detectFormat,
   diffDocuments,
   exportComponent,
+  isNativeFramework,
   exportForest,
   exportTree,
   FORMATS,
@@ -290,7 +291,8 @@ export class Tools {
     const kits = [...kitsOf(doc)];
     for (const file of args.kits ?? []) kits.push(kitFromFile(file, await this.ws.read(file)));
     const out = exportComponent(tree, { framework: args.framework, styling: args.styling, kits, name: args.name, typescript: args.typescript });
-    const summary = `${out.name}: "${tree.name}" as ${args.framework} with ${out.styling === 'tailwind' ? 'Tailwind classes' : 'a CSS file'} (${out.files.length} file${out.files.length === 1 ? '' : 's'}, entry ${out.entry}).`;
+    const native = isNativeFramework(out.framework);
+    const summary = `${out.name}: "${tree.name}" as ${args.framework}${native ? '' : ` with ${out.styling === 'tailwind' ? 'Tailwind classes' : 'a CSS file'}`} (${out.files.length} file${out.files.length === 1 ? '' : 's'}, entry ${out.entry}).`;
     const meta = { name: out.name, framework: out.framework, styling: out.styling, entry: out.entry };
     if (args.outputDir) {
       const dir = args.outputDir.replace(/[\\/]+$/, '');

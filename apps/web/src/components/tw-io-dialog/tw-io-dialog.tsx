@@ -1,5 +1,5 @@
 import { Component, Prop, State, h } from '@stencil/core';
-import { COMPONENT_FRAMEWORKS, detectFormat, FORMATS, hasDrawing, type ComponentFramework, type ComponentStyling, type FormatId } from '@tree-weaver/formats';
+import { COMPONENT_FRAMEWORKS, isNativeFramework, detectFormat, FORMATS, hasDrawing, type ComponentFramework, type ComponentStyling, type FormatId } from '@tree-weaver/formats';
 import { currentTree, download, exportComponentCurrent, exportCurrent, exportStorybookCurrent, importText, toast, type ExportOutput } from '../../store/actions';
 import { state } from '../../store/editor';
 import { STORYBOOK_IMPORT_ENABLED } from '../../config';
@@ -120,7 +120,7 @@ export class TwIoDialog {
             onClick={() => (this.format = 'component')}
           >
             <strong>Component</strong>
-            <small>React, Vue, Svelte</small>
+            <small>React, Vue, SwiftUI, Flutter</small>
           </button>
         </div>
         {component ? (
@@ -132,14 +132,16 @@ export class TwIoDialog {
                 </button>
               ))}
             </div>
-            <div class="segmented" role="group" aria-label="Styles">
-              <button aria-pressed={String(this.styling === 'css')} onClick={() => (this.styling = 'css')}>
-                CSS file
-              </button>
-              <button aria-pressed={String(this.styling === 'tailwind')} onClick={() => (this.styling = 'tailwind')}>
-                Tailwind
-              </button>
-            </div>
+            {!isNativeFramework(this.framework) && (
+              <div class="segmented" role="group" aria-label="Styles">
+                <button aria-pressed={String(this.styling === 'css')} onClick={() => (this.styling = 'css')}>
+                  CSS file
+                </button>
+                <button aria-pressed={String(this.styling === 'tailwind')} onClick={() => (this.styling = 'tailwind')}>
+                  Tailwind
+                </button>
+              </div>
+            )}
           </div>
         ) : null}
         <textarea class="preview" readOnly aria-label="Export preview">
@@ -147,7 +149,11 @@ export class TwIoDialog {
         </textarea>
         <p class="hint" style={{ margin: '0' }}>
           {component
-            ? this.styling === 'tailwind'
+            ? this.framework === 'swiftui'
+              ? 'A SwiftUI view for iOS, iPadOS and macOS (iOS 16 / macOS 13 or later), with the styles and design kit rules built in. iPhone gets the mobile portrait layout, iPad and Mac the desktop one. Links, buttons and images become their native equivalents.'
+              : this.framework === 'flutter'
+                ? 'A Flutter widget (Flutter 3.27 or later), with the styles and design kit rules built in. It switches between the desktop, tablet and mobile portrait layouts by screen width.'
+                : this.styling === 'tailwind'
               ? 'Source code for your app, with Tailwind classes (v3.4+ or v4) and each display as a responsive variant. Design kits come along in kits.css.'
               : 'Source code for your app, with a stylesheet of readable, namespaced class names and a media query per display. Design kits come along in kits.css.'
             : storybook

@@ -24,6 +24,7 @@ import {
   type TreeNode,
 } from '@tree-weaver/core';
 import { slugify } from './slug';
+import { dartFileName, exportFlutter, exportSwiftUI, nativeTypeName } from './native';
 
 const SVG_SHAPES = new Set(SVG_SHAPE_TAGS);
 
@@ -33,15 +34,18 @@ const SVG_SHAPES = new Set(SVG_SHAPE_TAGS);
  * - `react`: a function component (`.jsx`, or `.tsx` with `typescript`);
  * - `vue`: a single-file component (`.vue`);
  * - `svelte`: a component (`.svelte`);
- * - `html`: an `index.html` with its stylesheets as separate files.
+ * - `html`: an `index.html` with its stylesheets as separate files;
+ * - `swiftui`: a SwiftUI view (`.swift`), for iOS, iPadOS and macOS;
+ * - `flutter`: a Flutter widget (`.dart`), for Android, iOS and other Flutter targets.
  *
  * Styles come out either as a CSS file with readable class names (`styling: 'css'`, the
  * default) or as Tailwind utility classes (`styling: 'tailwind'`), with displays mapped to
  * responsive variants. Design kits are written to `kits.css` in both cases. Nothing from
- * the editor (`data-tw` attributes, ids) is left in the output.
+ * the editor (`data-tw` attributes, ids) is left in the output. Native exports ignore `styling`
+ * and write one file with the styles in it (see `native.ts`).
  */
 
-export type ComponentFramework = 'react' | 'vue' | 'svelte' | 'html';
+export type ComponentFramework = 'react' | 'vue' | 'svelte' | 'html' | 'swiftui' | 'flutter';
 export type ComponentStyling = 'css' | 'tailwind';
 
 export const COMPONENT_FRAMEWORKS: readonly { id: ComponentFramework; label: string }[] = [
@@ -49,7 +53,12 @@ export const COMPONENT_FRAMEWORKS: readonly { id: ComponentFramework; label: str
   { id: 'vue', label: 'Vue (single-file component)' },
   { id: 'svelte', label: 'Svelte' },
   { id: 'html', label: 'HTML + CSS files' },
+  { id: 'swiftui', label: 'SwiftUI (iOS, macOS)' },
+  { id: 'flutter', label: 'Flutter (Android, iOS)' },
 ];
+
+/** Frameworks that write native code rather than HTML; they have no styling choice. */
+export const isNativeFramework = (framework: ComponentFramework): boolean => framework === 'swiftui' || framework === 'flutter';
 
 export interface ComponentOptions {
   framework: ComponentFramework;
@@ -71,7 +80,8 @@ export interface ComponentExport {
   /** The component's name, e.g. `HomePage`. */
   name: string;
   framework: ComponentFramework;
-  styling: ComponentStyling;
+  /** How styles were written; left out for native frameworks, which have no choice. */
+  styling?: ComponentStyling;
   /** The main file, e.g. `HomePage.jsx`. */
   entry: string;
   files: ComponentFile[];
@@ -366,6 +376,12 @@ export function exportComponent(tree: Tree, opts: ComponentOptions): ComponentEx
   const framework = opts.framework;
   const styling = opts.styling ?? 'css';
   const name = pascalName(opts.name ?? tree.name);
+  if (framework === 'swiftui' || framework === 'flutter') {
+    const type = nativeTypeName(name, framework);
+    const entry = framework === 'swiftui' ? `${type}.swift` : dartFileName(type);
+    const contents = framework === 'swiftui' ? exportSwiftUI(tree, { name: type, kits: opts.kits }) : exportFlutter(tree, { name: type, kits: opts.kits });
+    return { name: type, framework, entry, files: [{ path: entry, contents }] };
+  }
   // Generated classes are namespaced (`home__hero`) so they never meet a design kit's own classes.
   const build: Build = { styling, classOf: classNamer(`${cssIdent(slugify(tree.name, 'layout'))}__`), rules: [] };
   const svgTree = isSvgRoot(tree.root);
