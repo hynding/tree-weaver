@@ -23,7 +23,9 @@ import {
   type ValidationResult,
 } from '@tree-weaver/core';
 import {
+  COMPONENT_FRAMEWORKS,
   detectFormat,
+  exportComponent,
   exportForest,
   exportTree,
   FORMATS,
@@ -34,6 +36,7 @@ import {
   parseData,
   toEnvelope,
   validateText,
+  type ComponentFramework,
   type FormatId,
   type TreeDocument,
 } from '@tree-weaver/formats';
@@ -80,6 +83,7 @@ Commands:
   new [file]               Start a tree (or --forest) from a template
   validate <file...>       Strictly check documents; exits 1 when any has errors
   render <file>            Write a standalone HTML page for a tree
+  export <file>            Write a tree as a React, Vue or Svelte component, or HTML + CSS files
   convert <file>           Convert between JSON, YAML, XML, HTML, Markdown and SVG
   add <file> [blueprint]   Insert a blueprint branch or a JSON node into a tree
   patch <file> [ops]       Apply a list of edits (insert, move, setStyles, ...) to a tree
@@ -131,6 +135,21 @@ Write a standalone HTML page (inlined kits and responsive CSS) for a tree.
   -t, --tree <ref>      Tree in a forest: name, id or 1-based number (default: first)
   -k, --kit <css>       Add a CSS file as a design kit (repeatable)
   -F, --from <fmt>      Input format, when the extension doesn't say
+`,
+  export: `Usage: tree-weaver export <file> --framework <name> [options]
+
+Write a tree as source code for a codebase: a component with a CSS file (readable,
+namespaced class names) or with Tailwind classes, plus kits.css for its design kits.
+
+  -f, --framework <name>  ${COMPONENT_FRAMEWORKS.map((f) => f.id).join(', ')} (default: react)
+  -s, --styling <name>    css or tailwind (default: css)
+  -o, --output <dir>      Folder to write the files to (default: print them to stdout)
+  -t, --tree <ref>        Tree in a forest: name, id or 1-based number (default: first)
+  -n, --name <name>       Component name (default: from the tree's name)
+      --ts                React: write a .tsx file
+  -k, --kit <css>         Add a CSS file as a design kit (repeatable)
+  -F, --from <fmt>        Input format, when the extension doesn't say
+      --json              Print { name, entry, files: [{ path, contents }] } (or the paths written)
 `,
   convert: `Usage: tree-weaver convert <file> --to <fmt> [options]
 
@@ -435,6 +454,48 @@ async function cmdRender(cli: Cli, args: string[]): Promise<number> {
   return 0;
 }
 
+async function cmdExport(cli: Cli, args: string[]): Promise<number> {
+  const { values, positionals } = parse(args, {
+    framework: { type: 'string', short: 'f' },
+    styling: { type: 'string', short: 's' },
+    output: { type: 'string', short: 'o' },
+    tree: { type: 'string', short: 't' },
+    name: { type: 'string', short: 'n' },
+    ts: { type: 'boolean' },
+    kit: { type: 'string', short: 'k', multiple: true },
+    from: { type: 'string', short: 'F' },
+  });
+  if (positionals.length !== 1) throw new UsageError('export needs one file (or "-" for stdin)');
+  const ids = COMPONENT_FRAMEWORKS.map((f) => f.id) as string[];
+  const framework = (values.framework ?? 'react').toLowerCase();
+  if (!ids.includes(framework)) throw new UsageError(`--framework must be one of ${ids.join(', ')}, not "${values.framework}"`);
+  const styling = (values.styling ?? 'css').toLowerCase();
+  if (styling !== 'css' && styling !== 'tailwind') throw new UsageError(`--styling must be css or tailwind, not "${values.styling}"`);
+  const { doc } = await cli.load(positionals[0], asFormat(values.from, '--from'));
+  const tree = pickTree(cli, doc, values.tree, 'a component holds one tree');
+  const kits = [...kitsOf(doc)];
+  for (const file of values.kit ?? []) kits.push(kitFromFile(file, await cli.read(file)));
+  const out = exportComponent(tree, { framework: framework as ComponentFramework, styling, kits, name: values.name, typescript: !!values.ts });
+  const json = !!values.json;
+  if (values.output && values.output !== '-') {
+    const dir = values.output.replace(/\/+$/, '');
+    const written: string[] = [];
+    for (const f of out.files) {
+      const path = `${dir}/${f.path}`;
+      await cli.io.writeFile(path, f.contents);
+      written.push(path);
+    }
+    cli.report(json, { name: out.name, framework, styling, entry: `${dir}/${out.entry}`, files: written }, `Wrote ${out.name} (${framework}, ${styling}): ${written.join(', ')}`);
+  } else if (json) {
+    cli.report(true, out, '');
+  } else if (out.files.length === 1) {
+    await cli.emit(undefined, out.files[0].contents);
+  } else {
+    await cli.emit(undefined, out.files.map((f) => `===== ${f.path} =====\n${f.contents.replace(/\n$/, '')}\n`).join('\n'));
+  }
+  return 0;
+}
+
 async function cmdConvert(cli: Cli, args: string[]): Promise<number> {
   const { values, positionals } = parse(args, {
     to: { type: 'string', short: 'f' },
@@ -725,13 +786,14 @@ const COMMANDS: Record<string, (cli: Cli, args: string[]) => Promise<number>> = 
   add: cmdAdd,
   patch: cmdPatch,
   expand: cmdExpand,
+  export: cmdExport,
   outline: cmdOutline,
   kit: cmdKit,
   schema: cmdSchema,
   link: cmdLink,
 };
 
-const ALIASES: Record<string, string> = { check: 'validate', ls: 'outline', html: 'render', create: 'new', init: 'new' };
+const ALIASES: Record<string, string> = { component: 'export', check: 'validate', ls: 'outline', html: 'render', create: 'new', init: 'new' };
 
 async function version(io: CliIO): Promise<string> {
   try {

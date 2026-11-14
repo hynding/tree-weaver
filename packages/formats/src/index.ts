@@ -40,6 +40,18 @@ export {
   type StoryKitOptions,
 } from './storybook-import';
 export { slugify } from './slug';
+export {
+  exportComponent,
+  tailwindClass,
+  tailwindVariant,
+  jsxAttrName,
+  COMPONENT_FRAMEWORKS,
+  type ComponentExport,
+  type ComponentFile,
+  type ComponentFramework,
+  type ComponentOptions,
+  type ComponentStyling,
+} from './components';
 
 /** Format for a file name, from its extension. */
 export function formatFromFileName(fileName: string): FormatId | null {
