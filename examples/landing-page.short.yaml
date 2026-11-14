@@ -17,9 +17,9 @@ tree:
         - "h2: Features"
         - grid: 3
           children:
-            - { article.card: ["h3: Grids", "p.muted: Three columns on desktop, two on tablet, one on phones."] }
-            - { article.card: ["h3: Flex", "p.muted: Rows that stack on small screens."] }
-            - { article.card: ["h3: Tables", "p.muted: Real table markup, styled by your kit."] }
+            - { article.card: ["h2: Grids", "p.muted: Three columns on desktop, two on tablet, one on phones."] }
+            - { article.card: ["h2: Flex", "p.muted: Rows that stack on small screens."] }
+            - { article.card: ["h2: Tables", "p.muted: Real table markup, styled by your kit."] }
       name: Features
       attrs: { id: features }
     - section:

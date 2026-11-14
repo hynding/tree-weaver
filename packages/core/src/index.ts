@@ -15,3 +15,4 @@ export * from './schema';
 export * from './validate';
 export * from './svg';
 export * from './patch';
+export * from './checks';

@@ -1,7 +1,10 @@
 import { createRequire } from 'node:module';
 import {
   applyPatch,
+  checkRendered,
+  checkTree,
   createForest,
+  formatCheckReport,
   DISPLAYS,
   formatIssues,
   isBranch,
@@ -10,6 +13,7 @@ import {
   replaceTree,
   TreeDataError,
   validateDocument,
+  type CheckReport,
   type DesignKit,
   type DisplayId,
   type Tree,
@@ -275,6 +279,31 @@ export class Tools {
     return this.deliver(args.output, data, `Converted ${what} from ${getFormat(format).label} to ${getFormat(to).label}.${lossy}`, { from: format, to });
   }
 
+  async checkLayout(args: Source & { tree?: string; render?: boolean; displays?: DisplayId[]; kits?: string[] }): Promise<ToolOutput> {
+    const { doc } = await this.load(args);
+    const trees = args.tree === undefined ? treesOf(doc) : [pickTree(doc, args.tree)];
+    const kits = [...kitsOf(doc)];
+    for (const file of args.kits ?? []) kits.push(kitFromFile(file, await this.ws.read(file)));
+    let note = '';
+    const reports: CheckReport[] = [];
+    let browser: Browser | null = null;
+    if (args.render !== false) {
+      try {
+        browser = await launchBrowser();
+      } catch (err) {
+        if (args.render === true) throw err;
+        note = `\nRendered checks skipped: ${(err as Error).message}`;
+      }
+    }
+    try {
+      for (const tree of trees) reports.push(browser ? await checkRendered(tree, { browser, kits, displays: args.displays }) : checkTree(tree));
+    } finally {
+      await browser?.close();
+    }
+    const ok = reports.every((r) => r.ok);
+    return { text: `${reports.map(formatCheckReport).join('\n\n')}${note}`, data: { ok, rendered: !!browser, trees: reports } };
+  }
+
   async screenshot(args: Source & { tree?: string; displays?: DisplayId[]; fullPage?: boolean; kits?: string[] }): Promise<ToolOutput> {
     const { doc } = await this.load(args);
     const tree = pickTree(doc, args.tree);
@@ -428,7 +457,7 @@ interface Browser {
 }
 interface Page {
   setContent(html: string, opts: { waitUntil: 'load'; timeout: number }): Promise<void>;
-  evaluate(expr: string): Promise<unknown>;
+  evaluate<T = unknown>(expr: string): Promise<T>;
   screenshot(opts: { fullPage: boolean; type: 'png' }): Promise<Uint8Array>;
   close(): Promise<void>;
 }

@@ -20,6 +20,7 @@ tree-weaver add home.tree.json card --parent /2/0/1               # insert a lib
 tree-weaver add home.tree.json --node '"p.muted: Fine print"'    # shorthand, or full JSON
 tree-weaver patch home.tree.json edits.json                       # several edits, all or nothing
 tree-weaver validate home.tree.json                               # strict check, exits 1 on errors
+tree-weaver lint home.tree.json --render                          # layout and accessibility, per display
 tree-weaver render home.tree.json -o home.html                    # standalone HTML page
 tree-weaver export home.tree.json -f react -o src/components/     # or a component for an app
 ```
@@ -34,6 +35,7 @@ or write it in the [shorthand](shorthand.md) and run `expand`.
 | `new [file]` | Start a tree from a template (`--template`, `--list`), with the Weaver Basic starter kit unless `--bare`. `--forest` writes a forest holding the tree. The format comes from the file extension, or `--format` (default JSON to stdout). |
 | `validate <file...>` | Check documents against the contract. JSON and YAML are checked as written; HTML, XML, Markdown and SVG are imported first. Prints each problem with its path and a fix hint. `--strict` fails on warnings too. Exits 1 when any file has errors. |
 | `render <file>` | Write a standalone HTML page with the kits and the responsive CSS inlined. `--kit style.css` adds design kits (repeatable). |
+| `lint <file>` | Check trees for layout and accessibility problems: alt text, heading order, link and form labels, duplicate ids, empty branches, fixed widths and contrast, each with a path, its displays and a fix. `--render` also renders every display in Chromium (needs Playwright) for sideways overflow, contrast with kits applied and broken images; `-d` picks displays. Exits 1 on errors, or on warnings with `--strict`. See [layout checks](checks.md). |
 | `export <file>` | Write a tree as source code for an app: `--framework react` (default), `vue`, `svelte` or `html`, with `--styling css` (a stylesheet with readable class names, the default) or `tailwind` (utility classes, displays as responsive variants). `-o <dir>` writes the files there; otherwise they are printed. `--ts` writes `.tsx`, `--name` names the component. See [exporting components](export.md). |
 | `convert <file>` | Convert between `json`, `yaml`, `xml`, `html`, `markdown` and `svg` (`--to`, or the extension of `-o`). Forests stay forests in JSON, YAML and XML; other formats take one tree. |
 | `add <file> <blueprint>` | Insert a ready-made branch (`--list` shows them: `grid-3`, `card`, `hero`, `table`, `svg-badge`, …) or any branch or leaf as JSON or [shorthand](shorthand.md) (`--node`). `--parent` takes an id or a path, `--index` a position (negative counts from the end: `--index=-1`). The file is rewritten in its own format unless `-o` is given. |

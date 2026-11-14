@@ -10,6 +10,7 @@ Key facts for writing Tree Weaver data:
 - Images are leaves (`{ "kind": "leaf", "type": "image", "value": url, "attrs": { "alt": "..." } }`), not `img` branches.
 - SVG: a tree whose root has `"tag": "svg"` is a drawing. Shapes are leaves: `{ "type": "shape", "value": "circle", "attrs": { "cx": "50", "cy": "50", "r": "40" } }`, inside an `svg` branch; groups (`g`), `text`, `defs` and gradients are branches. SVG names keep their case (`viewBox`, `linearGradient`).
 - No scripts, event handlers, SVG animation or `style` attributes. CSS goes in design kits (`forest.kits`).
+- Check layouts with `npx tree-weaver lint file.json --render`: overflow per display, contrast, alt text, heading order and labels, each with a path and a fix.
 - Check output with `npx tree-weaver validate file.json`, or `validateDocument` / `validateText` from the `tree-weaver` npm package; every issue has a path and a fix hint.
 - The `tree-weaver` CLI also starts trees from templates (`new`), inserts library branches or JSON nodes by path (`add`, `outline`), applies patches (`patch`), expands shorthand (`expand`), converts formats (`convert`), renders HTML (`render`) and exports React, Vue or Svelte components with a CSS file or Tailwind classes (`export`).
 - Shorthand saves tokens: `"h2: Title"`, `"a.btn[href=/join]: Join"`, `"@card"` (a library branch), `{ "grid": 3, "children": [...] }`, `{ "row": [...] }`, `{ "table": [["A", "B"], ["1", "2"]] }`, and flat `styles` (`{ "gap": "1rem", "tablet": {...} }`). Run `npx tree-weaver expand file.yaml -o file.json`.
@@ -23,6 +24,7 @@ Key facts for writing Tree Weaver data:
 - [Shorthand](https://github.com/hynding/tree-weaver/blob/main/docs/shorthand.md): the compact authoring form and how it expands
 - [Patches](https://github.com/hynding/tree-weaver/blob/main/docs/patch.md): edit operations, node references and checks; [patch JSON Schema](https://hynding.github.io/tree-weaver/schema/tree-weaver-patch-v1.schema.json)
 - [MCP server](https://github.com/hynding/tree-weaver/blob/main/docs/mcp.md): `npx -y @tree-weaver/mcp` gives MCP clients tools to create, patch, validate, render and screenshot trees
+- [Layout checks](https://github.com/hynding/tree-weaver/blob/main/docs/checks.md): `tree-weaver lint`, the `check_layout` MCP tool, `checkTree` / `checkRendered`, and every rule
 - [Exporting components](https://github.com/hynding/tree-weaver/blob/main/docs/export.md): `npx tree-weaver export file.json -f react|vue|svelte|html [-s tailwind]`, `exportComponent`, class naming and display variants
 - [Embedding and links](https://github.com/hynding/tree-weaver/blob/main/docs/embed.md): `<tree-weaver-editor>`, its postMessage API, and editor links (`?src=`, `#doc=`; `npx tree-weaver link file.json`)
 - [AGENTS.md](https://github.com/hynding/tree-weaver/blob/main/AGENTS.md): working in the repository and integrating the packages

@@ -1,9 +1,14 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { dirname } from 'node:path';
 import { parseArgs, type ParseArgsConfig } from 'node:util';
 import {
   applyPatch,
   canHaveChildren,
+  checkRendered,
+  checkTree,
+  DISPLAY_IDS,
+  formatCheckReport,
   createForest,
   formatIssues,
   isBranch,
@@ -17,7 +22,10 @@ import {
   TreeDataError,
   validateDocument,
   type Branch,
+  type CheckBrowser,
+  type CheckReport,
   type DesignKit,
+  type DisplayId,
   type Tree,
   type TreeNode,
   type ValidationResult,
@@ -50,6 +58,25 @@ export interface CliIO {
   readStdin(): Promise<string>;
   stdout(text: string): void;
   stderr(text: string): void;
+  /** Start a browser for `lint --render`. Default: Chromium through Playwright, when installed. */
+  launchBrowser?(): Promise<CheckBrowser & { close(): Promise<void> }>;
+}
+
+/** Chromium through Playwright, an optional dependency. TW_CHROMIUM_PATH points at another Chrome. */
+async function launchChromium(): Promise<CheckBrowser & { close(): Promise<void> }> {
+  type Launcher = { chromium: { launch(o: object): Promise<CheckBrowser & { close(): Promise<void> }> } };
+  let pw: Launcher | undefined;
+  try {
+    pw = (await import('playwright' as string)) as Launcher;
+  } catch {
+    try {
+      pw = createRequire(import.meta.url)('playwright') as Launcher;
+    } catch {
+      throw new Error('--render needs Playwright: run "npm i -D playwright" and "npx playwright install chromium", or leave out --render');
+    }
+  }
+  const executablePath = process.env.TW_CHROMIUM_PATH || undefined;
+  return pw.chromium.launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
 }
 
 const nodeIO: CliIO = {
@@ -84,6 +111,7 @@ Commands:
   validate <file...>       Strictly check documents; exits 1 when any has errors
   render <file>            Write a standalone HTML page for a tree
   export <file>            Write a tree as a React, Vue or Svelte component, or HTML + CSS files
+  lint <file>              Check a tree for layout and accessibility problems (--render: on every display)
   convert <file>           Convert between JSON, YAML, XML, HTML, Markdown and SVG
   add <file> [blueprint]   Insert a blueprint branch or a JSON node into a tree
   patch <file> [ops]       Apply a list of edits (insert, move, setStyles, ...) to a tree
@@ -150,6 +178,24 @@ namespaced class names) or with Tailwind classes, plus kits.css for its design k
   -k, --kit <css>         Add a CSS file as a design kit (repeatable)
   -F, --from <fmt>        Input format, when the extension doesn't say
       --json              Print { name, entry, files: [{ path, contents }] } (or the paths written)
+`,
+  lint: `Usage: tree-weaver lint <file> [options]
+
+Check a tree for problems you would only see by looking at it on every display:
+missing alt text, heading order, links and buttons without text, form fields
+without labels, duplicate ids, empty branches, fixed widths wider than a display
+and low contrast. Each issue has a path, the displays it shows on and a fix.
+Exits 1 when there are errors (or warnings, with --strict).
+
+      --render            Also render the page in Chromium (needs Playwright) at each
+                          display's size: what overflows sideways, contrast with the
+                          design kits applied, and images that don't load
+  -d, --display <ids>     Displays to render, comma-separated (default: all)
+  -t, --tree <ref>        Tree in a forest: name, id or 1-based number (default: all trees)
+  -k, --kit <css>         Add a CSS file as a design kit (repeatable)
+      --strict            Fail on warnings too
+  -F, --from <fmt>        Input format, when the extension doesn't say
+      --json              Print { ok, trees: [{ tree, ok, counts, issues, rendered }] }
 `,
   convert: `Usage: tree-weaver convert <file> --to <fmt> [options]
 
@@ -496,6 +542,44 @@ async function cmdExport(cli: Cli, args: string[]): Promise<number> {
   return 0;
 }
 
+async function cmdLint(cli: Cli, args: string[]): Promise<number> {
+  const { values, positionals } = parse(args, {
+    render: { type: 'boolean' },
+    display: { type: 'string', short: 'd' },
+    tree: { type: 'string', short: 't' },
+    kit: { type: 'string', short: 'k', multiple: true },
+    strict: { type: 'boolean' },
+    from: { type: 'string', short: 'F' },
+  });
+  if (positionals.length !== 1) throw new UsageError('lint needs one file (or "-" for stdin)');
+  let displays: DisplayId[] | undefined;
+  if (values.display) {
+    displays = values.display.split(',').map((d) => d.trim()) as DisplayId[];
+    const bad = displays.filter((d) => !(DISPLAY_IDS as readonly string[]).includes(d));
+    if (bad.length) throw new UsageError(`Unknown display "${bad[0]}". Displays: ${DISPLAY_IDS.join(', ')}`);
+    if (!values.render) throw new UsageError('--display picks the displays to render; add --render');
+  }
+  const { doc } = await cli.load(positionals[0], asFormat(values.from, '--from'));
+  const trees = values.tree === undefined ? treesOf(doc) : [pickTree(cli, doc, values.tree, '')];
+  const kits = [...kitsOf(doc)];
+  for (const file of values.kit ?? []) kits.push(kitFromFile(file, await cli.read(file)));
+  const reports: CheckReport[] = [];
+  if (values.render) {
+    const browser = await (cli.io.launchBrowser ?? launchChromium)();
+    try {
+      for (const tree of trees) reports.push(await checkRendered(tree, { browser, kits, displays }));
+    } finally {
+      await browser.close();
+    }
+  } else {
+    for (const tree of trees) reports.push(checkTree(tree));
+  }
+  const failed = (r: CheckReport) => !r.ok || (!!values.strict && r.counts.warnings > 0);
+  const ok = !reports.some(failed);
+  cli.report(!!values.json, { ok, trees: reports.map((r) => ({ ...r, ok: !failed(r) })) }, reports.map(formatCheckReport).join('\n\n'));
+  return ok ? 0 : 1;
+}
+
 async function cmdConvert(cli: Cli, args: string[]): Promise<number> {
   const { values, positionals } = parse(args, {
     to: { type: 'string', short: 'f' },
@@ -782,6 +866,7 @@ const COMMANDS: Record<string, (cli: Cli, args: string[]) => Promise<number>> = 
   new: cmdNew,
   validate: cmdValidate,
   render: cmdRender,
+  lint: cmdLint,
   convert: cmdConvert,
   add: cmdAdd,
   patch: cmdPatch,

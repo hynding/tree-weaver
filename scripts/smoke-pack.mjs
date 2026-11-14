@@ -64,6 +64,7 @@ sh(bin, ['render', 'home.tree.json', '-o', 'home.html']);
 if (!readFileSync(join(app, 'home.html'), 'utf8').startsWith('<!doctype html>')) throw new Error('render');
 sh(bin, ['export', 'home.tree.json', '-f', 'vue', '-n', 'Home', '-o', 'components']);
 if (!readFileSync(join(app, 'components/Home.vue'), 'utf8').includes('<template>')) throw new Error('export');
+console.log(sh(bin, ['lint', 'home.tree.json']).trim().split('\n')[0]);
 console.log(`cli ok (tree-weaver ${sh(bin, ['--version']).trim()})`);
 
 // The MCP server: start the installed bin over stdio and call a tool.
