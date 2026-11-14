@@ -605,7 +605,7 @@ async function cmdExport(cli: Cli, args: string[]): Promise<number> {
     const native = isNativeFramework(out.framework);
     cli.report(
       json,
-      { name: out.name, framework, ...(native ? {} : { styling }), entry: `${dir}/${out.entry}`, files: written },
+      { name: out.name, framework, styling: out.styling, entry: `${dir}/${out.entry}`, files: written },
       `Wrote ${out.name} (${native ? framework : `${framework}, ${styling}`}): ${written.join(', ')}`,
     );
   } else if (json) {

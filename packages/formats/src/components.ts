@@ -24,7 +24,7 @@ import {
   type TreeNode,
 } from '@tree-weaver/core';
 import { slugify } from './slug';
-import { dartFileName, exportFlutter, exportSwiftUI } from './native';
+import { dartFileName, exportFlutter, exportSwiftUI, nativeTypeName } from './native';
 
 const SVG_SHAPES = new Set(SVG_SHAPE_TAGS);
 
@@ -80,7 +80,8 @@ export interface ComponentExport {
   /** The component's name, e.g. `HomePage`. */
   name: string;
   framework: ComponentFramework;
-  styling: ComponentStyling;
+  /** How styles were written; left out for native frameworks, which have no choice. */
+  styling?: ComponentStyling;
   /** The main file, e.g. `HomePage.jsx`. */
   entry: string;
   files: ComponentFile[];
@@ -375,13 +376,11 @@ export function exportComponent(tree: Tree, opts: ComponentOptions): ComponentEx
   const framework = opts.framework;
   const styling = opts.styling ?? 'css';
   const name = pascalName(opts.name ?? tree.name);
-  if (framework === 'swiftui') {
-    const entry = `${name}.swift`;
-    return { name, framework, styling: 'css', entry, files: [{ path: entry, contents: exportSwiftUI(tree, { name, kits: opts.kits }) }] };
-  }
-  if (framework === 'flutter') {
-    const entry = dartFileName(name);
-    return { name, framework, styling: 'css', entry, files: [{ path: entry, contents: exportFlutter(tree, { name, kits: opts.kits }) }] };
+  if (framework === 'swiftui' || framework === 'flutter') {
+    const type = nativeTypeName(name, framework);
+    const entry = framework === 'swiftui' ? `${type}.swift` : dartFileName(type);
+    const contents = framework === 'swiftui' ? exportSwiftUI(tree, { name: type, kits: opts.kits }) : exportFlutter(tree, { name: type, kits: opts.kits });
+    return { name: type, framework, entry, files: [{ path: entry, contents }] };
   }
   // Generated classes are namespaced (`home__hero`) so they never meet a design kit's own classes.
   const build: Build = { styling, classOf: classNamer(`${cssIdent(slugify(tree.name, 'layout'))}__`), rules: [] };

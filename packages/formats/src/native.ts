@@ -4,6 +4,7 @@ import {
   isSafeAttr,
   isSvgRoot,
   parseAutoColumns,
+  parseColor,
   parseRulesCss,
   parseTracks,
   resolveStyles,
@@ -71,42 +72,10 @@ export interface Rgba {
   a: number;
 }
 
-const NAMED: Record<string, string> = {
-  white: '#ffffff',
-  black: '#000000',
-  red: '#ff0000',
-  green: '#008000',
-  blue: '#0000ff',
-  gray: '#808080',
-  grey: '#808080',
-  silver: '#c0c0c0',
-  orange: '#ffa500',
-  yellow: '#ffff00',
-  purple: '#800080',
-  navy: '#000080',
-  teal: '#008080',
-};
-
 /** A CSS colour as RGBA (0–255, alpha 0–1). Undefined for colours it can't read (gradients, `currentColor`). */
 export function cssColor(value: string | undefined): Rgba | undefined {
-  if (!value) return undefined;
-  let v = value.trim().toLowerCase();
-  if (v === 'transparent') return { r: 0, g: 0, b: 0, a: 0 };
-  v = NAMED[v] ?? v;
-  let m = /^#([0-9a-f]{3,8})$/.exec(v);
-  if (m) {
-    let hex = m[1];
-    if (hex.length === 3 || hex.length === 4) hex = [...hex].map((c) => c + c).join('');
-    if (hex.length !== 6 && hex.length !== 8) return undefined;
-    const n = (i: number) => parseInt(hex.slice(i, i + 2), 16);
-    return { r: n(0), g: n(2), b: n(4), a: hex.length === 8 ? Math.round((n(6) / 255) * 100) / 100 : 1 };
-  }
-  m = /^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)(?:\s*[,/]\s*([\d.]+%?))?\s*\)$/.exec(v);
-  if (m) {
-    const a = m[4] === undefined ? 1 : m[4].endsWith('%') ? Number(m[4].slice(0, -1)) / 100 : Number(m[4]);
-    return { r: Number(m[1]), g: Number(m[2]), b: Number(m[3]), a };
-  }
-  return undefined;
+  const c = value ? parseColor(value) : null;
+  return c ? { r: c[0], g: c[1], b: c[2], a: Math.round(c[3] * 100) / 100 } : undefined;
 }
 
 /** Replace `var(--name, fallback)` with the token's value, a few levels deep. */
@@ -170,6 +139,7 @@ interface Look {
   width?: number;
   maxWidth?: number;
   height?: number;
+  minHeight?: number;
   opacity?: number;
   /** `margin: 0 auto`: centred in its parent. */
   centered: boolean;
@@ -246,8 +216,11 @@ function stylesOf(branch: Branch, ctx: Ctx): Tiered<StyleMap> {
   for (const [d, map] of Object.entries(branch.styles) as [DisplayId, StyleMap][]) merged[d] = { ...merged[d], ...map };
   return tiered((t) => {
     const raw = resolveStyles(merged, TIER_DISPLAY[t]);
+    // Custom properties set on the class or the branch itself win over the kit's :root ones.
+    const local = Object.entries(raw).filter(([k]) => k.startsWith('--'));
+    const tokens = local.length ? new Map([...ctx.tokens, ...local]) : ctx.tokens;
     const out: StyleMap = {};
-    for (const [k, v] of Object.entries(raw)) if (!k.startsWith('--')) out[k] = resolveVars(v, ctx.tokens);
+    for (const [k, v] of Object.entries(raw)) if (!k.startsWith('--')) out[k] = resolveVars(v, tokens);
     return out;
   });
 }
@@ -275,7 +248,8 @@ function lookOf(s: StyleMap): Look {
     border: borderWidth && borderColor ? { width: borderWidth, color: borderColor } : undefined,
     width: cssLength(s.width),
     maxWidth: cssLength(s['max-width']),
-    height: cssLength(s.height) ?? cssLength(s['min-height']),
+    height: cssLength(s.height),
+    minHeight: cssLength(s['min-height']),
     opacity: opacity !== undefined && Number.isFinite(opacity) && opacity < 1 ? opacity : undefined,
     centered: margin.autoX,
     hidden: s.display === 'none',
@@ -406,7 +380,12 @@ const comment = (text: string) => text.replace(/\*\/|\n/g, ' ');
 
 /* --------------------------------------------------------------- swift */
 
-const swiftString = (s: string) => JSON.stringify(s).replace(/\\u([0-9a-fA-F]{4})/g, '\\u{$1}');
+/** A Swift string literal: only the escapes Swift knows (`\\` `\"` `\n` `\r` `\t` `\u{…}`). */
+const swiftString = (s: string) =>
+  `"${s.replace(/[\\"\n\r\t]|[\u0000-\u001f\u007f]/g, (c) => ({ '\\': '\\\\', '"': '\\"', '\n': '\\n', '\r': '\\r', '\t': '\\t' })[c] ?? `\\u{${c.charCodeAt(0).toString(16)}}`)}"`;
+
+/** A URL with anything outside the URL character set percent-encoded (existing escapes kept). */
+const encodeUrl = (url: string) => url.replace(/%(?![0-9a-f]{2})|[^A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=%]/giu, (c) => encodeURIComponent(c));
 const swiftColor = (c: Rgba) => {
   const ch = (v: number) => num(v / 255);
   return `Color(red: ${ch(c.r)}, green: ${ch(c.g)}, blue: ${ch(c.b)}${c.a < 1 ? `, opacity: ${num(c.a)}` : ''})`;
@@ -439,6 +418,7 @@ function swiftModifiers(look: Tiered<Look>, opts: { text?: TextRole; fill?: bool
     if (has('height')) parts.push(`height: ${swiftPick(look, (l) => (l.height !== undefined ? dbl(l.height) : 'nil'))}`);
     m.push(`.frame(${parts.join(', ')})`);
   }
+  if (has('minHeight')) m.push(`.frame(minHeight: ${swiftPick(look, (l) => (l.minHeight !== undefined ? dbl(l.minHeight) : 'nil'))}, alignment: .topLeading)`);
   const pad = (l: Look) => l.padding;
   const p = tiered((t) => pad(look[t]));
   if (Object.values(p.lg).some(Boolean) || Object.values(p.phone).some(Boolean)) {
@@ -478,7 +458,8 @@ function swiftBody(v: NView, o: Out, d: number, fill: boolean): void {
   switch (v.kind) {
     case 'text': {
       if (v.link !== undefined) {
-        if (/^(https?:|mailto:|tel:)/i.test(v.link)) o.line(d, `Link(${swiftString(v.text)}, destination: URL(string: ${swiftString(v.link)})!)`);
+        // Percent-encoded here, so URL(string:) can't fail on spaces and the like.
+        if (/^(https?:|mailto:|tel:)/i.test(v.link)) o.line(d, `Link(${swiftString(v.text)}, destination: URL(string: ${swiftString(encodeUrl(v.link))})!)`);
         else o.line(d, `Button(${swiftString(v.text)}) { /* go to ${comment(v.link || 'a page')} */ }`);
       } else if (v.button) o.line(d, `Button(${swiftString(v.text)}) { }`);
       else o.line(d, `Text(${swiftString(v.text)})`);
@@ -487,7 +468,7 @@ function swiftBody(v: NView, o: Out, d: number, fill: boolean): void {
     }
     case 'image':
       if (/^https?:/i.test(v.src)) {
-        o.line(d, `AsyncImage(url: URL(string: ${swiftString(v.src)})) { image in`);
+        o.line(d, `AsyncImage(url: URL(string: ${swiftString(encodeUrl(v.src))})) { image in`);
         o.line(d + 1, 'image.resizable().scaledToFit()');
         o.line(d, '} placeholder: {');
         o.line(d + 1, 'Color.secondary.opacity(0.1)');
@@ -528,8 +509,12 @@ function swiftBody(v: NView, o: Out, d: number, fill: boolean): void {
       v.rows.forEach((row, i) => {
         o.line(d + 1, 'GridRow {');
         row.cells.forEach((c) => {
-          swiftView(c, o, d + 2, false);
-          if (row.header) o.line(d + 3, '.fontWeight(.semibold)');
+          if (!row.header) return swiftView(c, o, d + 2, false);
+          // A Group, so the weight applies even when the cell is wrapped in `if compact`.
+          o.line(d + 2, 'Group {');
+          swiftView(c, o, d + 3, false);
+          o.line(d + 2, '}');
+          o.line(d + 3, '.fontWeight(.semibold)');
         });
         o.line(d + 1, '}');
         if (row.header && i < v.rows.length - 1) o.line(d + 1, 'Divider()');
@@ -570,6 +555,16 @@ function swiftBody(v: NView, o: Out, d: number, fill: boolean): void {
       return;
     }
   }
+}
+
+/** Types the generated code uses, which the view's own name must not shadow. */
+const SWIFT_TAKEN = new Set(['View', 'Text', 'Image', 'Link', 'Button', 'Grid', 'GridRow', 'GridItem', 'Divider', 'TextField', 'Color', 'Group', 'Spacer', 'ScrollView', 'VStack', 'HStack', 'LazyVGrid', 'AnyLayout', 'VStackLayout', 'HStackLayout', 'AsyncImage', 'RoundedRectangle', 'EdgeInsets', 'URL', 'Bool', 'String', 'Font', 'Array']);
+const DART_TAKEN = new Set(['Widget', 'StatelessWidget', 'BuildContext', 'Text', 'Image', 'Table', 'TableRow', 'TableBorder', 'Container', 'Wrap', 'Flex', 'Flexible', 'Expanded', 'Row', 'Column', 'Center', 'Opacity', 'Padding', 'Visibility', 'SizedBox', 'Divider', 'TextField', 'TextButton', 'FilledButton', 'Theme', 'Color', 'Colors', 'BoxDecoration', 'BoxConstraints', 'BorderRadius', 'Border', 'EdgeInsets', 'MediaQuery', 'SingleChildScrollView', 'LayoutBuilder', 'InputDecoration', 'OutlineInputBorder', 'Axis', 'List', 'Map', 'String', 'Object']);
+
+/** The type name to write: the given name, with a suffix when it would shadow a framework type. */
+export function nativeTypeName(name: string, framework: NativeFramework): string {
+  if (framework === 'swiftui') return SWIFT_TAKEN.has(name) ? `${name}View` : name;
+  return DART_TAKEN.has(name) || name.startsWith('_') ? `${name.replace(/^_+/, '')}Widget` : name;
 }
 
 export function exportSwiftUI(tree: Tree, opts: NativeOptions): string {
@@ -665,7 +660,7 @@ function dartDecorate(look: Tiered<Look>, o: Out, d: number, inner: (d: number) 
   if (has('background')) deco.push(`color: ${dartPick(look, (l) => (l.background ? dartColor(l.background) : 'null'))}`);
   if (has('radius')) deco.push(`borderRadius: BorderRadius.circular(${dartPick(look, (l) => dbl(l.radius ?? 0))})`);
   if (look.lg.border) deco.push(`border: Border.all(color: ${dartColor(look.lg.border.color)}, width: ${dbl(look.lg.border.width)})`);
-  const needsBox = anyPad || deco.length || has('width') || has('height') || has('maxWidth');
+  const needsBox = anyPad || deco.length || has('width') || has('height') || has('maxWidth') || has('minHeight');
   let depth = d;
   const closers: string[] = [];
   const open = (text: string) => {
@@ -691,7 +686,10 @@ function dartDecorate(look: Tiered<Look>, o: Out, d: number, inner: (d: number) 
     }
     if (has('width')) o.line(depth, `width: ${dartPick(look, (l) => (l.width !== undefined ? dbl(l.width) : 'null'))},`);
     if (has('height')) o.line(depth, `height: ${dartPick(look, (l) => (l.height !== undefined ? dbl(l.height) : 'null'))},`);
-    if (has('maxWidth')) o.line(depth, `constraints: BoxConstraints(maxWidth: ${dartPick(look, (l) => (l.maxWidth !== undefined ? dbl(l.maxWidth) : 'double.infinity'))}),`);
+    const limits: string[] = [];
+    if (has('maxWidth')) limits.push(`maxWidth: ${dartPick(look, (l) => (l.maxWidth !== undefined ? dbl(l.maxWidth) : 'double.infinity'))}`);
+    if (has('minHeight')) limits.push(`minHeight: ${dartPick(look, (l) => dbl(l.minHeight ?? 0))}`);
+    if (limits.length) o.line(depth, `constraints: BoxConstraints(${limits.join(', ')}),`);
     if (deco.length) o.line(depth, `decoration: BoxDecoration(${deco.join(', ')}),`);
     o.line(depth, 'child:');
     closers.push(')');
@@ -707,8 +705,7 @@ function dartDecorate(look: Tiered<Look>, o: Out, d: number, inner: (d: number) 
 
 function dartChildren(views: NView[], o: Out, d: number, wrapChild?: (d: number, inner: (d: number) => void) => void): void {
   for (const c of views) {
-    const look = 'look' in c ? c.look : undefined;
-    const cond = look ? dartVisible(tiered((t) => look[t].hidden)) : null;
+    const cond = dartShown(c);
     if (cond === 'false') continue;
     const prefix = cond ? `if (${cond}) ` : '';
     const start = o.lines.length;
@@ -717,6 +714,19 @@ function dartChildren(views: NView[], o: Out, d: number, wrapChild?: (d: number,
     if (prefix) o.lines[start] = o.lines[start].replace(/^(\s*)/, `$1${prefix}`);
     o.lines[o.lines.length - 1] += ',';
   }
+}
+
+/** The condition a view shows under in Flutter: null for always, 'false' for never. */
+const dartShown = (v: NView): string | null => ('look' in v ? dartVisible(tiered((t) => v.look[t].hidden)) : null);
+
+/** A view where it can't be left out of its parent (a table cell, the root): hidden by `Visibility`. */
+function dartViewVisible(v: NView, o: Out, d: number): void {
+  const cond = dartShown(v);
+  if (cond === 'false') return o.line(d, 'const SizedBox.shrink()');
+  if (!cond) return dartView(v, o, d);
+  o.line(d, `Visibility(visible: ${cond}, child:`);
+  dartView(v, o, d + 1);
+  o.line(d, ')');
 }
 
 function dartView(v: NView, o: Out, d: number): void {
@@ -759,7 +769,9 @@ function dartView(v: NView, o: Out, d: number): void {
         o.line(dd + 1, 'crossAxisAlignment: CrossAxisAlignment.start,');
         o.line(dd + 1, 'children: [');
         v.items.forEach((item, i) => {
-          o.line(dd + 2, 'Row(crossAxisAlignment: CrossAxisAlignment.start, children: [');
+          const cond = dartShown(item);
+          if (cond === 'false') return;
+          o.line(dd + 2, `${cond ? `if (${cond}) ` : ''}Row(crossAxisAlignment: CrossAxisAlignment.start, children: [`);
           o.line(dd + 3, `Text(${dartString(v.ordered ? `${i + 1}. ` : '•  ')}),`);
           o.line(dd + 3, 'Expanded(child:');
           dartView(item, o, dd + 4);
@@ -783,7 +795,7 @@ function dartView(v: NView, o: Out, d: number): void {
           while (cells.length < width) cells.push({ kind: 'placeholder', note: 'empty cell' });
           for (const c of cells) {
             o.line(dd + 3, 'Padding(padding: const EdgeInsets.all(8), child:');
-            dartView(c, o, dd + 4);
+            dartViewVisible(c, o, dd + 4);
             o.line(dd + 3, '),');
           }
           o.line(dd + 2, ']),');
@@ -868,7 +880,7 @@ class _Grid extends StatelessWidget {
           cells.add(Expanded(child: i + j < children.length ? children[i + j] : const SizedBox.shrink()));
         }
         if (rows.isNotEmpty) rows.add(SizedBox(height: spacing));
-        rows.add(IntrinsicHeight(child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: cells)));
+        rows.add(Row(crossAxisAlignment: CrossAxisAlignment.start, children: cells));
       }
       return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: rows);
     });
@@ -898,7 +910,7 @@ export function exportFlutter(tree: Tree, opts: NativeOptions): string {
   o.line(2, 'return SingleChildScrollView(');
   o.line(3, 'child:');
   const start = o.lines.length;
-  dartView(root, o, 4);
+  dartViewVisible(root, o, 4);
   o.lines[o.lines.length - 1] += ',';
   const view = o.lines.slice(start).join('\n');
   o.line(2, ');');

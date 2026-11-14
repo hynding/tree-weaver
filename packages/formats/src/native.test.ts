@@ -131,7 +131,7 @@ describe('exportComponent with native frameworks', () => {
     const out = exportComponent(page(), { framework: 'swiftui', styling: 'tailwind', kits });
     expect(out.entry).toBe('LandingPage.swift');
     expect(out.files.map((f) => f.path)).toEqual(['LandingPage.swift']);
-    expect(out.styling).toBe('css');
+    expect(out.styling).toBeUndefined();
   });
 
   it('writes one Dart file named in snake case', () => {
@@ -141,11 +141,65 @@ describe('exportComponent with native frameworks', () => {
     expect(out.files[0].contents).toContain('class HomeScreen extends StatelessWidget');
   });
 
+  it('renames a component that would shadow a framework type', () => {
+    expect(exportComponent(page(), { framework: 'flutter', name: 'Table' }).files[0].contents).toContain('class TableWidget extends StatelessWidget');
+    expect(exportComponent(page(), { framework: 'swiftui', name: 'Text' }).entry).toBe('TextView.swift');
+  });
+
   it('says what an SVG tree becomes', () => {
     const svg = createSvgTree('Logo', [createShape('circle', { cx: '10', cy: '10', r: '5' })]);
     for (const framework of ['swiftui', 'flutter'] as const) {
       const out = exportComponent(svg, { framework });
       expect(out.files[0].contents).toMatch(/SVG/);
     }
+  });
+});
+
+describe('native edge cases', () => {
+  const tree = () =>
+    pageTree('Edge', [
+      createBranch({ tag: 'section', styles: { lg: { 'min-height': '400px', '--accent': '#0066cc', border: '1px solid var(--accent)' } }, children: [text('Tall')] }),
+      createBranch({ tag: 'a', attrs: { href: 'https://example.com/my page' }, children: [text('Back\bspace')] }),
+      createBranch({
+        tag: 'table',
+        children: [
+          createBranch({
+            tag: 'tr',
+            children: [
+              createBranch({ tag: 'th', styles: { 'mobile-portrait': { display: 'none' } }, children: [text('Head')] }),
+              createBranch({ tag: 'th', children: [text('Other')] }),
+            ],
+          }),
+        ],
+      }),
+      createBranch({ tag: 'ul', children: [createBranch({ tag: 'li', styles: { 'mobile-portrait': { display: 'none' } }, children: [text('Wide only')] })] }),
+    ]);
+
+  it('treats min-height as a floor, not a fixed height', () => {
+    const swift = exportSwiftUI(tree(), { name: 'Edge' });
+    expect(swift).toContain('.frame(minHeight: 400');
+    expect(swift).not.toContain('.frame(height: 400');
+    expect(exportFlutter(tree(), { name: 'Edge' })).toContain('constraints: BoxConstraints(minHeight: 400)');
+  });
+
+  it('resolves custom properties set on the branch', () => {
+    expect(exportSwiftUI(tree(), { name: 'Edge' })).toContain('Color(red: 0, green: 0.4, blue: 0.8)');
+  });
+
+  it('encodes URLs and writes only Swift escapes', () => {
+    const swift = exportSwiftUI(tree(), { name: 'Edge' });
+    expect(swift).toContain('URL(string: "https://example.com/my%20page")!');
+    expect(swift).toContain('"Back\\u{8}space"');
+  });
+
+  it('keeps hidden header cells compilable in SwiftUI', () => {
+    expect(exportSwiftUI(tree(), { name: 'Edge' })).toMatch(/Group \{\n\s+if !compact \{\n\s+Text\("Head"\)[\s\S]*?\}\n\s+\}\n\s+\.fontWeight\(\.semibold\)/);
+  });
+
+  it('hides list items and table cells in Flutter too', () => {
+    const dart = exportFlutter(tree(), { name: 'Edge' });
+    expect(dart).toMatch(/Visibility\(visible: !phone, child:\n\s+Text\('Head'/);
+    expect(dart).toMatch(/if \(!phone\) Row\([\s\S]*Wide only/);
+    expect(dart).not.toContain('IntrinsicHeight');
   });
 });

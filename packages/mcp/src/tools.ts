@@ -293,7 +293,7 @@ export class Tools {
     const out = exportComponent(tree, { framework: args.framework, styling: args.styling, kits, name: args.name, typescript: args.typescript });
     const native = isNativeFramework(out.framework);
     const summary = `${out.name}: "${tree.name}" as ${args.framework}${native ? '' : ` with ${out.styling === 'tailwind' ? 'Tailwind classes' : 'a CSS file'}`} (${out.files.length} file${out.files.length === 1 ? '' : 's'}, entry ${out.entry}).`;
-    const meta = { name: out.name, framework: out.framework, ...(native ? {} : { styling: out.styling }), entry: out.entry };
+    const meta = { name: out.name, framework: out.framework, styling: out.styling, entry: out.entry };
     if (args.outputDir) {
       const dir = args.outputDir.replace(/[\\/]+$/, '');
       const written: string[] = [];
