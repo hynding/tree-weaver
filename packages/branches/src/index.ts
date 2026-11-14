@@ -79,8 +79,9 @@ export const button = (label: string, primary = false): Branch =>
 export const image = (src = 'https://picsum.photos/seed/tree-weaver/800/500', alt = 'Placeholder image'): TreeNode =>
   createLeaf(src, 'image', { alt });
 
-export const card = (title = 'Card title', body = 'Describe something worth reading here.'): Branch =>
-  createBranch({ tag: 'article', type: 'card', name: 'Card', classes: ['card'], children: [heading(3, title), paragraph(body, ['muted'])] });
+/** A card: a heading (level 3 unless `level` says otherwise) and a muted paragraph. */
+export const card = (title = 'Card title', body = 'Describe something worth reading here.', level: 1 | 2 | 3 | 4 | 5 | 6 = 3): Branch =>
+  createBranch({ tag: 'article', type: 'card', name: 'Card', classes: ['card'], children: [heading(level, title), paragraph(body, ['muted'])] });
 
 export const section = (children: TreeNode[] = [], name = 'Section'): Branch =>
   createBranch({
@@ -331,16 +332,18 @@ export const TEMPLATES: readonly TreeTemplate[] = [
     description: 'Sidebar layout with stat cards and a data table',
     create: (name = 'Dashboard') => {
       const tree = createTree(name);
-      const stats = responsiveGrid(4, ['Visitors', 'Signups', 'Revenue', 'Churn'].map((t) => card(t, '0')), 'Stats');
+      const stats = responsiveGrid(4, ['Visitors', 'Signups', 'Revenue', 'Churn'].map((t) => card(t, '0', 2)), 'Stats');
       const data = createTable(5, 4);
       data.classes = ['table'];
+      // Wide tables scroll inside their own box instead of pushing the page sideways on phones.
+      const tableBox = createBranch({ name: 'Table scroller', styles: { lg: { 'overflow-x': 'auto' } }, children: [data] });
       tree.root.children = [
         createBranch({
           type: 'grid',
           name: 'App shell',
           styles: {
             lg: { display: 'grid', 'grid-template-columns': '240px minmax(0, 1fr)', 'min-height': '100vh' },
-            tablet: { 'grid-template-columns': '1fr' },
+            tablet: { 'grid-template-columns': 'minmax(0, 1fr)' },
           },
           children: [
             createBranch({
@@ -348,9 +351,9 @@ export const TEMPLATES: readonly TreeTemplate[] = [
               name: 'Sidebar',
               classes: ['surface'],
               styles: { lg: { padding: '1.5rem' }, tablet: { display: 'none' } },
-              children: [heading(3, 'Menu'), flexColumn(['Overview', 'Reports', 'Settings'].map((t) => createBranch({ tag: 'a', attrs: { href: '#' }, children: [text(t)] })))],
+              children: [heading(2, 'Menu'), flexColumn(['Overview', 'Reports', 'Settings'].map((t) => createBranch({ tag: 'a', attrs: { href: '#' }, children: [text(t)] })))],
             }),
-            createBranch({ tag: 'main', name: 'Main', classes: ['stack'], styles: { lg: { padding: '1.5rem' } }, children: [heading(1, 'Overview'), stats, data] }),
+            createBranch({ tag: 'main', name: 'Main', classes: ['stack'], styles: { lg: { padding: '1.5rem' } }, children: [heading(1, 'Overview'), stats, tableBox] }),
           ],
         }),
       ];

@@ -360,3 +360,50 @@ describe('tree-weaver export', () => {
     expect(bad.err).toContain('react, vue, svelte, html');
   });
 });
+
+describe('tree-weaver lint', () => {
+  const bad = JSON.stringify({ tree: { name: 'Bad', root: { tag: 'body', children: [{ kind: 'leaf', type: 'image', value: 'a.png' }, { tag: 'h1', children: ['A'] }, { tag: 'h3', children: ['B'] }] } } });
+
+  it('reports issues with paths and fixes, and exits 1 on errors', async () => {
+    const r = await cli(['lint', 'bad.json'], { 'bad.json': bad });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('FAILED "Bad": 1 error, 1 warning');
+    expect(r.out).toContain('error image-alt at /0');
+    expect(r.out).toContain('Fix:');
+    const json = JSON.parse((await cli(['lint', 'bad.json', '--json'], { 'bad.json': bad })).out);
+    expect(json.ok).toBe(false);
+    expect(json.trees[0].issues.map((i: { rule: string }) => i.rule)).toEqual(['image-alt', 'heading-order']);
+  });
+
+  it('passes clean examples, fails warnings with --strict, and checks every tree of a forest', async () => {
+    expect((await cli(['lint', 'p.json'], { 'p.json': example('pricing-table.tree.json') })).code).toBe(0);
+    const warn = JSON.stringify({ tree: { name: 'W', root: { tag: 'body', children: [{ tag: 'h1', children: ['A'] }, { tag: 'a', children: ['x'] }] } } });
+    expect((await cli(['lint', 'w.json'], { 'w.json': warn })).code).toBe(0);
+    expect((await cli(['lint', 'w.json', '--strict'], { 'w.json': warn })).code).toBe(1);
+    const forest = JSON.parse((await cli(['lint', 's.json', '--json'], { 's.json': example('site.forest.json') })).out);
+    expect(forest.trees).toHaveLength(2);
+  });
+
+  it('renders with an injected browser and checks display names', async () => {
+    let pages = 0;
+    const browser = {
+      async newPage() {
+        pages++;
+        return {
+          setContent: async () => undefined,
+          evaluate: async <T>() => ({ pageWidth: 500, pageHeight: 900, overflow: [], contrast: [], broken: [] }) as T,
+          close: async () => undefined,
+        };
+      },
+      close: async () => undefined,
+    };
+    const m = memoryIO({ 'p.json': example('pricing-table.tree.json') });
+    m.io.launchBrowser = async () => browser;
+    const code = await run(['lint', 'p.json', '--render', '-d', 'tablet,mobile-portrait'], m.io);
+    expect(code).toBe(0);
+    expect(pages).toBe(2);
+    expect(m.out()).toContain('mobile-portrait: 390×844, page 500×900 (scrolls sideways)');
+    expect((await cli(['lint', 'p.json', '-d', 'tv', '--render'], { 'p.json': '{}' })).code).toBe(2);
+    expect((await cli(['lint', 'p.json', '-d', 'tablet'], { 'p.json': '{}' })).code).toBe(2);
+  });
+});

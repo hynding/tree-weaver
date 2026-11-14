@@ -191,15 +191,17 @@ HTML and CSS written with the default breakpoints still maps back to the right d
 Tree Weaver data is plain JSON (or YAML) with a published contract, so agents can write it directly:
 
 - The **MCP server** ([`docs/mcp.md`](docs/mcp.md)): `npx -y @tree-weaver/mcp` gives Claude, Cursor, VS Code and other MCP clients
-  tools to create, patch, validate, render, screenshot and export trees.
+  tools to create, patch, validate, check, render, screenshot and export trees.
 - **Embedding and links** ([`docs/embed.md`](docs/embed.md)): a `<tree-weaver-editor>` element for other apps, and editor links
   that open a document (`?src=<url>`, or `#doc=` from `npx tree-weaver link file.json`).
-- The **`tree-weaver` CLI** ([`docs/cli.md`](docs/cli.md)): `npx tree-weaver new | validate | render | export | convert | add | patch | expand | outline | kit | schema`,
+- The **`tree-weaver` CLI** ([`docs/cli.md`](docs/cli.md)): `npx tree-weaver new | validate | lint | render | export | convert | add | patch | expand | outline | kit | schema`,
   with `--json` reports. `npm i tree-weaver` also installs every library (`@tree-weaver/core`, `formats`, `kits`, `branches`, `storage`).
 
 - [`docs/format.md`](docs/format.md): the format guide, with the display cascade and layout recipes.
 - [`docs/shorthand.md`](docs/shorthand.md): a compact authoring form (`"h2: Title"`, `{ "grid": 3, ... }`, `"@card"`)
   that `tree-weaver expand` turns into full documents.
+- [`docs/checks.md`](docs/checks.md): layout and accessibility checks per display (overflow, contrast, alt text,
+  headings, labels) with `tree-weaver lint`, `check_layout` or `checkTree` / `checkRendered`.
 - [`docs/export.md`](docs/export.md): trees as React, Vue or Svelte components (CSS or Tailwind) with `tree-weaver export`.
 - [`docs/patch.md`](docs/patch.md): patches, lists of edits (`insert`, `move`, `setStyles`, …) applied with
   `tree-weaver patch` or `applyPatch`, all or nothing.

@@ -25,7 +25,8 @@ Use these words in code, UI text, docs and commit messages:
    branches, and shape leaves (`{ "type": "shape", "value": "path", "attrs": { "d": "..." } }`).
 3. Put base styles on `lg`, and only overrides on `tablet`, `mobile-portrait` and the rest.
 4. Prefer the forest's kit classes over inline styles. `kitManifest(kits)` (`@tree-weaver/kits`) lists them.
-5. Validate before handing the file on, and fix every error the validator reports:
+5. Validate before handing the file on, and fix every error the validator reports (then run the
+   layout checks, step 10):
 
    ```ts
    import { validateText } from '@tree-weaver/formats';
@@ -48,6 +49,9 @@ Use these words in code, UI text, docs and commit messages:
 9. To put the layout into an app, export it as a component: `npx tree-weaver export page.tree.json
    --framework react|vue|svelte|html [--styling tailwind] -o src/components/`, or
    `exportComponent(tree, { framework, styling, kits })`. See [`docs/export.md`](docs/export.md).
+10. Check the layout on every display before handing it on: `npx tree-weaver lint page.tree.json --render`
+    (or `check_layout` in MCP, `checkTree` / `checkRendered` in code). Fix errors; read each warning's fix.
+    See [`docs/checks.md`](docs/checks.md).
 
 Working examples are in [`examples/`](examples/); a test keeps them valid.
 
@@ -61,6 +65,7 @@ npx tree-weaver outline home.tree.json                  # paths (/2/0/1) and ids
 npx tree-weaver add home.tree.json card --parent /2/0/1 # or --node '{"tag":"p","children":["Hi"]}'
 npx tree-weaver patch home.tree.json --ops '[{"op":"setText","target":"/1/0","value":"Hi"}]'
 npx tree-weaver validate home.tree.json                 # exits 1 with path + fix hint per error
+npx tree-weaver lint home.tree.json --render            # overflow, contrast, alt text, headings per display
 npx tree-weaver render home.tree.json -o home.html
 npx tree-weaver export home.tree.json -f react -o src/ # React/Vue/Svelte component, CSS or Tailwind
 ```
@@ -73,7 +78,7 @@ classes and tokens, and `schema` prints the JSON Schema. Every command takes `--
 Agents in MCP clients can use `@tree-weaver/mcp` instead of the CLI: `claude mcp add tree-weaver --
 npx -y @tree-weaver/mcp --root .`, or `{ "command": "npx", "args": ["-y", "@tree-weaver/mcp"] }` in a
 client's `mcpServers`. Tools: `create_tree`, `outline`, `patch_tree`, `validate`, `render_html`,
-`export_component`, `convert`, `screenshot` (a PNG per display), `catalog`, `kit_manifest`. The schemas and guides are
+`export_component`, `convert`, `check_layout` (problems per display, with fixes), `screenshot` (a PNG per display), `catalog`, `kit_manifest`. The schemas and guides are
 resources (`tree-weaver://guide/shorthand`, …). Full guide: [`docs/mcp.md`](docs/mcp.md).
 
 ## Handing a tree to a person
@@ -95,7 +100,7 @@ Useful entry points:
 
 - `@tree-weaver/core`: `createForest`, `createTree`, `createBranch`, `createLeaf`; immutable ops
   `insertNode`, `moveNode`, `removeNode`, `setStyles`, `wrapNode`; patches `applyPatch`,
-  `resolveRef`, `TREE_WEAVER_PATCH_SCHEMA`; `normalizeForest` /
+  `resolveRef`, `TREE_WEAVER_PATCH_SCHEMA`; layout checks `checkTree`, `checkRendered`, `formatCheckReport`; `normalizeForest` /
   `normalizeTree` (lenient); `validateDocument` (strict); `renderDocument`; `TREE_WEAVER_SCHEMA`.
 - `@tree-weaver/formats`: `importDocument(text, format?)`, `exportTree`, `exportForest`,
   `validateText`, `exportStorybook`, `exportComponent` (React, Vue, Svelte, HTML; CSS or Tailwind).

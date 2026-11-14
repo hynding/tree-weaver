@@ -1,4 +1,4 @@
-import { isBranch, normalizeTree, renderDocument, validateDocument, walk } from '@tree-weaver/core';
+import { checkTree, isBranch, normalizeTree, renderDocument, validateDocument, walk } from '@tree-weaver/core';
 import { describe, expect, it } from 'vitest';
 import { BLUEPRINT_CATEGORIES, BLUEPRINTS, responsiveGrid, TEMPLATES } from './index';
 
@@ -42,6 +42,15 @@ describe('templates', () => {
         if (isBranch(n)) branches++;
       });
       expect(branches).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('template quality', () => {
+  it('starts every template with no layout or accessibility issues', () => {
+    for (const t of TEMPLATES) {
+      const report = checkTree(t.create());
+      expect(report.issues.map((i) => `${t.id}: ${i.rule} at ${i.path}: ${i.message}`)).toEqual([]);
     }
   });
 });

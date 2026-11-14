@@ -55,6 +55,7 @@ or set `TW_CHROMIUM_PATH` to a Chrome or Chromium binary. Every other tool works
 | `render_html` | A standalone HTML page with kits and responsive CSS inlined. |
 | `export_component` | A tree as a React, Vue or Svelte component, or HTML with CSS files, styled with a CSS file or Tailwind classes. Returns every file, or writes them into `outputDir`. See [exporting components](export.md). |
 | `convert` | Between JSON, YAML, XML, HTML, Markdown and SVG. |
+| `check_layout` | Layout and accessibility problems per display, each with a path and a fix: sideways overflow, contrast (with kits), alt text, heading order, labels, duplicate ids, empty branches, fixed widths. Renders in Chromium when Playwright is installed; `render: false` checks the tree alone. See [layout checks](checks.md). |
 | `screenshot` | A PNG per display (default `lg`, `tablet`, `mobile-portrait`) from headless Chromium, with page height and a warning when content overflows sideways. Scripts are disabled while rendering. |
 | `catalog` | Blueprints, templates, displays or formats. |
 | `kit_manifest` | Classes, tokens and media queries of `.css` files or a document's kits. |
@@ -72,6 +73,7 @@ to fix, and a failed patch changes nothing.
 | `tree-weaver://guide/format` | [Format guide](format.md) |
 | `tree-weaver://guide/shorthand` | [Shorthand guide](shorthand.md) |
 | `tree-weaver://guide/patch` | [Patch guide](patch.md) |
+| `tree-weaver://guide/checks` | [Layout checks](checks.md) |
 | `tree-weaver://guide/export` | [Component export guide](export.md) |
 | `tree-weaver://catalog/blueprints`, `…/templates` | The building blocks, as JSON |
 
