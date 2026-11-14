@@ -25,9 +25,9 @@ const time = (iso?: string) => {
 /** Labels worked out from diffs, keyed by the state a change led to. States never change, so the cache never goes stale. */
 const labels = new WeakMap<Forest, string>();
 
-function labelFor(prev: Forest | undefined, next: Forest, given?: string): string {
+function labelFor(prev: Forest | undefined, next: Forest, given?: string, start?: boolean): string {
   if (given) return given;
-  if (!prev) return 'Opened';
+  if (!prev) return start ? 'Opened' : 'Earlier changes (not kept)';
   let label = labels.get(next);
   if (label === undefined) {
     label = describeDiff(diffForests(prev, next));
@@ -144,7 +144,7 @@ export class TwHistoryPanel {
         <ol class="history-list" aria-label="Undo history, newest first">
           {[...timeline].reverse().map((entry) => {
             const i = timeline.indexOf(entry);
-            const label = labelFor(timeline[i - 1]?.state, entry.state, entry.change?.label);
+            const label = labelFor(timeline[i - 1]?.state, entry.state, entry.change?.label, entry.start);
             const source = entry.change?.source;
             return (
               <li key={String(entry.offset)} class={{ current: entry.offset === 0, future: entry.offset > 0 }}>

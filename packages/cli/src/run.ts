@@ -427,14 +427,22 @@ function resolveNode(root: Branch, ref: string | undefined): { node: TreeNode; p
   return resolveRef(root, ref);
 }
 
-/** Put an updated tree back into its document and write it, in the document's own format. */
 /* ---------------------------------------------------------------- versions */
 
+/** The file's version log. Missing is empty; unreadable or damaged throws, so nothing writes over it. */
 async function readVersions(cli: Cli, file: string): Promise<VersionLog> {
+  const path = versionLogPath(file);
+  let text: string;
   try {
-    return parseVersionLog(await cli.io.readFile(versionLogPath(file)));
-  } catch {
-    return parseVersionLog(null);
+    text = await cli.io.readFile(path);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return parseVersionLog(null);
+    throw new Error(`${path}: ${(err as Error).message}`);
+  }
+  try {
+    return parseVersionLog(text, true);
+  } catch (err) {
+    throw new Error(`${path}: ${(err as Error).message}`);
   }
 }
 
@@ -445,6 +453,7 @@ async function keepVersion(cli: Cli, file: string, text: string, format: FormatI
   return version;
 }
 
+/** Put an updated tree back into its document and write it, in the document's own format. */
 async function writeTree(cli: Cli, loaded: Loaded, file: string, tree: Tree, output: string | undefined, versionAs?: string): Promise<string | undefined> {
   const { doc, format } = loaded;
   let next: TreeDocument;

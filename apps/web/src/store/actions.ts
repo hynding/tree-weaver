@@ -19,7 +19,6 @@ import {
   findParent,
   History,
   type ChangeMeta,
-  type ChangeSource,
   type TimelineEntry,
   inSvgContext,
   insertNode,
@@ -141,28 +140,11 @@ export async function saveNow(): Promise<void> {
   }
 }
 
-/** Who the changes being made right now come from. Set with `asSource` around host or agent edits. */
-let changeSource: ChangeSource = 'editor';
-let changeLabel: string | undefined;
-
-/** Run `fn` with its changes recorded as coming from `source` (and labelled `label`, when given). */
-export function asSource<T>(source: ChangeSource, fn: () => T, label?: string): T {
-  const prevSource = changeSource;
-  const prevLabel = changeLabel;
-  changeSource = source;
-  changeLabel = label;
-  try {
-    return fn();
-  } finally {
-    changeSource = prevSource;
-    changeLabel = prevLabel;
-  }
-}
-/** Replace the forest. Records an undo step unless `record` is false. */
+/** Replace the forest. Records an undo step unless `record` is false; `meta` says where the change came from (default: the editor). */
 export function commit(next: Forest, record = true, meta: ChangeMeta = {}): void {
   const prev = state.forest;
   if (next === prev) return;
-  if (record && prev) history.push(prev, { source: changeSource, ...(changeLabel ? { label: changeLabel } : {}), ...meta });
+  if (record && prev) history.push(prev, { source: 'editor', ...meta });
   state.forest = next;
   if (!next.trees.some((t) => t.id === state.treeId)) state.treeId = next.trees[0]?.id ?? '';
   const tree = currentTree();
@@ -878,17 +860,17 @@ export async function importText(text: string, format?: FormatId, fileName?: str
  * Replace what is open with a document, without keeping the old forest around. Used by
  * the embed API, where the host page owns the data. A tree opens in a forest of its own.
  */
-export async function openDocument(doc: TreeDocument): Promise<{ kind: 'forest' | 'tree'; trees: number }> {
+export async function openDocument(doc: TreeDocument, meta: ChangeMeta = {}): Promise<{ kind: 'forest' | 'tree'; trees: number }> {
   // A new version of what is open (the host sent back an edited copy) is an undoable change, not a fresh start.
   const open = state.forest;
   if (open && doc.kind === 'forest' && doc.forest.id === open.id) {
-    commit(withCurrentBreakpoints(doc.forest));
+    commit(withCurrentBreakpoints(doc.forest), true, meta);
     await saveNow();
     return { kind: 'forest', trees: doc.forest.trees.length };
   }
   if (open && doc.kind === 'tree' && open.trees.some((t) => t.id === doc.tree.id)) {
     const added = newKits(doc.kits);
-    commit({ ...replaceTree(open, doc.tree), kits: [...open.kits, ...added] });
+    commit({ ...replaceTree(open, doc.tree), kits: [...open.kits, ...added] }, true, meta);
     switchTree(doc.tree.id);
     await saveNow();
     return { kind: 'tree', trees: 1 };

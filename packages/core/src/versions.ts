@@ -33,18 +33,29 @@ export const AUTO_VERSION_LIMIT = 30;
 
 export const emptyVersionLog = (): VersionLog => ({ version: 1, versions: [] });
 
-/** Read a version log, tolerating a missing or damaged file (an empty log comes back). */
-export function parseVersionLog(text: string | null | undefined): VersionLog {
+/** A version log that exists but can't be read. Writing over it would lose every version, so callers stop. */
+export class VersionLogError extends Error {}
+
+/**
+ * Read a version log. A missing log is empty. A damaged one is empty too, unless `strict`,
+ * when it throws a `VersionLogError` so that nothing writes over the versions it still holds.
+ */
+export function parseVersionLog(text: string | null | undefined, strict = false): VersionLog {
   if (!text) return emptyVersionLog();
+  const damaged = (why: string) => {
+    if (strict) throw new VersionLogError(`The version log is damaged (${why}); fix or move it before saving versions`);
+    return emptyVersionLog();
+  };
   try {
     const raw = JSON.parse(text) as Partial<VersionLog>;
-    if (!Array.isArray(raw.versions)) return emptyVersionLog();
+    if (!raw || !Array.isArray(raw.versions)) return damaged('no "versions" list');
     const versions = raw.versions.filter(
       (v): v is DocumentVersion => !!v && typeof v.id === 'string' && typeof v.document === 'string' && typeof v.createdAt === 'string',
     );
     return { version: 1, versions: versions.map((v) => ({ ...v, name: typeof v.name === 'string' ? v.name : v.id, format: v.format || 'json' })) };
-  } catch {
-    return emptyVersionLog();
+  } catch (err) {
+    if (err instanceof VersionLogError) throw err;
+    return damaged('not valid JSON');
   }
 }
 
@@ -58,7 +69,7 @@ export function addVersion(
 ): { log: VersionLog; version: DocumentVersion } {
   const version: DocumentVersion = {
     id: createId('v'),
-    name: init.name?.trim() || (init.auto ? 'Automatic' : `Version ${log.versions.length + 1}`),
+    name: init.name?.trim() || (init.auto ? 'Automatic' : `Version ${log.versions.filter((v) => !v.auto).length + 1}`),
     createdAt: new Date().toISOString(),
     ...(init.source ? { source: init.source } : {}),
     ...(init.auto ? { auto: true } : {}),

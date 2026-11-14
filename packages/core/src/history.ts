@@ -16,6 +16,8 @@ export interface TimelineEntry<T> {
   change?: ChangeMeta;
   /** Steps from the current state: negative for undo steps, positive for redo steps, 0 for the current state. */
   offset: number;
+  /** The state the history started from (older steps were not dropped to stay under the limit). */
+  start?: boolean;
 }
 
 interface Step<T> {
@@ -29,13 +31,18 @@ export class History<T> {
   private past: Step<T>[] = [];
   /** Newest redo step last. Each holds a later state and the change that led to it. */
   private future: Step<T>[] = [];
+  /** Older steps were dropped to stay under the limit. */
+  private dropped = false;
 
   constructor(private readonly limit = 100) {}
 
   /** Record `previous` as an undo step before moving to a new state, described by `meta`. */
   push(previous: T, meta: ChangeMeta = {}): void {
     this.past.push({ state: previous, meta: { at: new Date().toISOString(), ...meta } });
-    if (this.past.length > this.limit) this.past.shift();
+    if (this.past.length > this.limit) {
+      this.past.shift();
+      this.dropped = true;
+    }
     this.future = [];
   }
 
@@ -67,6 +74,7 @@ export class History<T> {
     const n = this.past.length;
     this.past.forEach((step, i) => out.push({ state: step.state, change: i > 0 ? this.past[i - 1].meta : undefined, offset: i - n }));
     out.push({ state: current, change: n ? this.past[n - 1].meta : undefined, offset: 0 });
+    if (!this.dropped) out[0].start = true;
     [...this.future].reverse().forEach((step, i) => out.push({ state: step.state, change: step.meta, offset: i + 1 }));
     return out;
   }
@@ -74,6 +82,7 @@ export class History<T> {
   clear(): void {
     this.past = [];
     this.future = [];
+    this.dropped = false;
   }
 
   get canUndo(): boolean {

@@ -1,6 +1,6 @@
-import { createId, diffForests, normalizeForest, type ChangeSource, type Forest, type ForestDiff } from '@tree-weaver/core';
+import { AUTO_VERSION_LIMIT, createId, diffForests, normalizeForest, type ChangeSource, type Forest, type ForestDiff } from '@tree-weaver/core';
 import { createRecordStore, MemoryRecordStore, type RecordStore } from '@tree-weaver/storage';
-import { asSource, commit, toast } from './actions';
+import { commit, toast } from './actions';
 import { onChange, state, type ForestVersion } from './editor';
 import { isEmbedded } from './embed-flags';
 
@@ -12,7 +12,7 @@ import { isEmbedded } from './embed-flags';
  */
 
 /** Automatic versions kept per forest; named ones stay until deleted. */
-const AUTO_LIMIT = 20;
+const AUTO_LIMIT = AUTO_VERSION_LIMIT;
 
 let store: RecordStore<ForestVersion> | null = null;
 let loadedFor = '';
@@ -94,7 +94,7 @@ export function restoreVersion(id: string): boolean {
   if (!version || !forest) return false;
   // Keep the open forest's id, so the restored copy replaces it rather than becoming another forest.
   const restored = normalizeForest({ ...JSON.parse(JSON.stringify(version.forest)), id: forest.id, updatedAt: new Date().toISOString() });
-  asSource('restore', () => commit(restored), `Restored “${version.name}”`);
+  commit(restored, true, { source: 'restore', label: `Restored “${version.name}”` });
   toast(`Restored “${version.name}”`, 'success');
   return true;
 }

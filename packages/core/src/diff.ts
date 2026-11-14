@@ -149,18 +149,20 @@ export function diffNodes(before: Branch, after: Branch): NodeChange[] {
     const keep = (cid: string) => a.get(cid)?.parent === id && b.get(cid)?.parent === id;
     for (const cid of reordered(pa.node, pb.node, keep)) moved.add(cid);
   }
-  const walk = (node: TreeNode) => {
+  const walk = (node: TreeNode, insideAdded: boolean) => {
     const pa = a.get(node.id);
-    if (!pa) changes.push({ kind: 'added', id: node.id, label: nodeLabel(node) });
-    else {
+    // New nodes inside a new branch are part of that branch's addition.
+    if (!pa) {
+      if (!insideAdded) changes.push({ kind: 'added', id: node.id, label: nodeLabel(node) });
+    } else {
       if (moved.has(node.id)) changes.push({ kind: 'moved', id: node.id, label: nodeLabel(node) });
       const { fields, displays } = compareNodes(pa.node, node);
       if (fields.length) changes.push({ kind: 'changed', id: node.id, label: nodeLabel(node), fields, ...(displays.length ? { displays } : {}) });
     }
-    // Children of an added branch are part of that addition.
-    if (isBranch(node) && pa) node.children.forEach(walk);
+    // Keep walking an added branch: nodes that existed before may have been moved into it (a wrap).
+    if (isBranch(node)) node.children.forEach((c) => walk(c, !pa));
   };
-  walk(after);
+  walk(after, false);
   // Report only the top of a removed subtree.
   const removedTop = (id: string, p: Placed) => !b.has(id) && (p.parent === null || b.has(p.parent));
   for (const [id, p] of a) if (removedTop(id, p)) changes.push({ kind: 'removed', id, label: nodeLabel(p.node) });
@@ -248,7 +250,9 @@ export function describeDiff(diff: ForestDiff): string {
   for (const t of diff.trees) for (const c of t.changes) counts[c.kind]++;
   const parts = (Object.entries(counts) as [NodeChangeKind, number][]).filter(([, n]) => n).map(([k, n]) => `${k} ${plural(n, 'node')}`);
   if (!parts.length) return `${lines[0]} and ${plural(lines.length - 1, 'more change')}`;
-  const sentence = parts.join(', ');
+  const nodeChanges = counts.added + counts.removed + counts.moved + counts.changed;
+  const others = lines.length - nodeChanges;
+  const sentence = parts.join(', ') + (others > 0 ? `, and ${plural(others, 'other change')}` : '');
   return `${sentence[0].toUpperCase()}${sentence.slice(1)}`;
 }
 

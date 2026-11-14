@@ -2,7 +2,7 @@ import { applyPatch, formatDiff, diffLines, isDisplayId, replaceTree, type Tree 
 import { expandShorthand } from '@tree-weaver/branches';
 import { exportForest, exportTree, FORMATS, importDocument, type FormatId } from '@tree-weaver/formats';
 import type { EditorMessage, HostMessage } from '@tree-weaver/embed';
-import { allKits, asSource, commit, currentTree, importText, openDocument, redo, setDisplay, switchTree, toast, undo } from './actions';
+import { allKits, commit, currentTree, importText, openDocument, redo, setDisplay, switchTree, toast, undo } from './actions';
 import { compareWithCurrent, restoreVersion, saveVersion, versionBefore } from './versions';
 import { onChange, state, type ForestVersion } from './editor';
 import { allowedOrigins, isEmbedded, sourceUrl } from './embed-flags';
@@ -114,7 +114,7 @@ async function handle(msg: HostMessage): Promise<unknown> {
       const open = state.forest;
       const replacing = !!open && (doc.kind === 'forest' ? doc.forest.id === open.id : open.trees.some((t) => t.id === doc.tree.id));
       if (replacing) await versionBefore('host', msg.label ? `Before ${msg.label}` : 'Before a host page update');
-      return asSource('host', () => openDocument(doc), msg.label);
+      return openDocument(doc, { source: 'host', ...(msg.label ? { label: msg.label } : {}) });
     }
     case 'patch': {
       const forest = state.forest;
@@ -127,7 +127,7 @@ async function handle(msg: HostMessage): Promise<unknown> {
       // The forest may have changed while the version saved; patch the newest copy of the tree.
       const current = state.forest!;
       if (current.trees.find((t) => t.id === tree.id) !== tree) throw new Error('The tree changed while the patch was being applied; nothing was changed');
-      asSource('agent', () => commit({ ...replaceTree(current, updated), updatedAt: updated.updatedAt }), msg.label);
+      commit({ ...replaceTree(current, updated), updatedAt: updated.updatedAt }, true, { source: 'agent', ...(msg.label ? { label: msg.label } : {}) });
       return { changes: result.changes, warnings: result.warnings };
     }
     case 'undo':
@@ -150,7 +150,8 @@ async function handle(msg: HostMessage): Promise<unknown> {
     }
     case 'diff': {
       const v = versionRef(msg.version);
-      const diff = compareWithCurrent(v.id)!;
+      const diff = compareWithCurrent(v.id);
+      if (!diff) throw new Error('Nothing is open');
       return { empty: diff.empty, changes: diffLines(diff), text: formatDiff(diff) };
     }
     case 'getDocument': {

@@ -107,6 +107,7 @@ describe('History timeline', () => {
     h.push('b', { source: 'agent', label: 'patch' });
     // a -> b (editor) -> c (agent) is current
     let line = h.timeline('c');
+    expect(line[0].start).toBe(true);
     expect(line.map((e) => [e.state, e.offset, e.change?.source])).toEqual([
       ['a', -2, undefined],
       ['b', -1, 'editor'],
@@ -125,6 +126,35 @@ describe('History timeline', () => {
   });
 });
 
+describe('History limit', () => {
+  it('stops calling the oldest state the start once older ones are dropped', () => {
+    const h = new History<number>(1);
+    h.push(1);
+    h.push(2);
+    expect(h.timeline(3)[0]).toMatchObject({ state: 2 });
+    expect(h.timeline(3)[0].start).toBeUndefined();
+  });
+});
+
+describe('wraps', () => {
+  it('reports nodes moved into a new branch, and their edits', () => {
+    const a = sample();
+    const wrapper = b('w', { tag: 'div', name: 'Wrapper' });
+    const header = { ...(a.root.children[0] as Branch), name: 'Top' };
+    wrapper.children = [header, a.root.children[1]];
+    const after = withRoot(a, { ...a.root, children: [wrapper, a.root.children[2]] });
+    const kinds = diffTrees(a, after).changes.map((c) => `${c.kind}:${c.id}`).sort();
+    expect(kinds).toEqual(['added:w', 'changed:h', 'moved:h', 'moved:m']);
+  });
+
+  it('mentions tree-level changes next to node counts', () => {
+    const t = sample();
+    const before = createForest('Site', [t]);
+    const after = { ...before, name: 'Shop', trees: [withRoot(t, removeNode(removeNode(t.root, 'f'), 'h'))] };
+    expect(describeDiff(diffForests(before, after))).toBe('Removed 2 nodes, and 1 other change');
+  });
+});
+
 describe('version logs', () => {
   it('adds, finds and caps automatic versions', () => {
     let log = emptyVersionLog();
@@ -138,6 +168,8 @@ describe('version logs', () => {
     expect(findVersion(log, log.versions[1].id)).toBe(log.versions[1]);
     expect(parseVersionLog(JSON.stringify(log))).toEqual(log);
     expect(parseVersionLog('not json')).toEqual(emptyVersionLog());
+    expect(() => parseVersionLog('not json', true)).toThrow(/damaged/);
+    expect(() => parseVersionLog('{"versions": 3}', true)).toThrow(/damaged/);
   });
 
   it('puts the log in a .tree-weaver folder next to the document', () => {

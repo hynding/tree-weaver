@@ -114,7 +114,12 @@ export class Tools {
 
   private async versions(path: string): Promise<VersionLog> {
     const logPath = versionLogPath(path);
-    return parseVersionLog((await this.ws.exists(logPath)) ? await this.ws.read(logPath) : null);
+    if (!(await this.ws.exists(logPath))) return parseVersionLog(null);
+    try {
+      return parseVersionLog(await this.ws.read(logPath), true);
+    } catch (err) {
+      throw new ToolError(`${logPath}: ${(err as Error).message}`);
+    }
   }
 
   private async keepVersion(path: string, text: string, format: string, init: { name?: string; source?: ChangeSource; auto?: boolean }) {
@@ -239,7 +244,7 @@ export class Tools {
     if (output) {
       // Editing the file in place: keep what it was, so the change can be reviewed (diff_versions) and rolled back (restore_version).
       let versionNote = '';
-      if (loaded.path && output === loaded.path && args.keepVersion !== false) {
+      if (loaded.path && output === loaded.path && args.keepVersion !== false && serialized !== loaded.text) {
         const v = await this.keepVersion(loaded.path, loaded.text, loaded.format, { name: args.label ? `Before ${args.label}` : 'Before patch', source: 'agent', auto: true });
         versionNote = `\nSaved the previous file as version ${v.id} (restore_version to roll back).`;
       }

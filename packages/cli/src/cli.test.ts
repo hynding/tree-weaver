@@ -432,6 +432,12 @@ describe('tree-weaver lint', () => {
     expect((await cli(['versions', 'p.json', 'fly'], files)).code).toBe(2);
     await cli(['patch', 'p.json', '--no-version', '--ops', '[{"op":"remove","target":"/0"}]'], files);
     expect(JSON.parse((await cli(['versions', 'p.json', '--json'], files)).out).versions).toHaveLength(3);
+    // A damaged log is never written over.
+    files['.tree-weaver/p.json.versions.json'] = '{"versions": [';
+    const damaged = await cli(['patch', 'p.json', '--ops', '[{"op":"remove","target":"/0"}]'], files);
+    expect(damaged.code).toBe(1);
+    expect(damaged.err).toContain('damaged');
+    expect(files['.tree-weaver/p.json.versions.json']).toBe('{"versions": [');
   });
 
   it('diffs two documents', async () => {
