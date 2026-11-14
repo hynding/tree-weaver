@@ -22,6 +22,7 @@ Key facts for writing Tree Weaver data:
 - [CLI guide](https://github.com/hynding/tree-weaver/blob/main/docs/cli.md): `npx tree-weaver` commands, options, paths and exit codes
 - [Shorthand](https://github.com/hynding/tree-weaver/blob/main/docs/shorthand.md): the compact authoring form and how it expands
 - [Patches](https://github.com/hynding/tree-weaver/blob/main/docs/patch.md): edit operations, node references and checks; [patch JSON Schema](https://hynding.github.io/tree-weaver/schema/tree-weaver-patch-v1.schema.json)
+- [MCP server](https://github.com/hynding/tree-weaver/blob/main/docs/mcp.md): `npx -y @tree-weaver/mcp` gives MCP clients tools to create, patch, validate, render and screenshot trees
 - [Embedding and links](https://github.com/hynding/tree-weaver/blob/main/docs/embed.md): `<tree-weaver-editor>`, its postMessage API, and editor links (`?src=`, `#doc=`; `npx tree-weaver link file.json`)
 - [AGENTS.md](https://github.com/hynding/tree-weaver/blob/main/AGENTS.md): working in the repository and integrating the packages
 - [README](https://github.com/hynding/tree-weaver/blob/main/README.md): features, formats and deployment settings

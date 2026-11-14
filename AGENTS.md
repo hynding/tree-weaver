@@ -64,6 +64,14 @@ npx tree-weaver render home.tree.json -o home.html
 `expand` turns shorthand into a full document, `convert` moves between JSON, YAML, XML, HTML, Markdown and SVG, `kit` lists a stylesheet's
 classes and tokens, and `schema` prints the JSON Schema. Every command takes `--json`.
 
+## Using the MCP server
+
+Agents in MCP clients can use `@tree-weaver/mcp` instead of the CLI: `claude mcp add tree-weaver --
+npx -y @tree-weaver/mcp --root .`, or `{ "command": "npx", "args": ["-y", "@tree-weaver/mcp"] }` in a
+client's `mcpServers`. Tools: `create_tree`, `outline`, `patch_tree`, `validate`, `render_html`,
+`convert`, `screenshot` (a PNG per display), `catalog`, `kit_manifest`. The schemas and guides are
+resources (`tree-weaver://guide/shorthand`, …). Full guide: [`docs/mcp.md`](docs/mcp.md).
+
 ## Handing a tree to a person
 
 `npx tree-weaver link page.tree.json` prints an editor link with the document packed into it
@@ -113,6 +121,9 @@ Useful entry points:
 - Package sources use extensionless relative imports; `scripts/esm-extensions.mjs` adds `.js` to the
   built output so it runs in plain Node. `pnpm smoke` packs every package, installs the tarballs in
   an empty project and runs the libraries and the CLI there.
+- The MCP server lives in `packages/mcp` (`createServer` in `src/server.ts`, handlers in `src/tools.ts`,
+  path confinement in `src/workspace.ts`); its tests drive it through the SDK's in-memory client.
+  Keep `docs/mcp.md` in step with it.
 - The embed bridge is `apps/web/src/store/embed.ts` (links and `postMessage`, on only with `?embed=1`);
   `packages/embed` is the `<tree-weaver-editor>` element (one file, no imports, copied to `embed.js` on the
   site). `pnpm e2e:embed` checks both in Chromium after `pnpm build`. Keep `docs/embed.md` in step.
