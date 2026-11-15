@@ -19,7 +19,8 @@
     "release:version": "node scripts/set-version.mjs",
     "e2e:embed": "node scripts/e2e-embed.mjs",
     "e2e:collab": "node scripts/e2e-collab.mjs",
-    "native:samples": "node scripts/native-samples.mjs"
+    "native:samples": "node scripts/native-samples.mjs",
+    "e2e:variants": "node scripts/e2e-variants.mjs"
   },
   "devDependencies": {
     "ajv": "^8.20.0",

@@ -115,10 +115,28 @@ in the editor (when a component is open) turn a component into code with its pro
   attributes and classes that mix text and props.
 - **Vue:** `defineProps` with defaults, `:href="link"` bindings and `v-if`.
 - **Svelte:** `export let` props and `{#if}` blocks.
-- **Variants** (CSS styling) become a `variant` prop. It adds a modifier class to the root
-  (`card card--compact`), and the stylesheet holds each variant's rules per display
-  (`.card.card--compact { … }`, `.card--compact .card__title { … }`). The prop picks one variant
-  for every display; switching variants at a breakpoint stays an editor feature.
+- **Variants** (CSS styling) become a `variant` prop that works per display, as in the editor.
+  Pass one variant for every display, or a pick per display that inherits like styles do (`-`
+  is the base look):
+
+  ```jsx
+  <Card variant="compact" />
+  <Card variant={{ lg: 'row', 'mobile-portrait': 'stacked' }} />
+  ```
+
+  ```vue
+  <Card :variant="{ tablet: 'stacked', 'mobile-portrait': '-' }" />
+  ```
+
+  The component turns the prop into one modifier class per display on its root
+  (`card--lg-row card--xl-row card--tablet-row card--mobile-landscape-row
+  card--mobile-portrait-stacked`). The stylesheet holds, under each display's media query, what
+  changes when that display shows a different variant from the display it inherits from, so
+  switching at a breakpoint also undoes what the wider variant set. With `--typescript`, React
+  exports type the prop (`CardVariant`, `CardDisplay`). Variant names become class-safe slugs; a
+  variant named `base` is exported as `base-2`, because `base` is the modifier for no variant.
+  `pnpm e2e:variants` renders exported components next to the editor at every display size and
+  checks that they look the same.
 - **Tailwind** styling keeps the props; variants are left out.
 - **HTML, SwiftUI and Flutter** have no props: they export the component as it looks with its
   defaults.

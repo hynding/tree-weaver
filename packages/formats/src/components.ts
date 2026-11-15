@@ -32,6 +32,10 @@ import {
   isPropName,
   type ComponentDef,
   type ComponentProp,
+  type ComponentVariant,
+  type DisplayStyles,
+  resolveStyles,
+  walk,
 } from '@tree-weaver/core';
 import { slugify } from './slug';
 import { DESIGN_TOKENS_DART, DESIGN_TOKENS_SWIFT, dartFileName, exportFlutter, exportFlutterTokens, exportSwiftUI, exportSwiftUITokens, nativeTypeName } from './native';
@@ -252,8 +256,8 @@ type El =
       svg: boolean;
       /** Component exports: render only when this prop is set (`negate`: when it isn't). */
       cond?: { prop: string; negate: boolean };
-      /** Component exports: the root's class, which gets a `--<variant>` modifier from the `variant` prop. */
-      variantClass?: string;
+      /** Component exports: the root's class list gets the variant modifier classes from the `variant` prop. */
+      variantClass?: boolean;
     }
   | { kind: 'text'; value: string };
 
@@ -341,7 +345,9 @@ const propExpr = (value: string): string => {
   const segs = segments(value);
   return segs.length === 2 && !segs[0].lit && !segs[1].lit ? segs[0].prop! : templateLiteral(value);
 };
-const variantSuffix = (cls: string) => `\${variant ? \` ${cls}--\${variant}\` : ''}`;
+/** The `variant` prop's modifier classes, added to the root's class list. */
+const VARIANT_CALL = 'variantClasses(variant)';
+const variantSuffix = `\${${VARIANT_CALL}}`;
 
 /* ------------------------------------------------------------- writers */
 
@@ -427,12 +433,12 @@ function writePropsEl(el: El & { kind: 'el' }, depth: number, mode: 'vue' | 'sve
     .map(([n, v]) => {
       const variant = n === 'class' && el.variantClass;
       if (!hasProps(v) && !variant) return v === '' && !el.svg ? ` ${n}` : ` ${n}="${esc(v)}"`;
-      if (mode === 'vue') return ` :${n}="${escapeAttr(variant ? templateLiteral(v, variantSuffix(el.variantClass!)) : propExpr(v))}"`;
+      if (mode === 'vue') return ` :${n}="${escapeAttr(variant ? templateLiteral(v, variantSuffix) : propExpr(v))}"`;
       // Svelte: attribute values can hold {expressions} between literal text.
       const body = segments(v)
         .map((s) => esc(s.lit) + (s.prop ? `{${s.prop}}` : ''))
         .join('');
-      return ` ${n}="${body}${variant ? `{variant ? ' ${el.variantClass}--' + variant : ''}` : ''}"`;
+      return ` ${n}="${body}${variant ? `{${VARIANT_CALL}}` : ''}"`;
     })
     .join('');
   const cond = mode === 'vue' && el.cond ? ` v-if="${el.cond.negate ? '!' : ''}${el.cond.prop}"` : '';
@@ -461,7 +467,7 @@ function writeJsx(el: El, depth: number, props = false): string {
   const attrs = el.attrs
     .map(([n, v]) => {
       const name = jsxAttrName(n);
-      if (props && n === 'class' && el.variantClass) return ` ${name}={${templateLiteral(v, variantSuffix(el.variantClass))}}`;
+      if (props && n === 'class' && el.variantClass) return ` ${name}={${templateLiteral(v, variantSuffix)}}`;
       if (props && hasProps(v)) return ` ${name}={${propExpr(v)}}`;
       if (v === '' && !el.svg && n !== 'alt' && n !== 'class') return ` ${name}`;
       return /["\\{}<>\n]/.test(v) ? ` ${name}={${jsxString(v)}}` : ` ${name}="${v.replace(/&/g, '&amp;')}"`;
@@ -579,14 +585,110 @@ export function exportComponent(tree: Tree, opts: ComponentOptions): ComponentEx
 
 /* ------------------------------------------------- reusable components */
 
+const VARIANT_DOC = "a variant for every display (\"compact\"), or one per display ({ lg: \"row\", \"mobile-portrait\": \"stacked\" }; \"-\" is the base look), inheriting like styles do";
+
+/** Class-safe names for variants, unique, never `base` (the modifier for no variant). */
+function variantSlugs(variants: ComponentVariant[]): Map<ComponentVariant, string> {
+  const used = new Set(['base']);
+  const out = new Map<ComponentVariant, string>();
+  for (const v of variants) {
+    const slug = slugify(v.name, 'variant');
+    let name = slug;
+    for (let i = 2; used.has(name); i++) name = `${slug}-${i}`;
+    used.add(name);
+    out.set(v, name);
+  }
+  return out;
+}
+
+/** The display a display's styles cascade from directly, or `undefined` for the base. */
+const parentDisplay = (d: DisplayDef) => d.inherits[d.inherits.length - 1];
+
+/**
+ * The runtime part of breakpoint-aware variants: `variantClasses(variant)` turns the `variant`
+ * prop (one variant, or a pick per display that inherits like styles) into one modifier class
+ * per display, `root--<display>-<variant>` (`-base` for none), which the variant rules match.
+ */
+function variantHelper(rootCls: string, tsName?: string): string {
+  const table = DISPLAYS.map((d) => `[${JSON.stringify(d.id)}, ${JSON.stringify(parentDisplay(d) ?? '')}]`).join(', ');
+  const ts = !!tsName;
+  return [
+    `// Each display and the display it inherits from, widest first.`,
+    `const VARIANT_DISPLAYS${ts ? ': [string, string][]' : ''} = [${table}];`,
+    ``,
+    `/** One modifier class per display for the variant it shows: its own pick, else the one it inherits. */`,
+    `function variantClasses(variant${ts ? `: ${tsName}Props['variant']` : ''})${ts ? ': string' : ''} {`,
+    `  if (!variant) return '';`,
+    `  const picks${ts ? ': Partial<Record<string, string>>' : ''} = typeof variant === 'string' ? { lg: variant } : variant;`,
+    `  const at${ts ? ': Record<string, string>' : ''} = {};`,
+    `  return VARIANT_DISPLAYS.map(([display, parent]) => {`,
+    `    const pick = picks[display];`,
+    `    at[display] = pick == null ? (parent ? at[parent] : '') : pick === '-' ? '' : pick;`,
+    `    return \` ${rootCls}--\${display}-\${at[display] || 'base'}\`;`,
+    `  }).join('');`,
+    `}`,
+  ].join('\n');
+}
+
+/**
+ * CSS for breakpoint-aware variants. For each display and each pair of (variant the display
+ * inherits, variant it shows), a rule under the display's media query holds what changes
+ * between the two, so a narrower display can switch variants and undo what the wider one set,
+ * exactly as `variantStyles` does in the editor. Only properties some variant sets are written;
+ * the rest comes from the template's own rules.
+ */
+function variantRules(def: ComponentDef, variants: ComponentVariant[], slugs: Map<ComponentVariant, string>, rootCls: string, classes: Map<string, string>): DisplayRule[] {
+  if (!variants.length) return [];
+  const base = new Map<string, DisplayStyles>();
+  walk(def.root, (n) => {
+    if (isBranch(n)) base.set(n.id, n.styles);
+  });
+  const ids = [...new Set(variants.flatMap((v) => Object.keys(v.styles)))].filter((id) => classes.has(id) && base.has(id));
+  const options: (ComponentVariant | undefined)[] = [undefined, ...variants];
+  const mod = (d: string, v: ComponentVariant | undefined) => `${rootCls}--${d}-${v ? slugs.get(v) : 'base'}`;
+  const rules: DisplayRule[] = [];
+  for (const id of ids) {
+    const keys = new Set(variants.flatMap((v) => Object.values(v.styles[id] ?? {}).flatMap((m) => Object.keys(m ?? {}))));
+    const full = (d: DisplayDef['id'], v: ComponentVariant | undefined): StyleMap => {
+      const over = v?.styles[id];
+      const all: StyleMap = { ...resolveStyles(base.get(id)!, d), ...(over ? resolveStyles(over, d) : {}) };
+      return Object.fromEntries(Object.entries(all).filter(([k]) => keys.has(k)));
+    };
+    const target = (mods: string) => (id === def.root.id ? `.${rootCls}${mods}` : `.${rootCls}${mods} .${classes.get(id)}`);
+    for (const d of DISPLAYS) {
+      const parent = parentDisplay(d);
+      for (const shown of options) {
+        if (!parent) {
+          // The base display only needs what differs from the template's own rules.
+          const plain = full(d.id, undefined);
+          const own = Object.fromEntries(Object.entries(full(d.id, shown)).filter(([k, v]) => plain[k] !== v));
+          if (shown && Object.keys(own).length) rules.push({ selector: target(`.${mod(d.id, shown)}`), styles: { [d.id]: own } });
+          continue;
+        }
+        for (const inherited of options) {
+          const from = full(parent, inherited);
+          const to = full(d.id, shown);
+          const own: StyleMap = {};
+          for (const [k, v] of Object.entries(to)) if (from[k] !== v) own[k] = v;
+          for (const k of Object.keys(from)) if (!(k in to)) own[k] = 'unset';
+          if (Object.keys(own).length) rules.push({ selector: target(`.${mod(parent, inherited)}.${mod(d.id, shown)}`), styles: { [d.id]: own } });
+        }
+      }
+    }
+  }
+  return rules;
+}
+
+
 /** A prop's default as a JS literal. */
 const jsDefault = (p: ComponentProp): string => (p.type === 'boolean' ? String(!!p.default && p.default !== 'false') : JSON.stringify(p.default));
 
 /**
  * Export a reusable component (see `components.ts` in core) as a React, Vue or Svelte component
  * with its props: `{{title}}` placeholders become expressions, `data-show-if` branches render
- * conditionally, and each variant becomes a `variant` prop value that adds a `--variant`
- * modifier class to the root, with the variant's styles per display in the CSS. Tailwind
+ * conditionally, and variants become a `variant` prop: one variant, or a pick per display that
+ * inherits like styles, turned into one modifier class per display on the root (see
+ * `variantHelper` and `variantRules`), so exports switch variants at breakpoints as the editor does. Tailwind
  * exports keep props but not variants (they would need one class list per variant). HTML and
  * native exports write the component as it looks with its default props.
  */
@@ -613,45 +715,51 @@ export function exportComponentDef(def: ComponentDef, opts: ComponentOptions): C
     classes: new Map(),
   };
   const root = branchEl(def.root, build, false);
-  const rootCls = build.classes!.get(def.root.id);
-  if (root.kind === 'el' && variants.length && rootCls) root.variantClass = rootCls;
-  // Variant rules: `.root.root--compact` for the root, `.root--compact .card__title` inside.
-  for (const v of variants) {
-    const mod = `${rootCls}--${slugify(v.name, 'variant')}`;
-    for (const [id, styles] of Object.entries(v.styles)) {
-      const cls = build.classes!.get(id);
-      if (!cls) continue;
-      build.rules.push({ selector: id === def.root.id ? `.${rootCls}.${mod}` : `.${mod} .${cls}`, styles });
-    }
-  }
-  const allProps = variants.length ? [...props, { name: 'variant', type: 'enum' as const, default: '', options: variants.map((v) => slugify(v.name, 'variant')) }] : props;
+  const rootCls = build.classes!.get(def.root.id)!;
+  const slugs = variantSlugs(variants);
+  if (root.kind === 'el' && variants.length && rootCls) root.variantClass = true;
+  build.rules.push(...variantRules(def, variants, slugs, rootCls, build.classes!));
+  const options = variants.map((v) => slugs.get(v)!);
+  const allProps = variants.length ? [...props, { name: 'variant', type: 'enum' as const, default: '', options }] : props;
+  const helper = variants.length ? variantHelper(rootCls, opts.typescript && framework === 'react' ? name : undefined) : '';
 
   const css = styling === 'css' ? renderDisplayCss(build.rules) : '';
   const kitCss = kitsCss(opts.kits ?? []);
   const files: ComponentFile[] = [];
-  const header = `Generated by Tree Weaver from the component "${def.name.replace(/\*\/|-->/g, '')}".${variants.length ? ` Variants: ${variants.map((v) => slugify(v.name, 'variant')).join(', ')}.` : ''}`;
+  const header = `Generated by Tree Weaver from the component "${def.name.replace(/\*\/|-->/g, '')}".${variants.length ? ` Variants: ${options.join(', ')}.` : ''}`;
   const cssFile = `${name}.css`;
-  const docs = allProps.map((p) => `${p.name}${p.description ? `: ${p.description}` : ''}`);
+  const docs = allProps.map((p) => `${p.name}${p.name === 'variant' && !p.description ? `: ${VARIANT_DOC}` : p.description ? `: ${p.description}` : ''}`);
   let entry: string;
   switch (framework) {
     case 'react': {
       const ext = opts.typescript ? 'tsx' : 'jsx';
       entry = `${name}.${ext}`;
       const imports = [kitCss ? `import './kits.css';` : '', css ? `import './${cssFile}';` : ''].filter(Boolean).join('\n');
-      const tsType = (p: ComponentProp) => (p.type === 'boolean' ? 'boolean' : p.type === 'enum' && p.options?.length ? p.options.map((o) => JSON.stringify(o)).join(' | ') + " | ''" : 'string');
-      const iface = opts.typescript ? `\nexport interface ${name}Props {\n${allProps.map((p) => `  ${p.name}?: ${tsType(p)};`).join('\n')}\n}\n` : '';
+      const tsType = (p: ComponentProp) =>
+        p.name === 'variant' && variants.length
+          ? `${name}Variant | '' | Partial<Record<${name}Display, ${name}Variant | '-'>>`
+          : p.type === 'boolean'
+            ? 'boolean'
+            : p.type === 'enum' && p.options?.length
+              ? p.options.map((o) => JSON.stringify(o)).join(' | ') + " | ''"
+              : 'string';
+      const types =
+        opts.typescript && variants.length
+          ? `\nexport type ${name}Variant = ${options.map((o) => JSON.stringify(o)).join(' | ')};\nexport type ${name}Display = ${DISPLAYS.map((d) => JSON.stringify(d.id)).join(' | ')};\n`
+          : '';
+      const iface = opts.typescript ? `${types}\nexport interface ${name}Props {\n${allProps.map((p) => `  ${p.name}?: ${tsType(p)};`).join('\n')}\n}\n` : '';
       const params = allProps.length ? `{ ${allProps.map((p) => `${p.name} = ${jsDefault(p)}`).join(', ')} }${opts.typescript ? `: ${name}Props` : ''}` : '';
       files.push({
         path: entry,
-        contents: `// ${header}\n${imports ? `${imports}\n` : ''}${iface}\nexport default function ${name}(${params}) {\n  return (\n    ${writeJsx(root, 2, true)}\n  );\n}\n`,
+        contents: `// ${header}\n${imports ? `${imports}\n` : ''}${iface}${helper ? `\n${helper}\n` : ''}\nexport default function ${name}(${params}) {\n  return (\n    ${writeJsx(root, 2, true)}\n  );\n}\n`,
       });
       break;
     }
     case 'vue': {
       entry = `${name}.vue`;
-      const vueType = (p: ComponentProp) => (p.type === 'boolean' ? 'Boolean' : 'String');
+      const vueType = (p: ComponentProp) => (p.name === 'variant' && variants.length ? '[String, Object]' : p.type === 'boolean' ? 'Boolean' : 'String');
       const script = allProps.length
-        ? `<script setup>\ndefineProps({\n${allProps.map((p) => `  ${p.name}: { type: ${vueType(p)}, default: ${jsDefault(p)} },`).join('\n')}\n});\n</script>\n\n`
+        ? `<script setup>\ndefineProps({\n${allProps.map((p) => `  ${p.name}: { type: ${vueType(p)}, default: ${jsDefault(p)} },`).join('\n')}\n});\n${helper ? `\n${helper}\n` : ''}</script>\n\n`
         : '';
       const style = [kitCss ? `<style src="./kits.css"></style>` : '', css ? `<style>\n${css}\n</style>` : ''].filter(Boolean).join('\n');
       files.push({ path: entry, contents: `<!-- ${header} -->\n${script}<template>\n  ${writeHtml(root, 1, 'vue', true)}\n</template>\n${style ? `\n${style}\n` : ''}` });
@@ -659,7 +767,7 @@ export function exportComponentDef(def: ComponentDef, opts: ComponentOptions): C
     }
     case 'svelte': {
       entry = `${name}.svelte`;
-      const lines = [kitCss ? `  import './kits.css';` : '', ...allProps.map((p) => `  export let ${p.name} = ${jsDefault(p)};`)].filter(Boolean);
+      const lines = [kitCss ? `  import './kits.css';` : '', ...allProps.map((p) => `  export let ${p.name} = ${jsDefault(p)};`), helper ? `\n${helper.replace(/^(?=.)/gm, '  ')}` : ''].filter(Boolean);
       const script = lines.length ? `<script>\n${lines.join('\n')}\n</script>\n\n` : '';
       const style = css ? `\n<style>\n  /* Global: the classes are generated, so scoping only gets in the way of overrides. */\n${css.replace(/^(\s*)(\.[^{}\n]*?)\s*\{/gm, '$1:global($2) {')}\n</style>\n` : '';
       files.push({ path: entry, contents: `<!-- ${header} -->\n${script}${writeHtml(root, 0, 'svelte', true)}\n${style}` });
