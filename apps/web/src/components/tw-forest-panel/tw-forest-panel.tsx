@@ -1,7 +1,7 @@
 import { Component, State, h } from '@stencil/core';
 import { TEMPLATES } from '@tree-weaver/branches';
 import { countNodes } from '@tree-weaver/core';
-import { addTree, deleteForest, deleteTree, duplicateTree, moveTree, newForest, openForest, renameTree, switchTree } from '../../store/actions';
+import { addTree, deleteForest, deleteTree, duplicateTree, moveTree, openForest, renameTree, switchTree } from '../../store/actions';
 import { state } from '../../store/editor';
 import { deleteForestVersions } from '../../store/versions';
 import { Icon } from '../../utils/icons';
@@ -76,7 +76,7 @@ export class TwForestPanel {
       <section class="panel-section">
         <h3 class="panel-title">
           Forests in this browser
-          <button class="btn small" onClick={() => newForest()}>
+          <button class="btn small" onClick={() => (state.dialog = 'templates')}>
             <Icon name="plus" /> New forest
           </button>
         </h3>

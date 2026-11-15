@@ -64,7 +64,7 @@ import {
   type TreeDocument,
 } from '@tree-weaver/formats';
 import { createStarterKit, kitFromFile, kitManifest } from '@tree-weaver/kits';
-import { BLUEPRINTS, expandShorthand, expandShorthandDocument, getTemplate, TEMPLATES } from '@tree-weaver/branches';
+import { BLUEPRINTS, expandShorthand, expandShorthandDocument, getStarter, getTemplate, STARTERS, TEMPLATES } from '@tree-weaver/branches';
 import type { Workspace } from './workspace';
 
 /** What a tool hands back: text for the model, optional structured data and images. */
@@ -156,6 +156,7 @@ export class Tools {
   async createTree(args: {
     path?: string;
     template?: string;
+    starter?: string;
     shorthand?: unknown;
     name?: string;
     forest?: boolean;
@@ -163,7 +164,7 @@ export class Tools {
     format?: FormatId;
     overwrite?: boolean;
   }): Promise<ToolOutput> {
-    if (args.template && args.shorthand !== undefined) throw new ToolError('Give either "template" or "shorthand", not both');
+    if ([args.template, args.starter, args.shorthand].filter((x) => x !== undefined).length > 1) throw new ToolError('Give one of "template", "starter" or "shorthand"');
     if (args.path && !args.overwrite && (await this.ws.exists(args.path))) {
       throw new ToolError(`${args.path} already exists. Edit it with patch_tree, or pass "overwrite": true to replace it`);
     }
@@ -172,7 +173,12 @@ export class Tools {
     let doc: TreeDocument;
     let warnings: ValidationResult['warnings'] = [];
 
-    if (args.shorthand !== undefined) {
+    if (args.starter !== undefined) {
+      const starter = getStarter(args.starter);
+      if (!starter) throw new ToolError(`No starter "${args.starter}". Starters: ${STARTERS.map((t) => t.id).join(', ')}`);
+      // A starter brings its own token kit; the Weaver Basic kit would only compete with it.
+      doc = { kind: 'forest', forest: starter.create(args.name) };
+    } else if (args.shorthand !== undefined) {
       const raw = typeof args.shorthand === 'string' ? parseShorthandText(args.shorthand) : args.shorthand;
       let data: Record<string, unknown>;
       try {
@@ -408,7 +414,7 @@ export class Tools {
     }
   }
 
-  catalog(args: { kind: 'blueprints' | 'templates' | 'displays' | 'formats' }): ToolOutput {
+  catalog(args: { kind: 'blueprints' | 'templates' | 'starters' | 'displays' | 'formats' }): ToolOutput {
     switch (args.kind) {
       case 'blueprints': {
         const list = BLUEPRINTS.map(({ id, label, category, description }) => ({ id, label, category, description }));
@@ -420,6 +426,13 @@ export class Tools {
       case 'templates': {
         const list = TEMPLATES.map(({ id, label, description }) => ({ id, label, description }));
         return { text: `Templates (create_tree "template"):\n${list.map((t) => `- ${t.id}: ${t.description}`).join('\n')}`, data: { templates: list } };
+      }
+      case 'starters': {
+        const list = STARTERS.map(({ id, label, description, trees, components }) => ({ id, label, description, trees, components }));
+        return {
+          text: `Starter forests (create_tree "starter"), each with design tokens and components:\n${list.map((t) => `- ${t.id}: ${t.description}. Trees: ${t.trees.join(', ')}. Components: ${t.components.join(', ')}`).join('\n')}`,
+          data: { starters: list },
+        };
       }
       case 'displays': {
         const list = DISPLAYS.map((d) => ({ id: d.id, label: d.label, width: d.width, height: d.height, media: d.media, inherits: d.inherits }));

@@ -83,6 +83,11 @@ export namespace Components {
     interface TwStorybookImport {
     }
     /**
+     * The template gallery: start a new forest blank or from a starter forest.
+     */
+    interface TwTemplateGallery {
+    }
+    /**
      * Design tokens: the colours, spacing and type sizes the forest's kits define as `:root`
      * custom properties. Edits go into the forest's token kit, so every `var(--name)` on the
      * canvas and in every export follows, and the kit's own CSS stays as imported.
@@ -234,6 +239,15 @@ declare global {
         new (): HTMLTwStorybookImportElement;
     };
     /**
+     * The template gallery: start a new forest blank or from a starter forest.
+     */
+    interface HTMLTwTemplateGalleryElement extends Components.TwTemplateGallery, HTMLStencilElement {
+    }
+    var HTMLTwTemplateGalleryElement: {
+        prototype: HTMLTwTemplateGalleryElement;
+        new (): HTMLTwTemplateGalleryElement;
+    };
+    /**
      * Design tokens: the colours, spacing and type sizes the forest's kits define as `:root`
      * custom properties. Edits go into the forest's token kit, so every `var(--name)` on the
      * canvas and in every export follows, and the kit's own CSS stays as imported.
@@ -278,6 +292,7 @@ declare global {
         "tw-share-dialog": HTMLTwShareDialogElement;
         "tw-sidebar": HTMLTwSidebarElement;
         "tw-storybook-import": HTMLTwStorybookImportElement;
+        "tw-template-gallery": HTMLTwTemplateGalleryElement;
         "tw-tokens-panel": HTMLTwTokensPanelElement;
         "tw-toolbar": HTMLTwToolbarElement;
     }
@@ -360,6 +375,11 @@ declare namespace LocalJSX {
     interface TwStorybookImport {
     }
     /**
+     * The template gallery: start a new forest blank or from a starter forest.
+     */
+    interface TwTemplateGallery {
+    }
+    /**
      * Design tokens: the colours, spacing and type sizes the forest's kits define as `:root`
      * custom properties. Edits go into the forest's token kit, so every `var(--name)` on the
      * canvas and in every export follows, and the kit's own CSS stays as imported.
@@ -391,6 +411,7 @@ declare namespace LocalJSX {
         "tw-share-dialog": TwShareDialog;
         "tw-sidebar": TwSidebar;
         "tw-storybook-import": TwStorybookImport;
+        "tw-template-gallery": TwTemplateGallery;
         "tw-tokens-panel": TwTokensPanel;
         "tw-toolbar": TwToolbar;
     }
@@ -455,6 +476,10 @@ declare module "@stencil/core" {
              * as new trees, or both, with the Storybook's styles as design kits.
              */
             "tw-storybook-import": LocalJSX.IntrinsicElements["tw-storybook-import"] & JSXBase.HTMLAttributes<HTMLTwStorybookImportElement>;
+            /**
+             * The template gallery: start a new forest blank or from a starter forest.
+             */
+            "tw-template-gallery": LocalJSX.IntrinsicElements["tw-template-gallery"] & JSXBase.HTMLAttributes<HTMLTwTemplateGalleryElement>;
             /**
              * Design tokens: the colours, spacing and type sizes the forest's kits define as `:root`
              * custom properties. Edits go into the forest's token kit, so every `var(--name)` on the

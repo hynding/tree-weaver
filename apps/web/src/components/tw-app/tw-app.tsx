@@ -45,7 +45,7 @@ export class TwApp {
     return (
       <Host class={{ 'left-open': this.leftOpen, 'right-open': this.rightOpen }}>
         {state.ready && state.forest ? (
-          [<tw-toolbar />, <tw-sidebar />, <tw-canvas />, <tw-inspector />, state.dialog === 'displays' ? <tw-display-settings /> : state.dialog === 'storybook' ? <tw-storybook-import /> : state.dialog === 'share' ? <tw-share-dialog /> : state.dialog ? <tw-io-dialog mode={state.dialog} /> : null, state.preview ? <tw-preview /> : null]
+          [<tw-toolbar />, <tw-sidebar />, <tw-canvas />, <tw-inspector />, state.dialog === 'displays' ? <tw-display-settings /> : state.dialog === 'storybook' ? <tw-storybook-import /> : state.dialog === 'share' ? <tw-share-dialog /> : state.dialog === 'templates' ? <tw-template-gallery /> : state.dialog ? <tw-io-dialog mode={state.dialog} /> : null, state.preview ? <tw-preview /> : null]
         ) : (
           <div class="app-loading">Gathering your forests…</div>
         )}

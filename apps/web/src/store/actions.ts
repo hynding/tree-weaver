@@ -1,4 +1,4 @@
-import { getBlueprint, getTemplate } from '@tree-weaver/branches';
+import { getBlueprint, getStarter, getTemplate } from '@tree-weaver/branches';
 import {
   addTableColumn,
   applyDisplaySettings,
@@ -740,6 +740,18 @@ export async function newForest(name?: string): Promise<void> {
   openLoaded(forest, '');
   await saveNow();
   toast(`Planted “${forest.name}”`, 'success');
+}
+
+/** A new forest from the template gallery, with the starter's tokens, components and trees. */
+export async function newForestFromStarter(id: string, name?: string): Promise<void> {
+  const starter = getStarter(id);
+  if (!starter) return toast(`No template "${id}"`, 'error');
+  await saveNow();
+  const forest = starter.create(name || uniqueName(starter.label, state.forests.map((f) => f.name)));
+  state.dialog = null;
+  openLoaded(forest, '');
+  await saveNow();
+  toast(`Planted “${forest.name}” from the ${starter.label.toLowerCase()} template`, 'success');
 }
 
 export async function openForest(id: string): Promise<void> {

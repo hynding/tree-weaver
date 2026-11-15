@@ -4,7 +4,7 @@ import type { LibraryBranch } from '@tree-weaver/formats';
 
 export type SidebarTab = 'branches' | 'outline' | 'classes' | 'tokens' | 'kits' | 'forest' | 'history';
 export type SaveState = 'saved' | 'saving' | 'unsaved' | 'error';
-export type DialogKind = null | 'export' | 'import' | 'displays' | 'storybook' | 'share';
+export type DialogKind = null | 'export' | 'import' | 'displays' | 'storybook' | 'share' | 'templates';
 
 /** Someone else in a shared forest. */
 export interface CollabPeer {

@@ -64,6 +64,21 @@ describe('tree-weaver CLI', () => {
     expect(stdout.out).toContain('<svg');
   });
 
+  it('creates a starter forest from the template gallery', async () => {
+    const r = await cli(['new', 'site.forest.json', '--starter', 'landing', '-n', 'Fernwood']);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain('2 trees, 3 components');
+    const doc = JSON.parse(r.files['site.forest.json']);
+    expect(doc.forest.name).toBe('Fernwood');
+    expect(doc.forest.components).toHaveLength(3);
+    expect((await cli(['validate', 'site.forest.json'], r.files)).code).toBe(0);
+    expect((await cli(['lint', 'site.forest.json'], r.files)).code).toBe(0);
+    expect((await cli(['new', 'x.html', '--starter', 'form'])).code).toBe(2);
+    expect((await cli(['new', '--starter', 'nope'])).err).toContain('Starters: dashboard, landing, form');
+    const list = JSON.parse((await cli(['new', '--list', '--json'])).out);
+    expect(list.filter((t: { kind: string }) => t.kind === 'forest').map((t: { id: string }) => t.id)).toEqual(['dashboard', 'landing', 'form']);
+  });
+
   it('validates every example and reports issues with paths and hints', async () => {
     const files = { 'a.json': example('landing-page.tree.json'), 'b.json': example('site.forest.json') };
     const ok = await cli(['validate', 'a.json', 'b.json', '--json'], files);

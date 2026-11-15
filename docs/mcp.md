@@ -48,7 +48,7 @@ or set `TW_CHROMIUM_PATH` to a Chrome or Chromium binary. Every other tool works
 
 | Tool | What it does |
 | --- | --- |
-| `create_tree` | Start a tree from a template (`landing`, `dashboard`, `article`, `drawing`, `blank`) or from [shorthand](shorthand.md), with the Weaver Basic starter kit. Writes `path` (never overwrites unless `overwrite: true`) or returns the document. The result includes the outline. |
+| `create_tree` | Start a tree from a template (`landing`, `dashboard`, `article`, `drawing`, `blank`) or from [shorthand](shorthand.md), with the Weaver Basic starter kit, or a whole [starter forest](templates.md) (`starter`: `dashboard`, `landing`, `form`) with its own tokens and components. Writes `path` (never overwrites unless `overwrite: true`) or returns the document. The result includes the outline. |
 | `outline` | Every branch and leaf with its path (`/1/0`) and id (`#b_…`). |
 | `patch_tree` | Apply [patch operations](patch.md) in order, all or nothing: `insert`, `replace`, `remove`, `move`, `duplicate`, `wrap`, `update`, `setStyles`, `setText`. Nodes may be shorthand. Writes the file back, or returns the result for an inline `document`. `dryRun` describes the changes without writing. |
 | `list_versions`, `save_version` | Saved versions of a workspace file, kept in `.tree-weaver/<file>.versions.json` next to it. `patch_tree` saves one before every in-place edit (named after its `label`; `keepVersion: false` skips it). |
@@ -61,7 +61,7 @@ or set `TW_CHROMIUM_PATH` to a Chrome or Chromium binary. Every other tool works
 | `convert` | Between JSON, YAML, XML, HTML, Markdown and SVG. |
 | `check_layout` | Layout and accessibility problems per display, each with a path and a fix: sideways overflow, contrast (with kits), alt text, heading order, labels, duplicate ids, empty branches, fixed widths. Renders in Chromium when Playwright is installed; `render: false` checks the tree alone. See [layout checks](checks.md). |
 | `screenshot` | A PNG per display (default `lg`, `tablet`, `mobile-portrait`) from headless Chromium, with page height and a warning when content overflows sideways. Scripts are disabled while rendering. |
-| `catalog` | Blueprints, templates, displays or formats. |
+| `catalog` | Blueprints, templates, starters, displays or formats. |
 | `kit_manifest` | Classes, tokens and media queries of `.css` files or a document's kits. |
 | `list_tokens` | The document's design tokens with kinds, resolved values and which are edited. |
 | `set_tokens` | Set, add or reset design tokens in the document's token kit; saves a version first. See [design tokens](tokens.md). |
@@ -84,7 +84,7 @@ to fix, and a failed patch changes nothing.
 | `tree-weaver://guide/patch` | [Patch guide](patch.md) |
 | `tree-weaver://guide/checks` | [Layout checks](checks.md) |
 | `tree-weaver://guide/export` | [Component export guide](export.md) |
-| `tree-weaver://catalog/blueprints`, `…/templates` | The building blocks, as JSON |
+| `tree-weaver://catalog/blueprints`, `…/templates`, `…/starters` | The building blocks, as JSON |
 
 The `build_layout` prompt takes a brief and walks the model through create, refine, validate and
 screenshot.
