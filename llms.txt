@@ -26,6 +26,7 @@ Key facts for writing Tree Weaver data:
 - [MCP server](https://github.com/hynding/tree-weaver/blob/main/docs/mcp.md): `npx -y @tree-weaver/mcp` gives MCP clients tools to create, patch, validate, render and screenshot trees
 - [Layout checks](https://github.com/hynding/tree-weaver/blob/main/docs/checks.md): `tree-weaver lint`, the `check_layout` MCP tool, `checkTree` / `checkRendered`, and every rule
 - [Design tokens](https://github.com/hynding/tree-weaver/blob/main/docs/tokens.md): `:root` custom properties as tokens, `tree-weaver tokens`, MCP `list_tokens` / `set_tokens`, and how exports carry them
+- [Template gallery](https://github.com/hynding/tree-weaver/blob/main/docs/templates.md): starter forests (dashboard, landing, form) with design tokens and components, `tree-weaver new --starter`, MCP `create_tree` `starter`
 - [Reusable components](https://github.com/hynding/tree-weaver/blob/main/docs/components.md): components with `{{prop}}` placeholders and per-display variants, linked instances, `tree-weaver components`, MCP `list_components` / `save_component` / `insert_component`
 - [Exporting components](https://github.com/hynding/tree-weaver/blob/main/docs/export.md): `npx tree-weaver export file.json -f react|vue|svelte|html|swiftui|flutter [-s tailwind]`, `exportComponent`, class naming and display variants
 - [Embedding and links](https://github.com/hynding/tree-weaver/blob/main/docs/embed.md): `<tree-weaver-editor>`, its postMessage API, and editor links (`?src=`, `#doc=`; `npx tree-weaver link file.json`)

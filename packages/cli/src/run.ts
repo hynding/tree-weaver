@@ -79,7 +79,7 @@ import {
   type TreeDocument,
 } from '@tree-weaver/formats';
 import { createStarterKit, kitFromFile, kitManifest } from '@tree-weaver/kits';
-import { BLUEPRINTS, expandShorthand, expandShorthandDocument, getBlueprint, getTemplate, TEMPLATES } from '@tree-weaver/branches';
+import { BLUEPRINTS, expandShorthand, expandShorthandDocument, getBlueprint, getStarter, getTemplate, STARTERS, TEMPLATES } from '@tree-weaver/branches';
 
 /** Where the CLI reads and writes. Swap it out to drive the CLI from code or tests. */
 export interface CliIO {
@@ -137,7 +137,7 @@ const HELP = `tree-weaver: create, check, edit and render Tree Weaver forests an
 Usage: tree-weaver <command> [options]
 
 Commands:
-  new [file]               Start a tree (or --forest) from a template
+  new [file]               Start a tree (or --forest) from a template, or a starter forest
   validate <file...>       Strictly check documents; exits 1 when any has errors
   render <file>            Write a standalone HTML page for a tree
   export <file>            Write a tree as a React, Vue or Svelte component, or HTML + CSS files
@@ -170,14 +170,16 @@ Docs: https://github.com/hynding/tree-weaver/blob/main/docs/cli.md
 const COMMAND_HELP: Record<string, string> = {
   new: `Usage: tree-weaver new [file] [options]
 
-Start a tree from a template, with the Weaver Basic starter kit.
+Start a tree from a template, with the Weaver Basic starter kit, or a forest
+from the template gallery with its own design tokens and components.
 
   -T, --template <id>   Template to start from (default: blank)
+  -S, --starter <id>    Starter forest from the gallery: dashboard, landing or form
   -n, --name <name>     Name of the tree (and the forest)
       --forest          Write a forest holding the tree, instead of a tree
       --bare            Leave out the starter kit
   -f, --format <fmt>    Output format when there is no file extension (default: json)
-      --list            List the templates
+      --list            List the templates and starters
 `,
   validate: `Usage: tree-weaver validate <file...> [options]
 
@@ -541,6 +543,7 @@ async function writeTree(cli: Cli, loaded: Loaded, file: string, tree: Tree, out
 async function cmdNew(cli: Cli, args: string[]): Promise<number> {
   const { values, positionals } = parse(args, {
     template: { type: 'string', short: 'T' },
+    starter: { type: 'string', short: 'S' },
     name: { type: 'string', short: 'n' },
     forest: { type: 'boolean' },
     bare: { type: 'boolean' },
@@ -550,12 +553,33 @@ async function cmdNew(cli: Cli, args: string[]): Promise<number> {
   });
   const json = !!values.json;
   if (values.list) {
-    const list = TEMPLATES.map(({ id, label, description }) => ({ id, label, description }));
-    cli.report(json, list, list.map((t) => `${t.id.padEnd(12)} ${t.description}`).join('\n'));
+    const list = [
+      ...TEMPLATES.map(({ id, label, description }) => ({ id, label, description, kind: 'tree' as const })),
+      ...STARTERS.map(({ id, label, description }) => ({ id, label, description, kind: 'forest' as const })),
+    ];
+    const lines = (kind: 'tree' | 'forest') => list.filter((t) => t.kind === kind).map((t) => `  ${t.id.padEnd(12)} ${t.description}`);
+    cli.report(json, list, [`Templates (--template):`, ...lines('tree'), ``, `Starter forests (--starter):`, ...lines('forest')].join('\n'));
     return 0;
   }
   if (positionals.length > 1) throw new UsageError('new takes at most one file');
   const output = values.output ?? positionals[0];
+  if (values.starter !== undefined) {
+    if (values.template !== undefined) throw new UsageError('Give --template or --starter, not both');
+    const starter = getStarter(values.starter);
+    if (!starter) throw new UsageError(`No starter "${values.starter}". Starters: ${STARTERS.map((t) => t.id).join(', ')}`);
+    const format = asFormat(values.format, '--format') ?? (output ? formatFromFileName(output) : null) ?? 'json';
+    if (!getFormat(format).forest) throw new UsageError(`${getFormat(format).label} holds one tree; use json, yaml or xml for a starter forest`);
+    const forest = starter.create(values.name);
+    await cli.emit(output, exportForest(forest, format));
+    if (output) {
+      cli.report(
+        json,
+        { output, format, kind: 'forest', starter: starter.id, trees: forest.trees.map((t) => ({ id: t.id, name: t.name })), components: (forest.components ?? []).map((c) => c.name) },
+        `Wrote ${output} (${starter.label}: ${forest.trees.length} trees, ${forest.components?.length ?? 0} components, ${getFormat(format).label})`,
+      );
+    }
+    return 0;
+  }
   const templateId = values.template ?? 'blank';
   const template = getTemplate(templateId);
   if (!template) throw new UsageError(`No template "${templateId}". Templates: ${TEMPLATES.map((t) => t.id).join(', ')}`);

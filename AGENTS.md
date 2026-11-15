@@ -31,6 +31,8 @@ Use these words in code, UI text, docs and commit messages:
    (`tree-weaver components`, MCP `list_components` / `save_component` / `insert_component`). Don't
    edit inside an instance (`"instance"` on a branch): it is re-expanded from its component. Set its
    props and variants, or edit the component. See [`docs/components.md`](docs/components.md).
+   To start a whole site or app, a starter forest (`tree-weaver new --starter dashboard|landing|form`,
+   MCP `create_tree` `starter`) already has tokens and components to build on. See [`docs/templates.md`](docs/templates.md).
 5. Validate before handing the file on, and fix every error the validator reports (then run the
    layout checks, step 10):
 

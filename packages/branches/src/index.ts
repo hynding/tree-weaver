@@ -390,3 +390,4 @@ export function getTemplate(id: string): TreeTemplate | undefined {
   return TEMPLATES.find((t) => t.id === id);
 }
 export * from './shorthand';
+export * from './starters';

@@ -4,7 +4,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import { DISPLAY_IDS, TREE_WEAVER_PATCH_SCHEMA, TREE_WEAVER_SCHEMA, type DisplayId } from '@tree-weaver/core';
 import { FORMATS, type FormatId } from '@tree-weaver/formats';
-import { BLUEPRINTS, TEMPLATES } from '@tree-weaver/branches';
+import { BLUEPRINTS, STARTERS, TEMPLATES } from '@tree-weaver/branches';
 import { Tools, ToolError, type ToolOutput } from './tools';
 import { Workspace } from './workspace';
 
@@ -88,10 +88,14 @@ export function createServer(options: ServerOptions = {}): McpServer {
     {
       title: 'Create a tree',
       description:
-        'Start a tree from a template or from compact shorthand, with the Weaver Basic starter kit. Writes it to "path" (refuses to overwrite unless "overwrite" is true), or returns it. The result includes the outline with paths and ids.',
+        'Start a tree from a template or from compact shorthand, with the Weaver Basic starter kit, or a whole forest from a starter (a template gallery entry with its own design tokens, components and trees). Writes it to "path" (refuses to overwrite unless "overwrite" is true), or returns it. The result includes the outline with paths and ids.',
       inputSchema: {
         path: z.string().optional().describe('Workspace file to write, e.g. "home.tree.json" (the extension picks the format)'),
         template: z.enum(TEMPLATES.map((t) => t.id) as [string, ...string[]]).optional().describe('Template to start from (default "blank")'),
+        starter: z
+          .enum(STARTERS.map((t) => t.id) as [string, ...string[]])
+          .optional()
+          .describe('Starter forest from the template gallery instead of a tree template: dashboard, landing or form. Writes a forest with its own tokens and components (no starter kit)'),
         shorthand: z
           .union([z.string(), z.array(z.unknown()), z.record(z.string(), z.unknown())])
           .optional()
@@ -299,8 +303,8 @@ export function createServer(options: ServerOptions = {}): McpServer {
     'catalog',
     {
       title: 'List building blocks',
-      description: 'List the blueprints (ready-made branches such as card, hero, grid-3, table), tree templates, displays or file formats.',
-      inputSchema: { kind: z.enum(['blueprints', 'templates', 'displays', 'formats']).describe('What to list') },
+      description: 'List the blueprints (ready-made branches such as card, hero, grid-3, table), tree templates, starter forests (the template gallery), displays or file formats.',
+      inputSchema: { kind: z.enum(['blueprints', 'templates', 'starters', 'displays', 'formats']).describe('What to list') },
       annotations: { ...reads, title: 'List building blocks' },
     },
     wrap((args) => tools.catalog(args)),
@@ -430,6 +434,7 @@ export function createServer(options: ServerOptions = {}): McpServer {
     { name: 'components-guide', uri: 'tree-weaver://guide/components', title: 'Components guide', description: 'Reusable components: props, variants per display, instances and exports', mimeType: 'text/markdown', read: () => readDoc('components.md') },
     { name: 'checks-guide', uri: 'tree-weaver://guide/checks', title: 'Layout checks guide', description: 'Every check_layout rule and how rendered checks work', mimeType: 'text/markdown', read: () => readDoc('checks.md') },
     { name: 'blueprints', uri: 'tree-weaver://catalog/blueprints', title: 'Blueprints', description: 'Ready-made branches', mimeType: 'application/json', read: () => json(BLUEPRINTS.map(({ id, label, category, description }) => ({ id, label, category, description }))) },
+    { name: 'starters', uri: 'tree-weaver://catalog/starters', title: 'Starter forests', description: 'Template gallery forests for create_tree "starter"', mimeType: 'application/json', read: () => json(STARTERS.map(({ id, label, description, trees, components }) => ({ id, label, description, trees, components }))) },
     { name: 'templates', uri: 'tree-weaver://catalog/templates', title: 'Templates', description: 'Tree templates for create_tree', mimeType: 'application/json', read: () => json(TEMPLATES.map(({ id, label, description }) => ({ id, label, description }))) },
   ];
   for (const r of resources) {

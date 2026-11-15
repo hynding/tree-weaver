@@ -34,7 +34,7 @@ or write it in the [shorthand](shorthand.md) and run `expand`.
 
 | Command | What it does |
 | --- | --- |
-| `new [file]` | Start a tree from a template (`--template`, `--list`), with the Weaver Basic starter kit unless `--bare`. `--forest` writes a forest holding the tree. The format comes from the file extension, or `--format` (default JSON to stdout). |
+| `new [file]` | Start a tree from a template (`--template`, `--list`), with the Weaver Basic starter kit unless `--bare`. `--forest` writes a forest holding the tree. `--starter dashboard|landing|form` writes a whole [starter forest](templates.md) with its tokens and components instead. The format comes from the file extension, or `--format` (default JSON to stdout). |
 | `validate <file...>` | Check documents against the contract. JSON and YAML are checked as written; HTML, XML, Markdown and SVG are imported first. Prints each problem with its path and a fix hint. `--strict` fails on warnings too. Exits 1 when any file has errors. |
 | `render <file>` | Write a standalone HTML page with the kits and the responsive CSS inlined. `--kit style.css` adds design kits (repeatable). |
 | `lint <file>` | Check trees for layout and accessibility problems: alt text, heading order, link and form labels, duplicate ids, empty branches, fixed widths and contrast, each with a path, its displays and a fix. `--render` also renders every display in Chromium (needs Playwright) for sideways overflow, contrast with kits applied and broken images; `-d` picks displays. Exits 1 on errors, or on warnings with `--strict`. See [layout checks](checks.md). |

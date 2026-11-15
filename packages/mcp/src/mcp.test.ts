@@ -63,6 +63,21 @@ describe('Tree Weaver MCP server', () => {
     expect(again.text).toContain('already exists');
   });
 
+  it('creates a starter forest from the template gallery and lists the starters', async () => {
+    const { call } = await connect();
+    const r = await call('create_tree', { path: 'admin.forest.json', starter: 'dashboard', name: 'Admin' });
+    expect(r.isError).toBeFalsy();
+    expect(r.text).toContain('Created forest "Admin" in admin.forest.json');
+    const doc = file('admin.forest.json');
+    expect(doc.forest.trees.map((t: { name: string }) => t.name)).toEqual(['Overview', 'Settings']);
+    expect(doc.forest.components.map((c: { name: string }) => c.name)).toEqual(['Button', 'Stat tile', 'Form field']);
+    expect(doc.forest.kits.map((k: { name: string }) => k.name)).toEqual(['Lumen theme']);
+    const both = await call('create_tree', { template: 'landing', starter: 'landing' });
+    expect(both.isError).toBe(true);
+    const list = await call('catalog', { kind: 'starters' });
+    expect(list.text).toContain('- form:');
+  });
+
   it('creates a tree from shorthand, as a list or as text', async () => {
     const { call } = await connect();
     const r = await call('create_tree', { path: 'p.tree.json', name: 'Promo', shorthand: ['h1: Hello', { grid: 3, children: ['@card', '@card', '@card'] }] });

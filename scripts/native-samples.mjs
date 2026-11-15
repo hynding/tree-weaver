@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const load = (pkg) => import(join(root, 'packages', pkg, 'dist', 'index.js'));
-const [{ createBranch, createKit, createTree }, { exportComponent, importJson, dartFileName }, { BLUEPRINTS, TEMPLATES }, { WEAVER_BASIC_CSS }] = await Promise.all(
+const [{ createBranch, createKit, createTree }, { exportComponent, importJson, dartFileName }, { BLUEPRINTS, STARTERS, TEMPLATES }, { WEAVER_BASIC_CSS }] = await Promise.all(
   ['core', 'formats', 'branches', 'kits'].map(load),
 );
 
@@ -38,6 +38,11 @@ for (const file of readdirSync(join(root, 'examples')).sort()) {
   else for (const tree of doc.forest.trees) samples.push({ tree, kits: [basic, ...doc.forest.kits] });
 }
 for (const t of TEMPLATES) samples.push({ tree: t.create(`Template ${t.label}`), kits: [basic] });
+// Starter forests bring their own theme kit (tokens) and component instances.
+for (const s of STARTERS) {
+  const forest = s.create();
+  for (const tree of forest.trees) samples.push({ tree: { ...tree, name: `Starter ${s.label} ${tree.name}` }, kits: forest.kits });
+}
 samples.push({
   tree: createTree('All blueprints', createBranch({ tag: 'body', type: 'root', name: 'Body', children: BLUEPRINTS.filter((b) => b.category !== 'SVG').map((b) => b.create()) })),
   kits: [basic],

@@ -76,6 +76,9 @@ The same words are used in the code (`Forest`, `Tree`, `Branch`, `Leaf`) and in 
   changes per display, such as `compact` or `stacked`). Instances stay linked to the component, pick
   a variant per display, and export as React, Vue or Svelte components with props (see
   [`docs/components.md`](docs/components.md)).
+- **Start from the template gallery**: dashboard, landing page and form starter forests, each with
+  its own design tokens and components that switch variants per display (see
+  [`docs/templates.md`](docs/templates.md)).
 - **Download a Storybook project** for a tree or the whole forest, or **import stories from a built
   Storybook** as palette branches or trees (see [Storybook](#storybook)).
 - **Save locally**: forests autosave to IndexedDB (falling back to `localStorage`), and you can keep
@@ -223,6 +226,7 @@ Tree Weaver data is plain JSON (or YAML) with a published contract, so agents ca
   headings, labels) with `tree-weaver lint`, `check_layout` or `checkTree` / `checkRendered`.
 - [`docs/export.md`](docs/export.md): trees as React, Vue or Svelte components (CSS or Tailwind), SwiftUI views or Flutter widgets with `tree-weaver export`.
 - [`docs/components.md`](docs/components.md): reusable components with props and per-display variants, in the editor, `tree-weaver components` and MCP.
+- [`docs/templates.md`](docs/templates.md): the template gallery of starter forests, in the editor, `tree-weaver new --starter` and MCP.
 - [`docs/tokens.md`](docs/tokens.md): design tokens (colours, spacing, type) from your kits, edited in the Tokens tab or with `tree-weaver tokens`, carried into every export.
 - [`docs/patch.md`](docs/patch.md): patches, lists of edits (`insert`, `move`, `setStyles`, …) applied with
   `tree-weaver patch` or `applyPatch`, all or nothing.
