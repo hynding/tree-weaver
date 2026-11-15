@@ -95,6 +95,16 @@ columns to 1, a row that stacks into a column, padding and font sizes, and branc
 SVG trees and SVG branches become a placeholder comment: export the drawing as `.svg` and add it
 to the app as an image asset. Links and buttons get empty actions to fill in.
 
+### How the native output is checked
+
+CI exports every example tree, every tree template and one tree holding every palette blueprint
+(`node scripts/native-samples.mjs`, or `pnpm native:samples`), then builds the SwiftUI views as a
+Swift package for macOS and the iOS Simulator (Xcode on a macOS runner), and runs `flutter analyze`
+and a widget test that lays every Flutter sample out at desktop, tablet and phone widths with no
+overflow or layout errors, on Flutter 3.27 and the current stable. Flutter 3.47 and later mark
+`package:flutter/material.dart` as deprecated in favour of `package:material_ui`; the exports keep
+the older import so they still build on 3.27, and the analyzer only reports it as info.
+
 ## Limits
 
 - One tree per component. To export a forest, export each tree.

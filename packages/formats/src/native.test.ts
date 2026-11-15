@@ -112,6 +112,14 @@ describe('exportFlutter', () => {
     expect(dart).toContain("'Say \"hi\" \\\\ \\$5'");
   });
 
+  it('passes every grid argument and sizes with SizedBox (no analyzer warnings)', () => {
+    expect(dart).toMatch(/_Grid\(columns: \(phone \? 1 : 3\), minColumnWidth: null,/);
+    expect(dart).toContain('required this.minColumnWidth');
+    const sized = exportFlutter(pageTree('Sized', [createBranch({ tag: 'div', styles: { lg: { height: '32px' } }, children: [text('Gap')] })]), { name: 'Sized' });
+    expect(sized).toContain('SizedBox(');
+    expect(sized).not.toContain('Container(');
+  });
+
   it('applies design kit rules with tokens resolved', () => {
     expect(dart).toContain('color: Color(0xFFFF0000)');
     expect(dart).toContain('BorderRadius.circular(8)');

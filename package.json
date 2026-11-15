@@ -18,7 +18,8 @@
     "smoke": "node scripts/smoke-pack.mjs",
     "release:version": "node scripts/set-version.mjs",
     "e2e:embed": "node scripts/e2e-embed.mjs",
-    "e2e:collab": "node scripts/e2e-collab.mjs"
+    "e2e:collab": "node scripts/e2e-collab.mjs",
+    "native:samples": "node scripts/native-samples.mjs"
   },
   "devDependencies": {
     "ajv": "^8.20.0",
