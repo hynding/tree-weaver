@@ -10,3 +10,5 @@ test-results/
 playwright-report/
 packages/*/LICENSE
 native-samples/
+visual/
+.visual-base/

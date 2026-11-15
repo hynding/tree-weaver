@@ -268,7 +268,12 @@ pnpm build        # builds every package and the app (apps/web/www)
 pnpm test         # unit tests for the packages (Vitest)
 pnpm typecheck
 pnpm smoke        # packs the packages, installs them in an empty project and runs them in plain Node
+pnpm visual:capture visual/after   # screenshots of every sample at every display (see docs/visual-regression.md)
 ```
+
+Pull requests also run a [visual regression check](docs/visual-regression.md): every example, template,
+starter forest and blueprint is rendered at each display size from the base and from the pull request,
+and anything that looks different fails the check until the pull request gets the `visual-change` label.
 
 The app uses relative asset paths, so the built `apps/web/www` folder works from any subpath, including GitHub Pages.
 
