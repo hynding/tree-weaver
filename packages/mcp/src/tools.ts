@@ -1,6 +1,10 @@
 import { createRequire } from 'node:module';
 import {
   addVersion,
+  resetToken,
+  setToken,
+  themeTokens,
+  type DesignToken,
   applyPatch,
   findVersion,
   formatDiff,
@@ -452,6 +456,42 @@ export class Tools {
     const b = await this.load(args.after ?? {});
     const diff = diffDocuments(a.doc, b.doc);
     return { text: formatDiff(diff), data: { ...diff } };
+  }
+
+  async listTokens(args: Source): Promise<ToolOutput> {
+    const { doc } = await this.load(args);
+    const tokens = themeTokens(kitsOf(doc));
+    const text = tokens.length
+      ? `Design tokens (${tokens.length}). Use them as var(--name) in styles: exports name them (DesignTokens.x in SwiftUI/Flutter, theme utilities in Tailwind).\n${tokens
+          .map((t) => `  ${t.name}: ${t.value}${t.resolved !== t.value ? ` (= ${t.resolved})` : ''}  [${t.kind}${t.edited ? ', edited' : ''}]`)
+          .join('\n')}`
+      : 'No design tokens. Add some with set_tokens, or a kit with :root { --name: value }.';
+    return { text, data: { tokens } };
+  }
+
+  async setTokens(args: Source & { tokens?: DesignToken[]; reset?: string[]; output?: string; keepVersion?: boolean }): Promise<ToolOutput> {
+    const loaded = await this.load(args);
+    let kits = kitsOf(loaded.doc);
+    const dash = (n: string) => (n.startsWith('--') ? n : `--${n}`);
+    try {
+      for (const name of args.reset ?? []) kits = resetToken(kits, dash(name));
+      for (const t of args.tokens ?? []) kits = setToken(kits, { ...t, name: dash(t.name) });
+    } catch (err) {
+      throw new ToolError(`${(err as Error).message}\nNothing was changed.`);
+    }
+    const next: TreeDocument = loaded.doc.kind === 'forest' ? { kind: 'forest', forest: { ...loaded.doc.forest, kits, updatedAt: new Date().toISOString() } } : { ...loaded.doc, kits };
+    const serialized = this.serialize(next, loaded.format);
+    const tokens = themeTokens(kits);
+    const output = args.output ?? loaded.path;
+    const list = tokens.map((t) => `  ${t.name}: ${t.value}  [${t.kind}${t.edited ? ', edited' : ''}]`).join('\n');
+    if (!output) return { text: `${serialized}`, data: { tokens, document: serialized } };
+    let versionNote = '';
+    if (loaded.path && output === loaded.path && args.keepVersion !== false && serialized !== loaded.text) {
+      const v = await this.keepVersion(loaded.path, loaded.text, loaded.format, { name: 'Before tokens', source: 'agent', auto: true });
+      versionNote = `\nSaved the previous file as version ${v.id} (restore_version to roll back).`;
+    }
+    const written = await this.ws.write(output, serialized);
+    return { text: `Wrote ${written}.${versionNote}\nTokens:\n${list}`, data: { tokens, path: written } };
   }
 
   async kitManifest(args: { paths: string[] }): Promise<ToolOutput> {

@@ -4,6 +4,7 @@ import {
   canonicalTag,
   childrenInSvg,
   CUSTOM_KIT_SOURCE,
+  TOKENS_KIT_SOURCE,
   createId,
   displayForMedia,
   INLINE_TAGS,
@@ -291,6 +292,7 @@ export function importHtml(text: string): TreeDocument {
         const kit: Record<string, unknown> = { id: el.attribs['data-tw-kit'] || createId('k'), name: el.attribs['data-tw-kit-name'] || 'Design kit', css: css.trim(), enabled: true };
         // Custom classes and selectors come back as an editable kit.
         if (el.attribs['data-tw-kit-editable'] !== undefined) Object.assign(kit, { editable: true, source: CUSTOM_KIT_SOURCE });
+        if (el.attribs['data-tw-kit-tokens'] !== undefined) kit.source = TOKENS_KIT_SOURCE;
         kits.push(kit);
       } else if (css.trim()) looseCss.push(css.trim());
     } else if (el.name === 'link' && /\bstylesheet\b/i.test(el.attribs.rel ?? '') && el.attribs.href) {

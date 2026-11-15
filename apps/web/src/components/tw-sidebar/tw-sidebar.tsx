@@ -6,6 +6,7 @@ const TABS: { id: SidebarTab; label: string }[] = [
   { id: 'branches', label: 'Branches' },
   { id: 'outline', label: 'Outline' },
   { id: 'classes', label: 'Classes' },
+  { id: 'tokens', label: 'Tokens' },
   { id: 'kits', label: 'Kits' },
   { id: 'forest', label: 'Forest' },
   { id: 'history', label: 'History' },
@@ -26,6 +27,7 @@ export class TwSidebar {
         {state.tab === 'branches' && <tw-palette />}
         {state.tab === 'outline' && <tw-outline />}
         {state.tab === 'classes' && <tw-classes-panel />}
+        {state.tab === 'tokens' && <tw-tokens-panel />}
         {state.tab === 'kits' && <tw-kits-panel />}
         {state.tab === 'forest' && <tw-forest-panel />}
         {state.tab === 'history' && <tw-history-panel />}

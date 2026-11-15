@@ -151,3 +151,58 @@ describe('Tailwind helpers', () => {
     expect(jsxAttrName('data-x')).toBe('data-x');
   });
 });
+
+describe('design tokens in web exports', () => {
+  const tokenKits = () => [
+    createKit('Kit', ':root { --brand: #2f6f4f; --space-3: 1rem; --radius: 8px; --font-body: system-ui, sans-serif; }'),
+  ];
+  const themed = () =>
+    pageTree('Themed', [
+      createBranch({
+        tag: 'div',
+        name: 'Card',
+        styles: { lg: { background: 'var(--brand)', padding: 'var(--space-3)', 'border-radius': 'var(--radius)', color: 'var(--space-3)', margin: 'var(--space-3) 0' } },
+        children: [text('Hi')],
+      }),
+    ]);
+
+  it('writes tokens.json for CSS exports', () => {
+    const out = exportComponent(themed(), { framework: 'react', kits: tokenKits() });
+    const json = JSON.parse(out.files.find((f) => f.path === 'tokens.json')!.contents);
+    expect(json.brand).toEqual({ $value: '#2f6f4f', $type: 'color' });
+    expect(json['font-body'].$type).toBe('fontFamily');
+    expect(out.files.find((f) => f.path === 'ThemedCard.css' || f.path === 'Themed.css')!.contents).toContain('background: var(--brand)');
+    expect(out.files.some((f) => f.path.startsWith('tailwind.'))).toBe(false);
+  });
+
+  it('uses theme utilities in Tailwind exports when the kind fits, and writes the theme', () => {
+    const out = exportComponent(themed(), { framework: 'react', styling: 'tailwind', kits: tokenKits() });
+    const jsx = out.files[0].contents;
+    expect(jsx).toContain('bg-brand');
+    expect(jsx).toContain('p-space-3');
+    expect(jsx).toContain('rounded-radius');
+    // A length token used as a colour, and a shorthand, keep arbitrary values.
+    expect(jsx).toContain('[color:var(--space-3)]');
+    expect(jsx).toContain('[margin:var(--space-3)_0]');
+    const theme = out.files.find((f) => f.path === 'tailwind.theme.css')!.contents;
+    expect(theme).toContain('@theme inline {');
+    expect(theme).toContain('--color-brand: var(--brand);');
+    expect(theme).toContain('--spacing-space-3: var(--space-3);');
+    expect(theme).toContain('--font-font-body: var(--font-body);');
+    const preset = out.files.find((f) => f.path === 'tailwind.tokens.cjs')!.contents;
+    expect(preset).toContain('colors: {\n        "brand": "var(--brand)",');
+    expect(preset).toContain('borderRadius: {');
+  });
+
+  it('writes no token files without tokens', () => {
+    const out = exportComponent(themed(), { framework: 'react', styling: 'tailwind' });
+    expect(out.files.map((f) => f.path)).toEqual(['Themed.jsx']);
+  });
+
+  it('maps a token declaration to its theme class only for matching kinds', () => {
+    const kinds = new Map([['--brand', 'color' as const]]);
+    expect(tailwindClass('background-color', 'var(--brand)', kinds)).toBe('bg-brand');
+    expect(tailwindClass('padding', 'var(--brand)', kinds)).toBe('p-[var(--brand)]');
+    expect(tailwindClass('background-color', 'var(--brand)')).toBe('[background-color:var(--brand)]');
+  });
+});

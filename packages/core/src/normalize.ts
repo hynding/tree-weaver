@@ -4,6 +4,7 @@ import type { Branch, DesignKit, DisplayStyles, Forest, Leaf, StyleMap, StyleRul
 import { SCHEMA_VERSION } from './model';
 import { parseRulesCss, sanitizeSelector, withRules } from './rules';
 import { canonicalTag } from './svg';
+import { TOKEN_KINDS, TOKENS_KIT_SOURCE, isTokenName, sanitizeTokenValue, tokensFromCss, withTokens, type DesignToken, type TokenKind } from './tokens';
 
 /**
  * Turn loosely shaped data (parsed JSON, YAML or XML) into valid model objects.
@@ -124,7 +125,28 @@ export function normalizeKit(value: unknown, path = 'kit'): DesignKit {
   // (XML, HTML) mark the kit `editable` and the rules are read back from the CSS.
   if (!kit.href && Array.isArray(value.rules)) return withRules(kit, normalizeRules(value.rules, `${path}.rules`));
   if (!kit.href && (value.editable === true || value.editable === 'true')) return withRules(kit, parseRulesCss(kit.css).rules);
+  // Token kits: their tokens are the source of their CSS; from CSS-only formats, read them back.
+  if (!kit.href && Array.isArray(value.tokens)) return withTokens(kit, normalizeTokens(value.tokens, `${path}.tokens`));
+  if (!kit.href && kit.source === TOKENS_KIT_SOURCE) return withTokens(kit, tokensFromCss(kit.css));
   return kit;
+}
+
+function normalizeTokens(value: unknown[], path: string): DesignToken[] {
+  const seen = new Set<string>();
+  const out: DesignToken[] = [];
+  value.forEach((t, i) => {
+    if (!isObj(t)) throw new TreeDataError('Expected a token object', `${path}[${i}]`);
+    const name = str(t.name).trim();
+    if (!isTokenName(name)) throw new TreeDataError(`"${name}" is not a token name (use --letters-digits-and-dashes)`, `${path}[${i}].name`);
+    const tokenValue = sanitizeTokenValue(str(t.value));
+    if (!tokenValue || seen.has(name)) return;
+    seen.add(name);
+    const token: DesignToken = { name, value: tokenValue };
+    if (TOKEN_KINDS.includes(t.kind as TokenKind)) token.kind = t.kind as TokenKind;
+    if (t.description) token.description = str(t.description);
+    out.push(token);
+  });
+  return out;
 }
 
 function normalizeRules(value: unknown[], path: string): StyleRule[] {

@@ -38,7 +38,7 @@ describe('Tree Weaver MCP server', () => {
   it('lists its tools, resources and prompt, with instructions', async () => {
     const { client } = await connect();
     const tools = (await client.listTools()).tools.map((t) => t.name);
-    expect(tools).toEqual(expect.arrayContaining(['create_tree', 'outline', 'patch_tree', 'validate', 'render_html', 'export_component', 'convert', 'check_layout', 'screenshot', 'catalog', 'kit_manifest']));
+    expect(tools).toEqual(expect.arrayContaining(['create_tree', 'outline', 'patch_tree', 'validate', 'render_html', 'export_component', 'convert', 'check_layout', 'screenshot', 'catalog', 'kit_manifest', 'list_tokens', 'set_tokens']));
     expect(client.getInstructions()).toContain('patch_tree');
     const resources = (await client.listResources()).resources.map((r) => r.uri);
     expect(resources).toContain('tree-weaver://schema/document');
@@ -180,6 +180,21 @@ describe('Tree Weaver MCP server', () => {
     writeFileSync(join(root, 'brand.css'), ':root { --brand: #0a7 } .hero-x { color: var(--brand) }');
     const kit = await call('kit_manifest', { paths: ['brand.css'] });
     expect(kit.structuredContent!.classes).toContain('hero-x');
+  });
+
+  it('lists and edits design tokens', async () => {
+    const { call } = await connect();
+    await call('create_tree', { path: 'tokens.tree.json', template: 'landing' });
+    const list = await call('list_tokens', { path: 'tokens.tree.json' });
+    expect(list.text).toMatch(/--tw-color-accent: #2f6f4f\s+\[color\]/);
+    const set = await call('set_tokens', { path: 'tokens.tree.json', tokens: [{ name: 'tw-color-accent', value: '#ff0000' }, { name: '--hero-gap', value: '4rem', kind: 'space' }] });
+    expect(set.isError).toBeFalsy();
+    expect(set.text).toContain('--tw-color-accent: #ff0000  [color, edited]');
+    const doc = JSON.parse(readFileSync(join(root, 'tokens.tree.json'), 'utf8'));
+    expect(doc.kits.at(-1)).toMatchObject({ source: 'tokens', tokens: [{ name: '--tw-color-accent', value: '#ff0000' }, { name: '--hero-gap', value: '4rem', kind: 'space' }] });
+    expect((await call('set_tokens', { path: 'tokens.tree.json', tokens: [{ name: 'bad name', value: 'x' }] })).text).toContain('Nothing was changed');
+    const reset = await call('set_tokens', { path: 'tokens.tree.json', reset: ['tw-color-accent'] });
+    expect(reset.text).toContain('--tw-color-accent: #2f6f4f  [color]');
   });
 
   it('keeps every path inside the workspace', async () => {

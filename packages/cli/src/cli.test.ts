@@ -464,3 +464,48 @@ describe('tree-weaver lint', () => {
     expect(JSON.parse(same.out).empty).toBe(true);
   });
 });
+
+describe('tree-weaver tokens', () => {
+  const doc = () => ({
+    'page.json': JSON.stringify({
+      format: 'tree-weaver',
+      version: 1,
+      tree: { name: 'Page', root: { tag: 'body', children: [{ tag: 'div', styles: { lg: { background: 'var(--brand)', padding: 'var(--gap)' } }, children: [{ type: 'text', value: 'Hi' }] }] } },
+      kits: [{ name: 'Kit', css: ':root { --brand: #2f6f4f; --gap: 1rem; }' }],
+    }),
+  });
+
+  it('lists tokens with their kinds', async () => {
+    const r = await cli(['tokens', 'page.json', '--json'], doc());
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.out).tokens.map((t: { name: string; kind: string }) => `${t.name}:${t.kind}`)).toEqual(['--brand:color', '--gap:space']);
+    expect((await cli(['tokens', 'page.json'], doc())).out).toMatch(/--brand\s+color\s+#2f6f4f/);
+  });
+
+  it('edits tokens into a token kit and writes the document back', async () => {
+    const r = await cli(['tokens', 'page.json', '--set', 'brand=#ff0000', '--set', 'hero=4rem', '--kind', 'hero=space', '--no-version'], doc());
+    expect(r.code).toBe(0);
+    const saved = JSON.parse(r.files['page.json']);
+    expect(saved.kits[1]).toMatchObject({ name: 'Tokens', source: 'tokens', tokens: [{ name: '--brand', value: '#ff0000' }, { name: '--hero', value: '4rem', kind: 'space' }] });
+    expect(r.out).toMatch(/--brand\s+color\s+#ff0000\s+\[edited, kit: #2f6f4f\]/);
+    const reset = await cli(['tokens', 'page.json', '--reset', 'brand', '--json', '--no-version'], r.files);
+    expect(JSON.parse(reset.out).tokens[0]).toMatchObject({ name: '--brand', value: '#2f6f4f', edited: false });
+  });
+
+  it('writes tokens for each platform', async () => {
+    expect((await cli(['tokens', 'page.json', '-f', 'swift'], doc())).out).toContain('static let brand = Color(');
+    expect((await cli(['tokens', 'page.json', '-f', 'dart'], doc())).out).toContain('static const double gap = 16;');
+    expect((await cli(['tokens', 'page.json', '-f', 'tailwind'], doc())).out).toContain('--color-brand: var(--brand);');
+    expect((await cli(['tokens', 'page.json', '-f', 'tailwind-v3'], doc())).out).toContain('spacing: {');
+    expect(JSON.parse((await cli(['tokens', 'page.json', '-f', 'json'], doc())).out).brand.$value).toBe('#2f6f4f');
+    expect((await cli(['tokens', 'page.json', '-f', 'css'], doc())).out).toContain(':root {\n  --brand: #2f6f4f;');
+    expect((await cli(['tokens', 'page.json', '-f', 'nope'], doc())).code).toBe(2);
+    expect((await cli(['tokens', 'page.json', '--set', 'bad'], doc())).code).toBe(2);
+  });
+
+  it('exports native files with DesignTokens', async () => {
+    const r = await cli(['export', 'page.json', '-f', 'swiftui', '-o', 'ios', '--json'], doc());
+    expect(r.files['ios/DesignTokens.swift']).toContain('enum DesignTokens');
+    expect(r.files['ios/Page.swift']).toContain('.background(DesignTokens.brand)');
+  });
+});

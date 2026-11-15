@@ -193,7 +193,13 @@ export class TwKitsPanel {
                 </div>
               ) : null}
               {this.renderInfo(kit)}
-              {kit.rules ? (
+              {kit.tokens ? (
+                <div class="row">
+                  <button class="btn small" onClick={() => setTab('tokens')}>
+                    <Icon name="edit" /> Edit in Tokens tab
+                  </button>
+                </div>
+              ) : kit.rules ? (
                 <div class="row">
                   <button class="btn small" onClick={() => setTab('classes')}>
                     <Icon name="edit" /> Edit in Classes tab

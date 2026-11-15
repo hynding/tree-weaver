@@ -63,6 +63,8 @@ or set `TW_CHROMIUM_PATH` to a Chrome or Chromium binary. Every other tool works
 | `screenshot` | A PNG per display (default `lg`, `tablet`, `mobile-portrait`) from headless Chromium, with page height and a warning when content overflows sideways. Scripts are disabled while rendering. |
 | `catalog` | Blueprints, templates, displays or formats. |
 | `kit_manifest` | Classes, tokens and media queries of `.css` files or a document's kits. |
+| `list_tokens` | The document's design tokens with kinds, resolved values and which are edited. |
+| `set_tokens` | Set, add or reset design tokens in the document's token kit; saves a version first. See [design tokens](tokens.md). |
 
 Tools that read a document take either `path` (a workspace file) or `document` (its text), so an
 agent can also work without files. Failures come back as tool errors with a message that says what

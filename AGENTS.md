@@ -25,6 +25,8 @@ Use these words in code, UI text, docs and commit messages:
    branches, and shape leaves (`{ "type": "shape", "value": "path", "attrs": { "d": "..." } }`).
 3. Put base styles on `lg`, and only overrides on `tablet`, `mobile-portrait` and the rest.
 4. Prefer the forest's kit classes over inline styles. `kitManifest(kits)` (`@tree-weaver/kits`) lists them.
+   For colours, spacing and type, use the kits' design tokens as `var(--name)` (`themeTokens(kits)`, `tree-weaver tokens`,
+   MCP `list_tokens`): exports keep the names. See [`docs/tokens.md`](docs/tokens.md).
 5. Validate before handing the file on, and fix every error the validator reports (then run the
    layout checks, step 10):
 
@@ -80,7 +82,7 @@ classes and tokens, and `schema` prints the JSON Schema. Every command takes `--
 Agents in MCP clients can use `@tree-weaver/mcp` instead of the CLI: `claude mcp add tree-weaver --
 npx -y @tree-weaver/mcp --root .`, or `{ "command": "npx", "args": ["-y", "@tree-weaver/mcp"] }` in a
 client's `mcpServers`. Tools: `create_tree`, `outline`, `patch_tree`, `validate`, `render_html`,
-`export_component`, `convert`, `check_layout` (problems per display, with fixes), `screenshot` (a PNG per display), `catalog`, `kit_manifest`, and `list_versions`, `save_version`, `diff_versions`, `restore_version`, `diff` to review and roll back edits. The schemas and guides are
+`export_component`, `convert`, `check_layout` (problems per display, with fixes), `screenshot` (a PNG per display), `catalog`, `kit_manifest`, `list_tokens`, `set_tokens`, and `list_versions`, `save_version`, `diff_versions`, `restore_version`, `diff` to review and roll back edits. The schemas and guides are
 resources (`tree-weaver://guide/shorthand`, …). Full guide: [`docs/mcp.md`](docs/mcp.md).
 
 ## Handing a tree to a person

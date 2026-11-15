@@ -162,16 +162,29 @@ export const TREE_WEAVER_SCHEMA = {
     },
     kit: {
       type: 'object',
-      description: 'A design kit: CSS inlined in css, a stylesheet linked by href, or editable rules.',
+      description: 'A design kit: CSS inlined in css, a stylesheet linked by href, editable rules, or design token edits.',
       additionalProperties: false,
       properties: {
         id: str('Optional. Filled in on import.'),
         name: str('Shown in the editor.'),
         css: str('Raw CSS. For a linked kit, a snapshot used to list its classes.'),
         enabled: { type: 'boolean', default: true },
-        source: str('Where the kit came from: a file name, a URL, "builtin", "custom" or "env".'),
+        source: str('Where the kit came from: a file name, a URL, "builtin", "custom", "tokens" or "env".'),
         href: { type: 'string', pattern: '^https?://[^\\s"\'<>]+$', description: 'Stylesheet URL for a linked kit.' },
         rules: { type: 'array', items: ref('styleRule'), description: 'Editable rules. When present, css is generated from them.' },
+        tokens: { type: 'array', items: ref('designToken'), description: 'Design token edits (a token kit, source "tokens"). When present, css is generated from them as :root custom properties.' },
+      },
+    },
+    designToken: {
+      type: 'object',
+      description: 'A design token: a CSS custom property the exports carry as a named colour, length or font.',
+      required: ['name', 'value'],
+      additionalProperties: false,
+      properties: {
+        name: { type: 'string', pattern: '^--[A-Za-z_][A-Za-z0-9_-]*$', description: 'Custom property name, e.g. --brand.' },
+        value: { type: 'string', pattern: '^[^{};]+$', description: 'Any CSS value, including var(--other).' },
+        kind: { enum: ['color', 'space', 'radius', 'font-family', 'font-size', 'font-weight', 'line-height', 'shadow', 'other'], description: 'Optional. Inferred from the name and value when left out.' },
+        description: str('Optional note shown in the editor and written to tokens.json.'),
       },
     },
     styleRule: {

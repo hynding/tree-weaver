@@ -1,3 +1,4 @@
+import type { DesignToken } from './tokens';
 /**
  * The Tree Weaver vocabulary:
  *
@@ -75,6 +76,11 @@ export interface DesignKit {
    * present, the rules are the kit's source and `css` is generated from them.
    */
   rules?: StyleRule[];
+  /**
+   * Tokens of a token kit, which holds the forest's token edits. When present, the tokens
+   * are the kit's source and `css` is generated from them (`:root { --name: value; }`).
+   */
+  tokens?: DesignToken[];
 }
 
 /** A custom CSS rule: a selector with per-display declarations, like a branch's styles. */

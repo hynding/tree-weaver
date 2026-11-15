@@ -22,9 +22,13 @@ import {
   type StyleMap,
   type Tree,
   type TreeNode,
+  type TokenKind,
+  themeTokens,
+  tokensToDtcg,
 } from '@tree-weaver/core';
 import { slugify } from './slug';
-import { dartFileName, exportFlutter, exportSwiftUI, nativeTypeName } from './native';
+import { DESIGN_TOKENS_DART, DESIGN_TOKENS_SWIFT, dartFileName, exportFlutter, exportFlutterTokens, exportSwiftUI, exportSwiftUITokens, nativeTypeName } from './native';
+import { tailwindPreset, tailwindThemeCss, tailwindTokenClass } from './tokens';
 
 const SVG_SHAPES = new Set(SVG_SHAPE_TAGS);
 
@@ -198,9 +202,14 @@ const bracket = (value: string): string =>
     .replace(/\s*,\s*/g, ',')
     .replace(/\s+/g, '_');
 
-/** One declaration as a Tailwind class (without the display variant). */
-export function tailwindClass(prop: string, value: string): string {
+/**
+ * One declaration as a Tailwind class (without the display variant). With the forest's token
+ * kinds, a value that is exactly `var(--token)` becomes the theme utility (`bg-brand`).
+ */
+export function tailwindClass(prop: string, value: string, tokenKinds?: ReadonlyMap<string, TokenKind>): string {
   const v = value.trim();
+  const themed = tokenKinds ? tailwindTokenClass(prop, v, tokenKinds) : undefined;
+  if (themed) return themed;
   const keyword = KEYWORD_UTILITIES[prop]?.[v];
   if (keyword) return keyword;
   const utility = VALUE_UTILITIES[prop];
@@ -209,7 +218,7 @@ export function tailwindClass(prop: string, value: string): string {
   return `[${prop}:${bracket(v)}]`;
 }
 
-function tailwindClasses(branch: Branch): string[] {
+function tailwindClasses(branch: Branch, tokenKinds: ReadonlyMap<string, TokenKind>): string[] {
   const out: string[] = [];
   for (const display of DISPLAYS) {
     const styles: StyleMap | undefined = branch.styles[display.id];
@@ -218,7 +227,7 @@ function tailwindClasses(branch: Branch): string[] {
     for (const [prop, raw] of Object.entries(styles)) {
       const value = sanitizeCssValue(raw);
       if (!isSafeCssProp(prop) || !value) continue;
-      out.push(`${variant}${tailwindClass(prop, value)}`);
+      out.push(`${variant}${tailwindClass(prop, value, tokenKinds)}`);
     }
   }
   return out;
@@ -235,6 +244,7 @@ interface Build {
   styling: ComponentStyling;
   classOf: (b: Branch) => string;
   rules: DisplayRule[];
+  tokenKinds: ReadonlyMap<string, TokenKind>;
 }
 
 function leafEl(leaf: Leaf, inSvg: boolean): El {
@@ -258,7 +268,7 @@ function branchEl(branch: Branch, b: Build, inSvg: boolean, asTag?: string): El 
   const childSvg = childrenInSvg(branch, inSvg);
   const classes = branch.classes.filter(Boolean);
   if (hasStyles(branch)) {
-    if (b.styling === 'tailwind') classes.push(...tailwindClasses(branch));
+    if (b.styling === 'tailwind') classes.push(...tailwindClasses(branch, b.tokenKinds));
     else {
       const cls = b.classOf(branch);
       classes.push(cls);
@@ -379,11 +389,18 @@ export function exportComponent(tree: Tree, opts: ComponentOptions): ComponentEx
   if (framework === 'swiftui' || framework === 'flutter') {
     const type = nativeTypeName(name, framework);
     const entry = framework === 'swiftui' ? `${type}.swift` : dartFileName(type);
-    const contents = framework === 'swiftui' ? exportSwiftUI(tree, { name: type, kits: opts.kits }) : exportFlutter(tree, { name: type, kits: opts.kits });
-    return { name: type, framework, entry, files: [{ path: entry, contents }] };
+    const kits = opts.kits ?? [];
+    // Tokens become a DesignTokens type the view refers to by name.
+    const tokenFile = framework === 'swiftui' ? exportSwiftUITokens(kits) : exportFlutterTokens(kits);
+    const native = { name: type, kits, tokens: !!tokenFile };
+    const contents = framework === 'swiftui' ? exportSwiftUI(tree, native) : exportFlutter(tree, native);
+    const files = [{ path: entry, contents }];
+    if (tokenFile) files.push({ path: framework === 'swiftui' ? DESIGN_TOKENS_SWIFT : DESIGN_TOKENS_DART, contents: tokenFile });
+    return { name: type, framework, entry, files };
   }
+  const tokens = themeTokens((opts.kits ?? []).filter((k) => k.enabled));
   // Generated classes are namespaced (`home__hero`) so they never meet a design kit's own classes.
-  const build: Build = { styling, classOf: classNamer(`${cssIdent(slugify(tree.name, 'layout'))}__`), rules: [] };
+  const build: Build = { styling, classOf: classNamer(`${cssIdent(slugify(tree.name, 'layout'))}__`), rules: [], tokenKinds: new Map(tokens.map((t) => [t.name, t.kind])) };
   const svgTree = isSvgRoot(tree.root);
 
   // A page root is a <body>; in a component it becomes a wrapper <div>.
@@ -448,5 +465,12 @@ export function exportComponent(tree: Tree, opts: ComponentOptions): ComponentEx
   }
   if (css && framework !== 'vue' && framework !== 'svelte') files.push({ path: cssFile, contents: `/* ${header((s) => s)} */\n${css}\n` });
   if (kitCss) files.push({ path: 'kits.css', contents: kitCss });
+  if (tokens.length) {
+    files.push({ path: 'tokens.json', contents: `${JSON.stringify(tokensToDtcg(tokens), null, 2)}\n` });
+    if (styling === 'tailwind') {
+      const theme = tailwindThemeCss(tokens);
+      if (theme) files.push({ path: 'tailwind.theme.css', contents: theme }, { path: 'tailwind.tokens.cjs', contents: tailwindPreset(tokens) });
+    }
+  }
   return { name, framework, styling, entry, files };
 }

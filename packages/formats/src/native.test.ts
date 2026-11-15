@@ -135,11 +135,45 @@ describe('exportFlutter', () => {
 });
 
 describe('exportComponent with native frameworks', () => {
-  it('writes one Swift file', () => {
+  it('writes the Swift view and its design tokens', () => {
     const out = exportComponent(page(), { framework: 'swiftui', styling: 'tailwind', kits });
     expect(out.entry).toBe('LandingPage.swift');
-    expect(out.files.map((f) => f.path)).toEqual(['LandingPage.swift']);
+    expect(out.files.map((f) => f.path)).toEqual(['LandingPage.swift', 'DesignTokens.swift']);
     expect(out.styling).toBeUndefined();
+    const [view, tokens] = out.files.map((f) => f.contents);
+    expect(tokens).toContain('enum DesignTokens {');
+    expect(tokens).toContain('static let brand = Color(red: 1, green: 0, blue: 0)');
+    expect(tokens).toContain('static let pad: CGFloat = 12');
+    // `.card { background: var(--brand); padding: var(--pad) }` refers to the tokens by name.
+    expect(view).toContain('.background(DesignTokens.brand)');
+    expect(view).toContain('.padding(DesignTokens.pad)');
+    expect(view).toContain('.clipShape(RoundedRectangle(cornerRadius: 8))');
+  });
+
+  it('writes one Swift file when the kits have no tokens', () => {
+    expect(exportComponent(page(), { framework: 'swiftui' }).files.map((f) => f.path)).toEqual(['LandingPage.swift']);
+  });
+
+  it('writes the Dart widget and its design tokens, imported only when used', () => {
+    const out = exportComponent(page(), { framework: 'flutter', kits });
+    expect(out.files.map((f) => f.path)).toEqual(['landing_page.dart', 'design_tokens.dart']);
+    const [view, tokens] = out.files.map((f) => f.contents);
+    expect(tokens).toContain('abstract final class DesignTokens {');
+    expect(tokens).toContain('static const brand = Color(0xFFFF0000);');
+    expect(tokens).toContain('static const double pad = 12;');
+    expect(view).toContain("import 'design_tokens.dart';");
+    expect(view).toContain('color: DesignTokens.brand');
+    expect(view).toContain('padding: EdgeInsets.all(DesignTokens.pad)');
+    const plain = exportComponent(pageTree('Plain', [createBranch({ tag: 'p', children: [text('Hi')] })]), { framework: 'flutter', kits });
+    expect(plain.files[0].contents).not.toContain('design_tokens.dart');
+  });
+
+  it('keeps literal values for tokens set on the branch itself and for direct calls', () => {
+    const local = pageTree('Local', [createBranch({ tag: 'div', classes: ['card'], styles: { lg: { '--brand': '#00ff00' } }, children: [text('x')] })]);
+    const view = exportComponent(local, { framework: 'swiftui', kits }).files[0].contents;
+    expect(view).toContain('.background(Color(red: 0, green: 1, blue: 0))');
+    expect(view).toContain('.padding(DesignTokens.pad)');
+    expect(exportSwiftUI(page(), { name: 'LandingPage', kits })).not.toContain('DesignTokens');
   });
 
   it('writes one Dart file named in snake case', () => {

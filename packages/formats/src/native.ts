@@ -15,6 +15,8 @@ import {
   type StyleMap,
   type Tree,
   type TreeNode,
+  themeTokens,
+  tokenIdentifier,
 } from '@tree-weaver/core';
 
 /**
@@ -39,6 +41,12 @@ export interface NativeOptions {
   kits?: DesignKit[];
   /** Type name (PascalCase). */
   name: string;
+  /**
+   * Refer to design tokens by name (`DesignTokens.brand`) where a style is exactly
+   * `var(--brand)`, instead of writing the value. Pair with `exportSwiftUITokens` or
+   * `exportFlutterTokens`, which write the `DesignTokens` type. Default: false.
+   */
+  tokens?: boolean;
 }
 
 /* ------------------------------------------------------------- tiers */
@@ -144,6 +152,8 @@ interface Look {
   /** `margin: 0 auto`: centred in its parent. */
   centered: boolean;
   hidden: boolean;
+  /** Design token identifiers for values that are exactly `var(--token)`: `color`, `background`, `fontSize`, `radius`, `borderColor`, `padding.top` and so on. */
+  refs: Record<string, string>;
 }
 
 interface Layout {
@@ -159,6 +169,8 @@ interface Layout {
   align: 'start' | 'center' | 'end' | 'stretch';
   /** Main-axis distribution in a horizontal stack. */
   justify: 'start' | 'center' | 'end' | 'between';
+  /** Design token identifier when the gap is exactly `var(--token)`. */
+  gapRef?: string;
 }
 
 type NView =
@@ -176,22 +188,56 @@ const HEADING: Record<string, TextRole> = { h1: 'h1', h2: 'h2', h3: 'h3', h4: 'h
 const TEXT_BLOCKS = new Set(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'span', 'label', 'li', 'a', 'button', 'small', 'strong', 'em', 'b', 'i', 'figcaption', 'blockquote', 'code', 'pre', 'td', 'th', 'caption', 'dt', 'dd', 'cite', 'q', 'mark', 'time', 'abbr', 'legend', 'summary']);
 const INLINE = new Set(['span', 'a', 'strong', 'em', 'b', 'i', 'small', 'code', 'mark', 'abbr', 'cite', 'q', 'time', 'sub', 'sup', 'u', 's', 'br', 'kbd', 'var', 'samp']);
 
+/** A design token a native export can name: a colour or a length. */
+export interface NativeToken {
+  name: string;
+  /** Swift and Dart identifier, e.g. `twColorAccent`. */
+  id: string;
+  color?: Rgba;
+  length?: number;
+  description?: string;
+}
+
 interface Ctx {
   /** Styles of single-class kit rules, by class name. */
   classStyles: Map<string, DisplayStyles>;
   tokens: Map<string, string>;
+  /** Colour and length tokens, by custom property name. */
+  named: Map<string, NativeToken>;
 }
+
+/** The kits' colour and length tokens, with unique identifiers. */
+export function nativeTokens(kits: DesignKit[]): NativeToken[] {
+  const used = new Set<string>();
+  const out: NativeToken[] = [];
+  for (const t of themeTokens(kits)) {
+    const color = t.kind === 'color' ? cssColor(t.resolved) : undefined;
+    const length = t.kind !== 'color' && t.kind !== 'font-weight' && t.kind !== 'line-height' ? cssLength(t.resolved) : undefined;
+    if (!color && length === undefined) continue;
+    let id = tokenIdentifier(t.name);
+    if (SWIFT_KEYWORDS.has(id)) id = `${id}Token`;
+    for (let i = 2; used.has(id); i++) id = `${tokenIdentifier(t.name)}${i}`;
+    used.add(id);
+    out.push({ name: t.name, id, ...(color ? { color } : { length }), ...(t.description ? { description: t.description } : {}) });
+  }
+  return out;
+}
+
+/** Identifiers Swift or Dart reserve. */
+const SWIFT_KEYWORDS = new Set(['default', 'case', 'class', 'enum', 'struct', 'let', 'var', 'func', 'return', 'if', 'else', 'switch', 'for', 'while', 'in', 'is', 'as', 'new', 'const', 'final', 'static', 'import', 'extension', 'protocol', 'true', 'false', 'nil', 'null', 'self', 'super', 'this', 'do', 'try', 'catch', 'throw', 'operator', 'init', 'deinit', 'subscript', 'typealias', 'where', 'guard', 'defer', 'repeat', 'break', 'continue', 'fallthrough', 'internal', 'private', 'public', 'open', 'fileprivate', 'void', 'with', 'assert', 'rethrows', 'throws', 'async', 'await', 'hashCode', 'runtimeType', 'toString']);
 
 function buildCtx(kits: DesignKit[]): Ctx {
   const classStyles = new Map<string, DisplayStyles>();
-  const tokens = new Map<string, string>();
+  const tokens = new Map<string, string>(themeTokens(kits).map((t) => [t.name, t.value]));
+  const named = new Map(nativeTokens(kits).map((t) => [t.name, t]));
   for (const kit of kits) {
     if (!kit.enabled || !kit.css.trim()) continue;
     const rules = kit.rules ?? parseRulesCss(kit.css).rules;
     for (const rule of rules) {
       const sel = rule.selector.trim();
       if (sel === ':root' || sel === 'html' || sel === 'body') {
-        for (const [k, v] of Object.entries(rule.styles.lg ?? {})) if (k.startsWith('--')) tokens.set(k, v);
+        // :root custom properties are the kit's tokens (read above); body ones count too.
+        if (sel === 'body') for (const [k, v] of Object.entries(rule.styles.lg ?? {})) if (k.startsWith('--')) tokens.set(k, v);
         continue;
       }
       const m = /^\.([\w-]+)$/.exec(sel);
@@ -202,11 +248,19 @@ function buildCtx(kits: DesignKit[]): Ctx {
       classStyles.set(m[1], merged);
     }
   }
-  return { classStyles, tokens };
+  return { classStyles, tokens, named };
+}
+
+/** A tier's styles: `s` with `var()` resolved, and `refs`, the token a property names when its whole value is `var(--token)`. */
+interface TierStyles {
+  s: StyleMap;
+  raw: StyleMap;
+  /** Tokens set on the class or branch itself, which shadow the kit tokens of the same name. */
+  local: Set<string>;
 }
 
 /** A branch's styles per tier: its kit classes' rules, then its own styles, cascaded. */
-function stylesOf(branch: Branch, ctx: Ctx): Tiered<StyleMap> {
+function stylesOf(branch: Branch, ctx: Ctx): Tiered<TierStyles> {
   const merged: DisplayStyles = {};
   for (const c of branch.classes) {
     const s = ctx.classStyles.get(c);
@@ -221,11 +275,65 @@ function stylesOf(branch: Branch, ctx: Ctx): Tiered<StyleMap> {
     const tokens = local.length ? new Map([...ctx.tokens, ...local]) : ctx.tokens;
     const out: StyleMap = {};
     for (const [k, v] of Object.entries(raw)) if (!k.startsWith('--')) out[k] = resolveVars(v, tokens);
-    return out;
+    return { s: out, raw, local: new Set(local.map(([k]) => k)) };
   });
 }
 
-function lookOf(s: StyleMap): Look {
+/** The token a value names when it is exactly `var(--token)` (with or without a fallback). */
+function tokenRef(raw: string | undefined, want: 'color' | 'length', ts: TierStyles | undefined, ctx: Ctx | undefined): string | undefined {
+  if (!raw || !ts || !ctx) return undefined;
+  const m = /^var\(\s*(--[\w-]+)\s*(?:,[^()]*)?\)$/.exec(raw.trim());
+  if (!m || ts.local.has(m[1])) return undefined;
+  const t = ctx.named.get(m[1]);
+  return t && (want === 'color' ? t.color : t.length !== undefined) ? t.id : undefined;
+}
+
+/** Split a shorthand at top-level spaces: `var(--a, 1px) 2px` → [`var(--a, 1px)`, `2px`]. */
+function splitTop(value: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let cur = '';
+  for (const ch of value.trim()) {
+    if (ch === '(') depth++;
+    if (ch === ')') depth--;
+    if (/\s/.test(ch) && depth === 0) {
+      if (cur) out.push(cur);
+      cur = '';
+    } else cur += ch;
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
+/** Token refs for each padding side, from the raw (unresolved) declarations. */
+function paddingRefs(raw: StyleMap, ts: TierStyles, ctx: Ctx, refs: Record<string, string>): void {
+  const set = (side: string, v: string | undefined) => {
+    const id = tokenRef(v, 'length', ts, ctx);
+    if (id) refs[`padding.${side}`] = id;
+    else delete refs[`padding.${side}`];
+  };
+  const short = raw.padding ? splitTop(raw.padding) : [];
+  if (short.length) {
+    const [t, r = t, b = t, l = r] = short;
+    set('top', t);
+    set('right', r);
+    set('bottom', b);
+    set('left', l);
+  }
+  const inline = raw['padding-inline'] ? splitTop(raw['padding-inline']) : undefined;
+  if (inline) {
+    set('left', inline[0]);
+    set('right', inline[1] ?? inline[0]);
+  }
+  const block = raw['padding-block'] ? splitTop(raw['padding-block']) : undefined;
+  if (block) {
+    set('top', block[0]);
+    set('bottom', block[1] ?? block[0]);
+  }
+  for (const side of ['top', 'right', 'bottom', 'left']) if (raw[`padding-${side}`] !== undefined) set(side, raw[`padding-${side}`]);
+}
+
+function lookOf(s: StyleMap, ts?: TierStyles, ctx?: Ctx): Look {
   const padding = edges(s, 'padding');
   const margin = edges(s, 'margin');
   const weight = s['font-weight'];
@@ -253,11 +361,33 @@ function lookOf(s: StyleMap): Look {
     opacity: opacity !== undefined && Number.isFinite(opacity) && opacity < 1 ? opacity : undefined,
     centered: margin.autoX,
     hidden: s.display === 'none',
+    refs: ts && ctx ? lookRefs(ts, ctx) : {},
   };
 }
 
-function layoutOf(s: StyleMap): Layout {
+function lookRefs(ts: TierStyles, ctx: Ctx): Record<string, string> {
+  const raw = ts.raw;
+  const refs: Record<string, string> = {};
+  const add = (key: string, value: string | undefined, want: 'color' | 'length') => {
+    const id = tokenRef(value, want, ts, ctx);
+    if (id) refs[key] = id;
+  };
+  add('color', raw.color, 'color');
+  add('background', raw['background-color'] ?? raw.background, 'color');
+  add('fontSize', raw['font-size'], 'length');
+  const radius = raw['border-radius'] ? splitTop(raw['border-radius']) : [];
+  if (radius.length === 1) add('radius', radius[0], 'length');
+  const border = raw.border ? splitTop(raw.border) : [];
+  for (const part of border) add('borderColor', part, 'color');
+  paddingRefs(raw, ts, ctx, refs);
+  return refs;
+}
+
+function layoutOf(s: StyleMap, ts?: TierStyles, ctx?: Ctx): Layout {
   const gap = cssLength(s.gap?.split(/\s+/)[0] ?? s['column-gap'] ?? s['row-gap']) ?? 0;
+  const rawGap = ts ? (ts.raw.gap ? splitTop(ts.raw.gap)[0] : (ts.raw['column-gap'] ?? ts.raw['row-gap'])) : undefined;
+  const gapRef = tokenRef(rawGap, 'length', ts, ctx);
+  const withGap = (l: Layout): Layout => (gapRef ? { ...l, gapRef } : l);
   const ai = s['align-items'];
   const align: Layout['align'] = ai === 'center' ? 'center' : ai === 'flex-end' || ai === 'end' ? 'end' : ai === 'stretch' ? 'stretch' : 'start';
   const jc = s['justify-content'];
@@ -266,15 +396,15 @@ function layoutOf(s: StyleMap): Layout {
   if (display === 'grid' || display === 'inline-grid') {
     const template = s['grid-template-columns'];
     const auto = parseAutoColumns(template);
-    if (auto) return { kind: 'grid', axis: 'v', wrap: false, columns: 1, minColumn: cssLength(auto.minWidth) ?? 200, gap, align, justify };
+    if (auto) return withGap({ kind: 'grid', axis: 'v', wrap: false, columns: 1, minColumn: cssLength(auto.minWidth) ?? 200, gap, align, justify });
     const tracks = parseTracks(template);
-    return { kind: 'grid', axis: 'v', wrap: false, columns: Math.max(1, tracks?.length ?? 1), gap, align, justify };
+    return withGap({ kind: 'grid', axis: 'v', wrap: false, columns: Math.max(1, tracks?.length ?? 1), gap, align, justify });
   }
   if (display === 'flex' || display === 'inline-flex') {
     const dir = s['flex-direction'] ?? 'row';
-    return { kind: 'stack', axis: dir.startsWith('column') ? 'v' : 'h', wrap: s['flex-wrap'] === 'wrap', columns: 1, gap, align, justify };
+    return withGap({ kind: 'stack', axis: dir.startsWith('column') ? 'v' : 'h', wrap: s['flex-wrap'] === 'wrap', columns: 1, gap, align, justify });
   }
-  return { kind: 'stack', axis: 'v', wrap: false, columns: 1, gap, align: 'stretch', justify: 'start' };
+  return withGap({ kind: 'stack', axis: 'v', wrap: false, columns: 1, gap, align: 'stretch', justify: 'start' });
 }
 
 /** Text of a branch made only of text and inline tags, or null when it holds blocks or media. */
@@ -314,7 +444,7 @@ function toView(node: TreeNode, ctx: Ctx): NView | null {
   }
   const b = node;
   const styles = stylesOf(b, ctx);
-  const look = tiered((t) => lookOf(styles[t]));
+  const look = tiered((t) => lookOf(styles[t].s, styles[t], ctx));
   if (isSvgRoot(b) || b.tag === 'svg') return { kind: 'placeholder', note: `SVG drawing${b.name ? ` "${b.name}"` : ''}: export the tree as .svg and add it as an image asset` };
   switch (b.tag) {
     case 'hr':
@@ -356,7 +486,7 @@ function toView(node: TreeNode, ctx: Ctx): NView | null {
     return { kind: 'text', text: label, role, look };
   }
   const children = b.children.map((c) => toView(c, ctx)).filter((v): v is NView => !!v);
-  const layout = tiered((t) => layoutOf(styles[t]));
+  const layout = tiered((t) => layoutOf(styles[t].s, styles[t], ctx));
   // A grid on one display and a stack on another: a one-column grid on the others.
   if (TIERS.some((t) => layout[t].kind === 'grid')) {
     for (const t of TIERS) if (layout[t].kind !== 'grid') layout[t] = { ...layout[t], kind: 'grid', columns: 1, minColumn: undefined };
@@ -373,6 +503,13 @@ class Out {
     this.lines.push(`${'    '.repeat(depth)}${text}`.replace(/\s+$/, ''));
   }
 }
+
+/** Set while an export that names tokens is being written (exports are synchronous). */
+let namingTokens = false;
+/** `DesignTokens.id` for a look's token ref, when the export names tokens. */
+const R = (refs: Record<string, string>, key: string): string | undefined => (namingTokens && refs[key] ? `DesignTokens.${refs[key]}` : undefined);
+/** A layout's gap: its token or its value. */
+const gapOf = (l: Layout): string => (namingTokens && l.gapRef ? `DesignTokens.${l.gapRef}` : dbl(l.gap));
 
 const num = (n: number) => (Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100));
 const dbl = (n: number) => (Number.isInteger(n) ? `${n}` : num(n));
@@ -405,13 +542,13 @@ function swiftModifiers(look: Tiered<Look>, opts: { text?: TextRole; fill?: bool
   const has = <K extends keyof Look>(k: K) => look.lg[k] !== undefined || look.phone[k] !== undefined;
   if (opts.text) {
     const role = opts.text;
-    if (has('fontSize')) m.push(`.font(.system(size: ${swiftPick(look, (l) => dbl(l.fontSize ?? DEFAULT_SIZE[role]))}${role === 'code' ? ', design: .monospaced' : ''}))`);
+    if (has('fontSize')) m.push(`.font(.system(size: ${swiftPick(look, (l) => R(l.refs, 'fontSize') ?? dbl(l.fontSize ?? DEFAULT_SIZE[role]))}${role === 'code' ? ', design: .monospaced' : ''}))`);
     else m.push(`.font(${SWIFT_FONT[role]})`);
     if (has('bold')) m.push(`.fontWeight(${swiftPick(look, (l) => SWIFT_WEIGHT(l.bold ?? 400))})`);
     if (look.lg.italic) m.push('.italic()');
     if (has('align')) m.push(`.multilineTextAlignment(${swiftPick(look, (l) => `.${l.align ?? 'leading'}`)})`);
   }
-  if (has('color')) m.push(`.foregroundStyle(${swiftPick(look, (l) => (l.color ? swiftColor(l.color) : 'Color.primary'))})`);
+  if (has('color')) m.push(`.foregroundStyle(${swiftPick(look, (l) => (l.color ? (R(l.refs, 'color') ?? swiftColor(l.color)) : 'Color.primary'))})`);
   if (has('width') || has('height')) {
     const parts = [];
     if (has('width')) parts.push(`width: ${swiftPick(look, (l) => (l.width !== undefined ? dbl(l.width) : 'nil'))}`);
@@ -419,21 +556,21 @@ function swiftModifiers(look: Tiered<Look>, opts: { text?: TextRole; fill?: bool
     m.push(`.frame(${parts.join(', ')})`);
   }
   if (has('minHeight')) m.push(`.frame(minHeight: ${swiftPick(look, (l) => (l.minHeight !== undefined ? dbl(l.minHeight) : 'nil'))}, alignment: .topLeading)`);
-  const pad = (l: Look) => l.padding;
-  const p = tiered((t) => pad(look[t]));
-  if (Object.values(p.lg).some(Boolean) || Object.values(p.phone).some(Boolean)) {
+  if (Object.values(look.lg.padding).some(Boolean) || Object.values(look.phone.padding).some(Boolean)) {
     const sides = ['top', 'leading', 'bottom', 'trailing'] as const;
     const key = { top: 'top', leading: 'left', bottom: 'bottom', trailing: 'right' } as const;
-    const uniform = (e: Edges) => e.top === e.right && e.top === e.bottom && e.top === e.left;
-    if (uniform(p.lg) && uniform(p.phone)) m.push(`.padding(${swiftPick(p, (e) => dbl(e.top))})`);
-    else m.push(`.padding(EdgeInsets(${sides.map((s) => `${s}: ${swiftPick(p, (e) => dbl(e[key[s]]))}`).join(', ')}))`);
+    const side = (l: Look, s: keyof Edges) => R(l.refs, `padding.${s}`) ?? dbl(l.padding[s]);
+    const uniform = (l: Look) => side(l, 'top') === side(l, 'right') && side(l, 'top') === side(l, 'bottom') && side(l, 'top') === side(l, 'left');
+    if (uniform(look.lg) && uniform(look.phone)) m.push(`.padding(${swiftPick(look, (l) => side(l, 'top'))})`);
+    else m.push(`.padding(EdgeInsets(${sides.map((s) => `${s}: ${swiftPick(look, (l) => side(l, key[s]))}`).join(', ')}))`);
   }
   if (has('maxWidth')) m.push(`.frame(maxWidth: ${swiftPick(look, (l) => (l.maxWidth !== undefined ? dbl(l.maxWidth) : '.infinity'))})`);
   const align = opts.text && look.lg.align === 'center' ? '.center' : opts.text && look.lg.align === 'trailing' ? '.trailing' : '.leading';
   if (opts.fill) m.push(`.frame(maxWidth: .infinity, alignment: ${look.lg.centered ? '.center' : align})`);
-  if (has('background')) m.push(`.background(${swiftPick(look, (l) => (l.background ? swiftColor(l.background) : 'Color.clear'))})`);
-  if (has('radius')) m.push(`.clipShape(RoundedRectangle(cornerRadius: ${swiftPick(look, (l) => dbl(l.radius ?? 0))}))`);
-  if (look.lg.border) m.push(`.overlay(RoundedRectangle(cornerRadius: ${dbl(look.lg.radius ?? 0)}).stroke(${swiftColor(look.lg.border.color)}, lineWidth: ${dbl(look.lg.border.width)}))`);
+  if (has('background')) m.push(`.background(${swiftPick(look, (l) => (l.background ? (R(l.refs, 'background') ?? swiftColor(l.background)) : 'Color.clear'))})`);
+  const radius = (l: Look) => (l.radius !== undefined ? (R(l.refs, 'radius') ?? dbl(l.radius)) : '0');
+  if (has('radius')) m.push(`.clipShape(RoundedRectangle(cornerRadius: ${swiftPick(look, radius)}))`);
+  if (look.lg.border) m.push(`.overlay(RoundedRectangle(cornerRadius: ${radius(look.lg)}).stroke(${R(look.lg.refs, 'borderColor') ?? swiftColor(look.lg.border.color)}, lineWidth: ${dbl(look.lg.border.width)}))`);
   if (has('opacity')) m.push(`.opacity(${swiftPick(look, (l) => num(l.opacity ?? 1))})`);
   return m;
 }
@@ -525,13 +662,13 @@ function swiftBody(v: NView, o: Out, d: number, fill: boolean): void {
     case 'box': {
       if (v.note) o.line(d, `// ${comment(v.note)}`);
       const L = v.layout;
-      const spacing = swiftPick(L, (l) => dbl(l.gap));
+      const spacing = swiftPick(L, gapOf);
       const crossV = (l: Layout) => (l.align === 'center' ? '.center' : l.align === 'end' ? '.trailing' : '.leading');
       const crossH = (l: Layout) => (l.align === 'center' ? '.center' : l.align === 'end' ? '.bottom' : '.top');
       let childFill = false;
       if (L.lg.kind === 'grid') {
         const columns = (l: Layout) =>
-          l.minColumn !== undefined ? `[GridItem(.adaptive(minimum: ${dbl(l.minColumn)}), spacing: ${dbl(l.gap)}, alignment: .top)]` : `Array(repeating: GridItem(.flexible(), spacing: ${dbl(l.gap)}, alignment: .top), count: ${l.columns})`;
+          l.minColumn !== undefined ? `[GridItem(.adaptive(minimum: ${dbl(l.minColumn)}), spacing: ${gapOf(l)}, alignment: .top)]` : `Array(repeating: GridItem(.flexible(), spacing: ${gapOf(l)}, alignment: .top), count: ${l.columns})`;
         o.line(d, `LazyVGrid(columns: ${swiftPick(L, columns)}, alignment: .leading, spacing: ${spacing}) {`);
         childFill = true;
       } else if (same(tiered((t) => L[t].axis)) || L.lg.axis === L.phone.axis) {
@@ -541,7 +678,7 @@ function swiftBody(v: NView, o: Out, d: number, fill: boolean): void {
           childFill = l.align === 'stretch' || l.align === 'start';
         } else o.line(d, `HStack(alignment: ${crossH(l)}, spacing: ${spacing}) {`);
       } else {
-        const layout = (l: Layout) => (l.axis === 'v' ? `AnyLayout(VStackLayout(alignment: .leading, spacing: ${dbl(l.gap)}))` : `AnyLayout(HStackLayout(alignment: ${crossH(l)}, spacing: ${dbl(l.gap)}))`);
+        const layout = (l: Layout) => (l.axis === 'v' ? `AnyLayout(VStackLayout(alignment: .leading, spacing: ${gapOf(l)}))` : `AnyLayout(HStackLayout(alignment: ${crossH(l)}, spacing: ${gapOf(l)}))`);
         o.line(d, `${swiftPick(L, layout)} {`);
       }
       const between = L.lg.kind === 'stack' && L.lg.axis === 'h' && L.lg.justify === 'between';
@@ -568,6 +705,15 @@ export function nativeTypeName(name: string, framework: NativeFramework): string
 }
 
 export function exportSwiftUI(tree: Tree, opts: NativeOptions): string {
+  namingTokens = opts.tokens === true;
+  try {
+    return writeSwiftUI(tree, opts);
+  } finally {
+    namingTokens = false;
+  }
+}
+
+function writeSwiftUI(tree: Tree, opts: NativeOptions): string {
   const ctx = buildCtx(opts.kits ?? []);
   const root = toView(tree.root, ctx) ?? { kind: 'placeholder', note: 'The tree is empty' };
   const o = new Out();
@@ -642,9 +788,9 @@ function dartVisible(hidden: Tiered<boolean>): string | null {
 function dartTextStyle(look: Tiered<Look>, role: TextRole): string {
   const parts: string[] = [];
   const has = <K extends keyof Look>(k: K) => TIERS.some((t) => look[t][k] !== undefined);
-  if (has('fontSize')) parts.push(`fontSize: ${dartPick(look, (l) => (l.fontSize !== undefined ? dbl(l.fontSize) : 'null'))}`);
+  if (has('fontSize')) parts.push(`fontSize: ${dartPick(look, (l) => (l.fontSize !== undefined ? (R(l.refs, 'fontSize') ?? dbl(l.fontSize)) : 'null'))}`);
   if (has('bold')) parts.push(`fontWeight: ${dartPick(look, (l) => (l.bold !== undefined ? DART_WEIGHT(l.bold) : 'null'))}`);
-  if (has('color')) parts.push(`color: ${dartPick(look, (l) => (l.color ? dartColor(l.color) : 'null'))}`);
+  if (has('color')) parts.push(`color: ${dartPick(look, (l) => (l.color ? (R(l.refs, 'color') ?? dartColor(l.color)) : 'null'))}`);
   if (look.lg.italic) parts.push('fontStyle: FontStyle.italic');
   if (role === 'code') parts.push("fontFamily: 'monospace'");
   const base = `Theme.of(context).textTheme.${DART_TEXT[role]}`;
@@ -654,12 +800,12 @@ function dartTextStyle(look: Tiered<Look>, role: TextRole): string {
 /** Wrap a widget in the containers its look needs. Returns the opening lines' builder. */
 function dartDecorate(look: Tiered<Look>, o: Out, d: number, inner: (d: number) => void): void {
   const has = <K extends keyof Look>(k: K) => TIERS.some((t) => look[t][k] !== undefined);
-  const pad = tiered((t) => look[t].padding);
-  const anyPad = TIERS.some((t) => Object.values(pad[t]).some(Boolean));
+  const anyPad = TIERS.some((t) => Object.values(look[t].padding).some(Boolean));
+  const side = (l: Look, s: keyof Edges) => R(l.refs, `padding.${s}`) ?? dbl(l.padding[s]);
   const deco: string[] = [];
-  if (has('background')) deco.push(`color: ${dartPick(look, (l) => (l.background ? dartColor(l.background) : 'null'))}`);
-  if (has('radius')) deco.push(`borderRadius: BorderRadius.circular(${dartPick(look, (l) => dbl(l.radius ?? 0))})`);
-  if (look.lg.border) deco.push(`border: Border.all(color: ${dartColor(look.lg.border.color)}, width: ${dbl(look.lg.border.width)})`);
+  if (has('background')) deco.push(`color: ${dartPick(look, (l) => (l.background ? (R(l.refs, 'background') ?? dartColor(l.background)) : 'null'))}`);
+  if (has('radius')) deco.push(`borderRadius: BorderRadius.circular(${dartPick(look, (l) => (l.radius !== undefined ? (R(l.refs, 'radius') ?? dbl(l.radius)) : '0'))})`);
+  if (look.lg.border) deco.push(`border: Border.all(color: ${R(look.lg.refs, 'borderColor') ?? dartColor(look.lg.border.color)}, width: ${dbl(look.lg.border.width)})`);
   const needsBox = anyPad || deco.length || has('width') || has('height') || has('maxWidth') || has('minHeight');
   let depth = d;
   const closers: string[] = [];
@@ -683,8 +829,8 @@ function dartDecorate(look: Tiered<Look>, o: Out, d: number, inner: (d: number) 
   if (needsBox) {
     open(sizeOnly ? 'SizedBox(' : 'Container(');
     if (anyPad) {
-      const uniform = TIERS.every((t) => pad[t].top === pad[t].right && pad[t].top === pad[t].bottom && pad[t].top === pad[t].left);
-      o.line(depth, uniform ? `padding: EdgeInsets.all(${dartPick(pad, (e) => dbl(e.top))}),` : `padding: EdgeInsets.fromLTRB(${(['left', 'top', 'right', 'bottom'] as const).map((s) => dartPick(pad, (e) => dbl(e[s]))).join(', ')}),`);
+      const uniform = TIERS.every((t) => side(look[t], 'top') === side(look[t], 'right') && side(look[t], 'top') === side(look[t], 'bottom') && side(look[t], 'top') === side(look[t], 'left'));
+      o.line(depth, uniform ? `padding: EdgeInsets.all(${dartPick(look, (l) => side(l, 'top'))}),` : `padding: EdgeInsets.fromLTRB(${(['left', 'top', 'right', 'bottom'] as const).map((s) => dartPick(look, (l) => side(l, s))).join(', ')}),`);
     }
     if (has('width')) o.line(depth, `width: ${dartPick(look, (l) => (l.width !== undefined ? dbl(l.width) : 'null'))},`);
     if (has('height')) o.line(depth, `height: ${dartPick(look, (l) => (l.height !== undefined ? dbl(l.height) : 'null'))},`);
@@ -810,7 +956,7 @@ function dartView(v: NView, o: Out, d: number): void {
       const L = v.layout;
       dartDecorate(v.look, o, d, (dd) => {
         if (v.note) o.line(dd, `// ${comment(v.note)}`);
-        const spacing = dartPick(L, (l) => dbl(l.gap));
+        const spacing = dartPick(L, gapOf);
         if (L.lg.kind === 'grid') {
           const cols = dartPick(L, (l) => String(l.columns));
           const min = TIERS.some((t) => L[t].minColumn !== undefined) ? dartPick(L, (l) => (l.minColumn !== undefined ? dbl(l.minColumn) : 'null')) : 'null';
@@ -891,6 +1037,15 @@ class _Grid extends StatelessWidget {
 `;
 
 export function exportFlutter(tree: Tree, opts: NativeOptions): string {
+  namingTokens = opts.tokens === true;
+  try {
+    return writeFlutter(tree, opts);
+  } finally {
+    namingTokens = false;
+  }
+}
+
+function writeFlutter(tree: Tree, opts: NativeOptions): string {
   const ctx = buildCtx(opts.kits ?? []);
   const root = toView(tree.root, ctx) ?? { kind: 'placeholder', note: 'The tree is empty' };
   const tablet = getDisplay('tablet').breakpoint ?? 1024;
@@ -925,8 +1080,36 @@ export function exportFlutter(tree: Tree, opts: NativeOptions): string {
   if (!used('phone')) out = out.replace(/\n\s*final phone = [^\n]+/, '');
   if (!used('tablet')) out = out.replace(/\n\s*final tablet = [^\n]+/, '');
   if (!used('phone') && !used('tablet')) out = out.replace(/\n\s*final width = [^\n]+/, '');
+  if (view.includes('DesignTokens.')) out = out.replace("import 'package:flutter/material.dart';", `import 'package:flutter/material.dart';\nimport '${DESIGN_TOKENS_DART}';`);
   return `${out}\n${body.includes('_Grid(') ? GRID_HELPER : ''}`;
 }
 
 /** File name for a Dart type: `LandingPage` → `landing_page.dart`. */
 export const dartFileName = (name: string) => `${name.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()}.dart`;
+
+/* ------------------------------------------------------------ token files */
+
+export const DESIGN_TOKENS_SWIFT = 'DesignTokens.swift';
+export const DESIGN_TOKENS_DART = 'design_tokens.dart';
+
+/** A Swift file with the kits' colour and length tokens as `DesignTokens.name`. Empty when there are none. */
+export function exportSwiftUITokens(kits: DesignKit[]): string {
+  const tokens = nativeTokens(kits);
+  if (!tokens.length) return '';
+  const lines = tokens.map((t) => {
+    const doc = `    /// \`${t.name}\`${t.description ? `: ${comment(t.description)}` : ''}`;
+    return `${doc}\n    static let ${t.id}${t.color ? ` = ${swiftColor(t.color)}` : `: CGFloat = ${dbl(t.length!)}`}`;
+  });
+  return `// Generated by Tree Weaver from the design tokens of the forest's kits.\n// Views exported with tokens refer to these by name; edit a value here to restyle them all.\nimport SwiftUI\n\nenum DesignTokens {\n${lines.join('\n')}\n}\n`;
+}
+
+/** A Dart file with the kits' colour and length tokens as `DesignTokens.name`. Empty when there are none. */
+export function exportFlutterTokens(kits: DesignKit[]): string {
+  const tokens = nativeTokens(kits);
+  if (!tokens.length) return '';
+  const lines = tokens.map((t) => {
+    const doc = `  /// \`${t.name}\`${t.description ? `: ${comment(t.description)}` : ''}`;
+    return `${doc}\n  static const ${t.color ? `${t.id} = ${dartColor(t.color)}` : `double ${t.id} = ${dbl(t.length!)}`};`;
+  });
+  return `// Generated by Tree Weaver from the design tokens of the forest's kits.\n// Widgets exported with tokens refer to these by name; edit a value here to restyle them all.\nimport 'package:flutter/painting.dart';\n\nabstract final class DesignTokens {\n${lines.join('\n')}\n}\n`;
+}

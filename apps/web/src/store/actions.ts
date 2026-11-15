@@ -56,6 +56,10 @@ import {
   type StyleRule,
   type Tree,
   type TreeNode,
+  addKitsBeforeTokens,
+  resetToken,
+  setToken,
+  type DesignToken,
 } from '@tree-weaver/core';
 import {
   exportComponent,
@@ -409,7 +413,7 @@ export function insertWithKits(node: TreeNode, kits: DesignKit[], targetId?: str
   if (!allowed(tree.root, parentId, node)) return;
   const added = newKits(kits);
   try {
-    const withKits = added.length ? { ...forest, kits: [...forest.kits, ...added] } : forest;
+    const withKits = added.length ? { ...forest, kits: addKitsBeforeTokens(forest.kits, added) } : forest;
     commit(updateTreeRoot(withKits, tree.id, (root) => insertNode(root, parentId, node, index)));
   } catch (err) {
     toast((err as Error).message, 'error');
@@ -436,7 +440,7 @@ export function addTreesWithKits(trees: Tree[], kits: DesignKit[]): { trees: Tre
     return { ...t, name };
   });
   const added = newKits(kits);
-  commit({ ...forest, trees: [...forest.trees, ...named], kits: [...forest.kits, ...added] });
+  commit({ ...forest, trees: [...forest.trees, ...named], kits: addKitsBeforeTokens(forest.kits, added) });
   switchTree(named[0].id);
   return { trees: named, kits: added };
 }
@@ -667,12 +671,33 @@ function uniqueName(base: string, taken: string[]): string {
   return `${base} ${n}`;
 }
 
+/* ------------------------------------------------------------- tokens */
+
+/** Set (or add) a design token in the forest's token kit; every var(--name) follows. */
+export function setTokenValue(token: DesignToken): boolean {
+  const forest = state.forest;
+  if (!forest) return false;
+  try {
+    commit({ ...forest, kits: setToken(forest.kits, token) });
+    return true;
+  } catch (err) {
+    toast((err as Error).message, 'error');
+    return false;
+  }
+}
+
+/** Drop a token edit, so the kit's own value shows again. */
+export function resetTokenValue(name: string): void {
+  const forest = state.forest;
+  if (forest) commit({ ...forest, kits: resetToken(forest.kits, name) });
+}
+
 /* ------------------------------------------------------------- kits */
 
 export function addKit(kit: DesignKit): void {
   const forest = state.forest;
   if (!forest) return;
-  commit({ ...forest, kits: [...forest.kits, kit] });
+  commit({ ...forest, kits: addKitsBeforeTokens(forest.kits, [kit]) });
   toast(`Added design kit “${kit.name}”`, 'success');
 }
 
@@ -873,7 +898,7 @@ export async function importText(text: string, format?: FormatId, fileName?: str
   tree = { ...tree, name: uniqueName(tree.name, forest.trees.map((t) => t.name)) };
   // Skip kits the forest already has, and the deployment's own stylesheets.
   const added = newKits(doc.kits);
-  commit({ ...forest, trees: [...forest.trees, tree], kits: [...forest.kits, ...added] });
+  commit({ ...forest, trees: [...forest.trees, tree], kits: addKitsBeforeTokens(forest.kits, added) });
   switchTree(tree.id);
   const kitNote = added.length ? ` and ${added.length} design kit${added.length === 1 ? '' : 's'}` : '';
   return { summary: `Added tree “${tree.name}”${kitNote}` };
@@ -893,7 +918,7 @@ export async function openDocument(doc: TreeDocument, meta: ChangeMeta = {}): Pr
   }
   if (open && doc.kind === 'tree' && open.trees.some((t) => t.id === doc.tree.id)) {
     const added = newKits(doc.kits);
-    commit({ ...replaceTree(open, doc.tree), kits: [...open.kits, ...added] }, true, meta);
+    commit({ ...replaceTree(open, doc.tree), kits: addKitsBeforeTokens(open.kits, added) }, true, meta);
     switchTree(doc.tree.id);
     await saveNow();
     return { kind: 'tree', trees: 1 };

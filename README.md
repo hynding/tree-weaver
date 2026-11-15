@@ -217,6 +217,7 @@ Tree Weaver data is plain JSON (or YAML) with a published contract, so agents ca
 - [`docs/checks.md`](docs/checks.md): layout and accessibility checks per display (overflow, contrast, alt text,
   headings, labels) with `tree-weaver lint`, `check_layout` or `checkTree` / `checkRendered`.
 - [`docs/export.md`](docs/export.md): trees as React, Vue or Svelte components (CSS or Tailwind), SwiftUI views or Flutter widgets with `tree-weaver export`.
+- [`docs/tokens.md`](docs/tokens.md): design tokens (colours, spacing, type) from your kits, edited in the Tokens tab or with `tree-weaver tokens`, carried into every export.
 - [`docs/patch.md`](docs/patch.md): patches, lists of edits (`insert`, `move`, `setStyles`, …) applied with
   `tree-weaver patch` or `applyPatch`, all or nothing.
 - [`schema/tree-weaver-v1.schema.json`](schema/tree-weaver-v1.schema.json): the JSON Schema (draft 2020-12),
