@@ -1973,3 +1973,88 @@ details.areas .hint {
   margin: 3px 0 0;
   font-size: 11px;
 }
+
+/* Reusable components */
+.component-panel {
+  margin: 0 0 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+.component-panel .field {
+  margin-bottom: 6px;
+}
+.component-banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 12.5px;
+}
+.component-banner .grow {
+  flex: 1;
+  min-width: 0;
+}
+.component-panel.editing .component-banner {
+  color: var(--accent, #2f6f4f);
+}
+.sub-title {
+  margin: 12px 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.prop-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.prop-row .grow {
+  flex: 1;
+  min-width: 80px;
+}
+.prop-name {
+  font-size: 12px;
+  min-width: 56px;
+}
+.prop-options {
+  flex-basis: 100%;
+}
+.variant-grid label.current {
+  font-weight: 600;
+}
+.component-save {
+  margin: 0 0 10px;
+}
+.component-tile {
+  position: relative;
+}
+.component-tile .blueprint {
+  width: 100%;
+}
+.component-tile .component-edit {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 22px;
+  height: 22px;
+  opacity: 0.7;
+}
+.component-tile .component-edit:hover,
+.component-tile .component-edit:focus-visible {
+  opacity: 1;
+}
+.component-banner svg,
+.component-save svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+.component-tile .blueprint .name {
+  padding-right: 18px;
+}

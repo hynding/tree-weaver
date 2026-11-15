@@ -4,6 +4,7 @@ import {
   currentTree,
   duplicateSelected,
   insertBlueprint,
+  insertComponent,
   moveTo,
   nudge,
   pathTo,
@@ -14,7 +15,7 @@ import {
 import { state } from '../../store/editor';
 import { dropLibraryBranch } from '../../store/storybook';
 import { nodeKind, nodeLabel } from '../../utils/describe';
-import { BLUEPRINT_MIME, LIBRARY_MIME, NODE_MIME, dropPosition, hasType, isTreeDrag } from '../../utils/dnd';
+import { BLUEPRINT_MIME, COMPONENT_MIME, LIBRARY_MIME, NODE_MIME, dropPosition, hasType, isTreeDrag } from '../../utils/dnd';
 import { Icon } from '../../utils/icons';
 
 /** The tree as a collapsible list of branches and leaves, with drag and drop reordering. */
@@ -60,7 +61,9 @@ export class TwOutline {
     const blueprint = e.dataTransfer!.getData(BLUEPRINT_MIME);
     const nodeId = e.dataTransfer!.getData(NODE_MIME);
     const library = e.dataTransfer!.getData(LIBRARY_MIME);
-    if (blueprint) insertBlueprint(blueprint, drop.id, drop.position);
+    const component = e.dataTransfer!.getData(COMPONENT_MIME);
+    if (component) insertComponent(component, drop.id, drop.position);
+    else if (blueprint) insertBlueprint(blueprint, drop.id, drop.position);
     else if (library) dropLibraryBranch(library, drop.id, drop.position);
     else if (nodeId) moveTo(nodeId, drop.id, drop.position);
   }

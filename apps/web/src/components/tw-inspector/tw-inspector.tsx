@@ -1441,6 +1441,7 @@ export class TwInspector {
     return [
       this.renderHead(node, isRoot),
       <div class="panel-body">
+        <tw-component-panel />
         {isBranch(node)
           ? [
               this.renderBranchBasics(node, isRoot),

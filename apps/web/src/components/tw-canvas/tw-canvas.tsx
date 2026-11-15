@@ -28,11 +28,12 @@ import {
   type DisplayId,
   type GridTrack,
 } from '@tree-weaver/core';
-import { allKits, currentTree, insertBlueprint, moveTo, pathTo, select, selectedNode, setStyleValue, updateLeaf, type DropPosition } from '../../store/actions';
+import { allKits, currentTree, insertBlueprint,
+  insertComponent, moveTo, pathTo, select, selectedNode, setStyleValue, updateLeaf, type DropPosition } from '../../store/actions';
 import { onChange, state } from '../../store/editor';
 import { dropLibraryBranch } from '../../store/storybook';
 import { nodeKind, nodeLabel } from '../../utils/describe';
-import { BLUEPRINT_MIME, LIBRARY_MIME, NODE_MIME, dropPosition, hasType, isTreeDrag } from '../../utils/dnd';
+import { BLUEPRINT_MIME, COMPONENT_MIME, LIBRARY_MIME, NODE_MIME, dropPosition, hasType, isTreeDrag } from '../../utils/dnd';
 import { areaColor } from '../../utils/areas';
 import { canvasElement, setCanvasDocument } from '../../utils/frame';
 import { handleShortcut } from '../../utils/shortcuts';
@@ -409,7 +410,9 @@ export class TwCanvas {
     const nodeId = e.dataTransfer!.getData(NODE_MIME);
     state.dragNodeId = null;
     const library = e.dataTransfer!.getData(LIBRARY_MIME);
-    if (blueprint) insertBlueprint(blueprint, mark.id, mark.position);
+    const component = e.dataTransfer!.getData(COMPONENT_MIME);
+    if (component) insertComponent(component, mark.id, mark.position);
+    else if (blueprint) insertBlueprint(blueprint, mark.id, mark.position);
     else if (library) dropLibraryBranch(library, mark.id, mark.position);
     else if (nodeId && nodeId !== mark.id) moveTo(nodeId, mark.id, mark.position);
   }

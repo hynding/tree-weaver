@@ -77,6 +77,8 @@ export interface EditorState {
   openKitId: string | null;
   /** Custom rule shown expanded in the Classes tab. */
   openRuleId: string | null;
+  /** While editing a component: the variant whose styles are shown and edited (null: the base). */
+  componentVariant: string | null;
   /** Bumped when the canvas's stylesheets, markup or width change, so views that read the canvas refresh. */
   canvasVersion: number;
   /** Display sizes and breakpoints changed in this browser. `TW_DISPLAYS` values win over these. */
@@ -118,6 +120,7 @@ export const { state, onChange, reset } = createStore<EditorState>({
   dragNodeId: null,
   openKitId: null,
   openRuleId: null,
+  componentVariant: null,
   canvasVersion: 0,
   displaySettings: {},
   displaysVersion: 0,

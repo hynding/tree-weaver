@@ -4,6 +4,7 @@ import type { Branch, DesignKit, DisplayStyles, Forest, Leaf, StyleMap, StyleRul
 import { SCHEMA_VERSION } from './model';
 import { parseRulesCss, sanitizeSelector, withRules } from './rules';
 import { canonicalTag } from './svg';
+import { COMPONENT_PROP_TYPES, isPropName, syncInstances, type ComponentDef, type ComponentInstance, type ComponentProp, type ComponentPropType, type ComponentVariant } from './components';
 import { TOKEN_KINDS, TOKENS_KIT_SOURCE, isTokenName, sanitizeTokenValue, tokensFromCss, withTokens, type DesignToken, type TokenKind } from './tokens';
 
 /**
@@ -77,9 +78,58 @@ export function normalizeNode(value: unknown, path = 'node', seen = new Set<stri
   };
   if (value.type) branch.type = str(value.type);
   if (value.name) branch.name = str(value.name);
+  const instance = normalizeInstance(value.instance);
+  if (instance) branch.instance = instance;
   uniq(branch, seen);
   branch.children = children.map((c, i) => normalizeNode(c, `${path}.children[${i}]`, seen));
   return branch;
+}
+
+function normalizeInstance(value: unknown): ComponentInstance | undefined {
+  if (!isObj(value) || !str(value.component)) return undefined;
+  const out: ComponentInstance = { component: str(value.component) };
+  const props = stringMap(value.props);
+  if (Object.keys(props).length) out.props = props;
+  const variants: ComponentInstance['variants'] = {};
+  for (const [d, v] of Object.entries(isObj(value.variants) ? value.variants : {})) if (isDisplayId(d) && str(v)) variants[d] = str(v);
+  if (Object.keys(variants).length) out.variants = variants;
+  return out;
+}
+
+export function normalizeComponent(value: unknown, path = 'component'): ComponentDef {
+  if (!isObj(value)) throw new TreeDataError('Expected a component object', path);
+  const root = normalizeNode(value.root ?? { tag: 'div' }, `${path}.root`);
+  if (root.kind !== 'branch') throw new TreeDataError('A component root must be a branch', `${path}.root`);
+  delete root.instance;
+  const props: ComponentProp[] = [];
+  for (const [i, p] of (Array.isArray(value.props) ? value.props : []).entries()) {
+    if (!isObj(p)) throw new TreeDataError('Expected a prop object', `${path}.props[${i}]`);
+    const name = str(p.name).trim();
+    if (!isPropName(name)) throw new TreeDataError(`"${name}" is not a prop name (letters, digits and _, starting with a letter)`, `${path}.props[${i}].name`);
+    if (props.some((q) => q.name === name)) continue;
+    const type = COMPONENT_PROP_TYPES.includes(p.type as ComponentPropType) ? (p.type as ComponentPropType) : 'text';
+    const prop: ComponentProp = { name, type, default: str(p.default) };
+    if (Array.isArray(p.options)) prop.options = p.options.map((o) => str(o)).filter(Boolean);
+    if (p.description) prop.description = str(p.description);
+    props.push(prop);
+  }
+  const variants: ComponentVariant[] = [];
+  for (const [i, v] of (Array.isArray(value.variants) ? value.variants : []).entries()) {
+    if (!isObj(v)) throw new TreeDataError('Expected a variant object', `${path}.variants[${i}]`);
+    const name = str(v.name).trim();
+    if (!name || variants.some((w) => w.name === name)) continue;
+    const styles: Record<string, DisplayStyles> = {};
+    for (const [id, s] of Object.entries(isObj(v.styles) ? v.styles : {})) {
+      const ds = normalizeStyles(s);
+      if (Object.keys(ds).length) styles[id] = ds;
+    }
+    const variant: ComponentVariant = { name, styles };
+    if (v.description) variant.description = str(v.description);
+    variants.push(variant);
+  }
+  const def: ComponentDef = { id: str(value.id) || createId('c'), name: str(value.name).trim() || 'Component', root, props, variants };
+  if (value.description) def.description = str(value.description);
+  return def;
 }
 
 function uniq<T extends TreeNode>(node: T, seen: Set<string>): T {
@@ -181,6 +231,17 @@ export function normalizeForest(value: unknown, path = 'forest'): Forest {
   for (const tree of forest.trees) {
     if (seen.has(tree.id)) tree.id = createId('t');
     seen.add(tree.id);
+  }
+  if (Array.isArray(value.components) && value.components.length) {
+    const ids = new Set<string>();
+    forest.components = value.components.map((c, i) => {
+      const def = normalizeComponent(c, `${path}.components[${i}]`);
+      if (ids.has(def.id)) def.id = createId('c');
+      ids.add(def.id);
+      return def;
+    });
+    // Instances always show their component as it is now.
+    return syncInstances(forest);
   }
   return forest;
 }

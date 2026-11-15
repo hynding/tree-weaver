@@ -1,3 +1,4 @@
+import { isComponentTreeId, syncBranch, updateComponentTree } from './components';
 import { cloneNode } from './create';
 import type { Branch, DisplayId, Forest, StyleMap, Tree, TreeNode } from './model';
 import { isBranch } from './model';
@@ -188,10 +189,20 @@ export function replaceTree(forest: Forest, tree: Tree): Forest {
   };
 }
 
-/** Apply `fn` to the root of tree `treeId` inside a forest. */
-export function updateTreeRoot(forest: Forest, treeId: string, fn: (root: Branch) => Branch): Forest {
+/**
+ * Apply `fn` to the root of tree `treeId` inside a forest. A component tree id
+ * (`component:<id>`) edits that component's template (or `variant`'s style overrides).
+ * Instances follow their components: branches inside an instance can't be edited directly.
+ */
+export function updateTreeRoot(forest: Forest, treeId: string, fn: (root: Branch) => Branch, variant?: string | null): Forest {
+  if (isComponentTreeId(treeId)) return updateComponentTree(forest, treeId, fn, variant);
   const tree = forest.trees.find((t) => t.id === treeId);
   if (!tree) return forest;
-  const root = fn(tree.root);
+  let root = fn(tree.root);
+  if (root !== tree.root && forest.components?.length) {
+    root = syncBranch(root, forest.components);
+    // An edit inside an instance is undone by the sync: then nothing changed.
+    if (JSON.stringify(root) === JSON.stringify(tree.root)) return forest;
+  }
   return root === tree.root ? forest : replaceTree(forest, { ...tree, root });
 }

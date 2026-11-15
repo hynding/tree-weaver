@@ -53,11 +53,12 @@ const BLOCKED = new Set(BLOCKED_TAGS);
 const TAG = /^[a-z][a-zA-Z0-9-]*$/;
 
 const ENVELOPE_KEYS = new Set(['$schema', 'format', 'version', 'forest', 'tree', 'kits']);
-const FOREST_KEYS = new Set(['id', 'name', 'version', 'trees', 'kits', 'createdAt', 'updatedAt']);
+const FOREST_KEYS = new Set(['id', 'name', 'version', 'trees', 'kits', 'components', 'createdAt', 'updatedAt']);
+const COMPONENT_KEYS = new Set(['id', 'name', 'description', 'root', 'props', 'variants']);
 const TREE_KEYS = new Set(['id', 'name', 'root', 'createdAt', 'updatedAt']);
-const BRANCH_KEYS = new Set(['kind', 'id', 'tag', 'type', 'name', 'classes', 'attrs', 'styles', 'children']);
+const BRANCH_KEYS = new Set(['kind', 'id', 'tag', 'type', 'name', 'classes', 'attrs', 'styles', 'children', 'instance']);
 const LEAF_KEYS = new Set(['kind', 'id', 'type', 'value', 'attrs']);
-const KIT_KEYS = new Set(['id', 'name', 'css', 'enabled', 'source', 'href', 'rules']);
+const KIT_KEYS = new Set(['id', 'name', 'css', 'enabled', 'source', 'href', 'rules', 'tokens']);
 const RULE_KEYS = new Set(['id', 'selector', 'styles']);
 
 /** Turn `gridTemplateColumns` into `grid-template-columns`. */
@@ -178,6 +179,18 @@ class Checker {
       });
     }
     this.kits(value.kits, `${path}.kits`);
+    if (value.components !== undefined) {
+      if (!Array.isArray(value.components)) this.error(`${path}.components`, `"components" must be a list, not ${typeName(value.components)}`);
+      else
+        value.components.forEach((c, i) => {
+          const at = `${path}.components[${i}]`;
+          if (!isObj(c)) return this.error(at, `Expected a component object, got ${typeName(c)}`);
+          this.unknownKeys(c, COMPONENT_KEYS, at, 'component');
+          if (typeof c.name !== 'string' || !c.name.trim()) this.warn(`${at}.name`, 'The component has no name', 'Add "name": "Card"');
+          if (!isObj(c.root)) this.error(`${at}.root`, 'A component needs a "root" branch: its template');
+          else this.node(c.root, `${at}.root`);
+        });
+    }
   }
 
   tree(value: unknown, path: string) {

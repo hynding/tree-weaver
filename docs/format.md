@@ -9,7 +9,7 @@ canonical definition is the JSON Schema at
 
 | Term       | What it is                                                                      | JSON                                                |
 | ---------- | ------------------------------------------------------------------------------- | --------------------------------------------------- |
-| **Forest** | A project: trees plus the design kits (CSS) they share.                         | `{ "name", "trees": [...], "kits": [...] }`         |
+| **Forest** | A project: trees plus the design kits (CSS) and [components](components.md) they share. | `{ "name", "trees": [...], "kits": [...], "components": [...] }` |
 | **Tree**   | One layout: a page, a screen, a section. Its `root` renders as `<body>`, or is an `<svg>` for an SVG tree (a drawing). | `{ "name", "root": { branch } }`                    |
 | **Branch** | An HTML or SVG element with classes, attributes, per-display styles and children. | `{ "tag", "classes", "attrs", "styles", "children" }` |
 | **Leaf**   | Content: text; an image whose `value` is its URL; or an SVG shape whose `value` is the element name. | `{ "kind": "leaf", "type": "text" \| "image" \| "shape", "value" }` or a plain string |

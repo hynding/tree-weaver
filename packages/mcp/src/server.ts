@@ -27,7 +27,7 @@ patch_tree (small edits by path or id; nodes may be shorthand such as "h2: Prici
 validate -> check_layout (problems per display, with fixes) and screenshot (see each display) or render_html, and export_component to hand the layout to a
 React, Vue or Svelte codebase. Every in-place patch_tree saves the file as a version first: diff_versions shows
 what an edit changed and restore_version rolls it back. Prefer the design kit's classes
-(kit_manifest) and design tokens (list_tokens, set_tokens) over inline styles. Read tree-weaver://guide/shorthand and tree-weaver://guide/patch
+(kit_manifest) and design tokens (list_tokens, set_tokens) over inline styles, and reusable components (list_components, insert_component, save_component) over repeating the same branch. Read tree-weaver://guide/shorthand and tree-weaver://guide/patch
 for the full syntax. File paths are relative to the server's workspace folder.`;
 
 const FORMAT_IDS = FORMATS.map((f) => f.id) as [FormatId, ...FormatId[]];
@@ -165,12 +165,16 @@ export function createServer(options: ServerOptions = {}): McpServer {
     {
       title: 'Export a component',
       description:
-        'Turn a tree into source code for a codebase: a React (.jsx/.tsx), Vue or Svelte component, an HTML page with CSS files, a SwiftUI view (.swift) or a Flutter widget (.dart). For web frameworks, styles become a CSS file with readable class names, or Tailwind classes with displays as responsive variants; design kits go to kits.css. SwiftUI and Flutter write one file with the styles (and design kit rules on single classes) built in, switching layout by screen width. Returns every file, or writes them into "outputDir".',
+        'Turn a tree (or a reusable component, with "component") into source code for a codebase: a React (.jsx/.tsx), Vue or Svelte component, an HTML page with CSS files, a SwiftUI view (.swift) or a Flutter widget (.dart). For web frameworks, styles become a CSS file with readable class names, or Tailwind classes with displays as responsive variants; design kits go to kits.css. SwiftUI and Flutter write one file with the styles (and design kit rules on single classes) built in, switching layout by screen width. Returns every file, or writes them into "outputDir".',
       inputSchema: {
         ...source,
         framework: z.enum(['react', 'vue', 'svelte', 'html', 'swiftui', 'flutter']).describe('What to write'),
         styling: z.enum(['css', 'tailwind']).optional().describe('css (default): a stylesheet with generated classes; tailwind: utility classes. Ignored for swiftui and flutter'),
         tree: treeRef,
+        component: z
+          .string()
+          .optional()
+          .describe('Export a reusable component of the forest (name or id, see list_components) instead of a tree: its props become component props and its variants a variant prop'),
         name: z.string().optional().describe('Component name (default: from the tree name, in PascalCase)'),
         typescript: z.boolean().optional().describe('React only: write .tsx'),
         outputDir: z.string().optional().describe('Workspace folder to write the files into, instead of returning them'),
@@ -303,6 +307,65 @@ export function createServer(options: ServerOptions = {}): McpServer {
   );
 
   const tokenKinds = ['color', 'space', 'radius', 'font-family', 'font-size', 'font-weight', 'line-height', 'shadow', 'other'] as const;
+  const branchRef = z.string().describe('A branch: its id, or a path from outline such as /0/2');
+  const keepVersion = z.boolean().optional().describe('Save the file as a version before changing it in place (default true)');
+  server.registerTool(
+    'list_components',
+    {
+      title: 'List components',
+      description:
+        'List a forest\'s reusable components: their props (with types and defaults), variants and how many instances use them. Prefer inserting a component over rebuilding the same branch again.',
+      inputSchema: { ...source },
+      annotations: { ...reads, title: 'List components' },
+    },
+    wrap((args) => tools.listComponents(args)),
+  );
+
+  server.registerTool(
+    'save_component',
+    {
+      title: 'Save a component',
+      description:
+        'Save a branch of a tree as a reusable component of the forest. The branch becomes its first instance. Props are {{name}} placeholders in its text, attribute values, image URLs or class names (a branch with data-show-if="name" shows only when the prop is set); variants are named style overrides per display. Edits the file in place unless output is given; saves a version first.',
+      inputSchema: {
+        ...source,
+        branch: branchRef,
+        name: z.string().optional().describe('Component name (default: the branch name)'),
+        description: z.string().optional(),
+        tree: treeRef,
+        output,
+        keepVersion,
+      },
+      annotations: { ...writes, title: 'Save a component' },
+    },
+    wrap((args) => tools.saveComponent(args)),
+  );
+
+  server.registerTool(
+    'insert_component',
+    {
+      title: 'Insert a component',
+      description:
+        'Insert an instance of a reusable component into a tree. The instance stays linked: it is re-expanded from the component whenever the component changes, so do not patch inside it; change its props, its variants or the component instead. Edits the file in place unless output is given; saves a version first.',
+      inputSchema: {
+        ...source,
+        component: z.string().describe('Component name or id (see list_components)'),
+        parent: z.string().optional().describe("Branch to insert into: id or outline path (default: the tree's root)"),
+        index: z.number().int().min(0).optional().describe('Position among the parent\'s children (default: last)'),
+        props: z.record(z.string(), z.string()).optional().describe('Prop values, e.g. {"title": "Hello", "badge": "true"}; unset props use their defaults'),
+        variants: z
+          .record(z.string(), z.string())
+          .optional()
+          .describe('Variant per display, e.g. {"lg": "row", "mobile-portrait": "stacked"}; displays left out inherit like styles do, and "-" means the base look'),
+        tree: treeRef,
+        output,
+        keepVersion,
+      },
+      annotations: { ...writes, title: 'Insert a component' },
+    },
+    wrap((args) => tools.insertComponent(args as Parameters<typeof tools.insertComponent>[0])),
+  );
+
   server.registerTool(
     'list_tokens',
     {
@@ -364,6 +427,7 @@ export function createServer(options: ServerOptions = {}): McpServer {
     { name: 'patch-guide', uri: 'tree-weaver://guide/patch', title: 'Patch guide', description: 'Every patch operation with examples', mimeType: 'text/markdown', read: () => readDoc('patch.md') },
     { name: 'export-guide', uri: 'tree-weaver://guide/export', title: 'Component export guide', description: 'React, Vue, Svelte and HTML exports, class naming and Tailwind display variants', mimeType: 'text/markdown', read: () => readDoc('export.md') },
     { name: 'tokens-guide', uri: 'tree-weaver://guide/tokens', title: 'Design tokens guide', description: 'Kit :root variables as tokens, editing them, and how each export names them', mimeType: 'text/markdown', read: () => readDoc('tokens.md') },
+    { name: 'components-guide', uri: 'tree-weaver://guide/components', title: 'Components guide', description: 'Reusable components: props, variants per display, instances and exports', mimeType: 'text/markdown', read: () => readDoc('components.md') },
     { name: 'checks-guide', uri: 'tree-weaver://guide/checks', title: 'Layout checks guide', description: 'Every check_layout rule and how rendered checks work', mimeType: 'text/markdown', read: () => readDoc('checks.md') },
     { name: 'blueprints', uri: 'tree-weaver://catalog/blueprints', title: 'Blueprints', description: 'Ready-made branches', mimeType: 'application/json', read: () => json(BLUEPRINTS.map(({ id, label, category, description }) => ({ id, label, category, description }))) },
     { name: 'templates', uri: 'tree-weaver://catalog/templates', title: 'Templates', description: 'Tree templates for create_tree', mimeType: 'application/json', read: () => json(TEMPLATES.map(({ id, label, description }) => ({ id, label, description }))) },
