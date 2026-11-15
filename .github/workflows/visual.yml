@@ -1,0 +1,57 @@
+name: Visual regression
+
+# Renders every example, template, starter forest and blueprint at each display size, once from
+# the pull request's base and once from the pull request, and compares them. Anything that looks
+# different fails the check, with a report of what moved; add the "visual-change" label to accept
+# intended changes (the check runs again when the label changes).
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: visual-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  visual:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out the base branch next to it
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: .visual-base
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Build the pull request's packages
+        run: pnpm install --frozen-lockfile && pnpm build:packages
+      - name: Build the base's packages
+        working-directory: .visual-base
+        run: pnpm install --frozen-lockfile && pnpm build:packages
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Capture the base
+        run: node scripts/visual-capture.mjs visual/base --root .visual-base
+      - name: Capture the pull request
+        run: node scripts/visual-capture.mjs visual/head
+      - name: Compare
+        env:
+          VISUAL_CHANGES_APPROVED: ${{ contains(github.event.pull_request.labels.*.name, 'visual-change') }}
+        run: node scripts/visual-diff.mjs visual/base visual/head visual/report --summary visual/summary.md
+      - name: Summary
+        if: always()
+        run: test -f visual/summary.md && cat visual/summary.md >> "$GITHUB_STEP_SUMMARY" || true
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-report
+          path: visual/report
+          if-no-files-found: ignore
