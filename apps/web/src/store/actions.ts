@@ -60,9 +60,21 @@ import {
   resetToken,
   setToken,
   type DesignToken,
+  componentTreeId,
+  saveComponent,
+  detachInstance,
+  findComponent,
+  findTree,
+  instancesOf,
+  instantiateComponent,
+  isComponentTreeId,
+  updateComponent,
+  type ComponentDef,
+  type ComponentInstance,
 } from '@tree-weaver/core';
 import {
   exportComponent,
+  exportComponentDef,
   exportForest,
   exportStorybook,
   exportTree,
@@ -87,7 +99,11 @@ import { state, type SidebarTab, type Toast } from './editor';
 /** Every kit the trees load, in load order: the deployment's stylesheets first, then the forest's kits. */
 export const allKits = (): DesignKit[] => [...state.envKits, ...(state.forest?.kits ?? [])];
 
-export const currentTree = (): Tree | undefined => state.forest?.trees.find((t) => t.id === state.treeId);
+export const currentTree = (): Tree | undefined => (state.forest ? findTree(state.forest, state.treeId, state.componentVariant) : undefined);
+
+/** The component being edited, when the open tree is a component's template. */
+export const editingComponent = (): ComponentDef | undefined =>
+  state.forest && isComponentTreeId(state.treeId) ? state.forest.components?.find((c) => componentTreeId(c.id) === state.treeId) : undefined;
 
 export const selectedNode = (): TreeNode | null => {
   const tree = currentTree();
@@ -165,7 +181,8 @@ export function commit(next: Forest, record = true, meta: ChangeMeta = {}): void
   if (next === prev) return;
   if (record && prev) history.push(prev, { source: 'editor', ...meta });
   state.forest = next;
-  if (!next.trees.some((t) => t.id === state.treeId)) state.treeId = next.trees[0]?.id ?? '';
+  if (!findTree(next, state.treeId)) state.treeId = next.trees[0]?.id ?? '';
+  if (state.componentVariant && !editingComponent()?.variants.some((v) => v.name === state.componentVariant)) state.componentVariant = null;
   const tree = currentTree();
   if (state.selectedId && (!tree || !findNode(tree.root, state.selectedId))) state.selectedId = null;
   syncHistoryFlags();
@@ -195,7 +212,7 @@ function editTree(fn: (root: Branch) => Branch): void {
   const forest = state.forest;
   if (!forest || !state.treeId) return;
   try {
-    commit(updateTreeRoot(forest, state.treeId, fn));
+    commit(updateTreeRoot(forest, state.treeId, fn, state.componentVariant));
   } catch (err) {
     toast((err as Error).message, 'error');
   }
@@ -390,8 +407,16 @@ function placement(root: Branch, targetId: string, position: DropPosition): { pa
 }
 
 /** Shapes and SVG groups only go inside an `<svg>`, and HTML can't be drawn inside one. Says why with a toast. */
+/** The instance a node is part of (itself, or its nearest instance ancestor). */
+export function instanceOwner(root: Branch, id: string): Branch | null {
+  const node = findNode(root, id);
+  if (node && isBranch(node) && node.instance) return node;
+  return [...ancestorsOf(root, id)].reverse().find((a) => a.instance) ?? null;
+}
+
 function allowed(root: Branch, parentId: string, node: TreeNode): boolean {
-  const problem = placementProblem(root, parentId, node);
+  const owner = instanceOwner(root, parentId);
+  const problem = owner ? `“${owner.name ?? 'This branch'}” is a component instance: edit the component to change what is inside it` : placementProblem(root, parentId, node);
   if (problem) toast(problem, 'error');
   return !problem;
 }
@@ -574,10 +599,88 @@ export function tableEdit(tableId: string, op: 'add-row' | 'remove-row' | 'add-c
 /* ----------------------------------------------------- trees and forests */
 
 export function switchTree(treeId: string): void {
+  if (isComponentTreeId(treeId) && !isComponentTreeId(state.treeId)) lastTreeId = state.treeId;
   state.treeId = treeId;
   state.selectedId = null;
-  prefs.write({ treeId });
+  state.componentVariant = null;
+  if (!isComponentTreeId(treeId)) prefs.write({ treeId });
 }
+
+/* ------------------------------------------------------------ components */
+
+/** The last real tree, to go back to after editing a component. */
+let lastTreeId = '';
+
+/** Save a branch (or the open tree's root) as a reusable component; the branch becomes its first instance. */
+export function saveAsComponent(branchId: string, name: string): ComponentDef | null {
+  const forest = state.forest;
+  const tree = currentTree();
+  if (!forest || !tree || isComponentTreeId(tree.id)) return null;
+  const node = findNode(tree.root, branchId);
+  if (!node || !isBranch(node)) return null;
+  // The branch itself becomes an instance, so it follows the component from now on.
+  const saved = saveComponent(forest, tree.id, node.id, name);
+  if (!saved) return null;
+  const def = saved.component;
+  commit(saved.forest, true, { label: `Saved “${def.name}” as a component` });
+  toast(`Saved “${def.name}” as a component. It is in the Branches tab.`, 'success');
+  return def;
+}
+
+/** Insert an instance of a component at the selection. */
+export function insertComponent(componentId: string, targetId?: string, position?: DropPosition): void {
+  const def = state.forest?.components?.find((c) => c.id === componentId);
+  if (!def) return;
+  const inst = instantiateComponent(def);
+  // Inside a component's template an instance would refer to itself; insert a plain copy.
+  insertAt(isComponentTreeId(state.treeId) ? detachInstance(inst) : inst, targetId, position);
+}
+
+/** Open a component's template on the canvas (optionally one of its variants). */
+export function editComponent(componentId: string, variant: string | null = null): void {
+  switchTree(componentTreeId(componentId));
+  state.componentVariant = variant;
+}
+
+export function leaveComponent(): void {
+  const forest = state.forest;
+  if (!forest) return;
+  switchTree(forest.trees.some((t) => t.id === lastTreeId) ? lastTreeId : (forest.trees[0]?.id ?? ''));
+}
+
+export function setComponentVariant(variant: string | null): void {
+  state.componentVariant = variant;
+  state.selectedId = null;
+}
+
+/** Change a component's name, description, props or variants. Instances follow. */
+export function editComponentDef(componentId: string, fn: (def: ComponentDef) => ComponentDef, label?: string): void {
+  const forest = state.forest;
+  const def = forest?.components?.find((c) => c.id === componentId);
+  if (!forest || !def) return;
+  commit(updateComponent(forest, fn(def)), true, label ? { label } : {});
+}
+
+export function deleteComponent(componentId: string): void {
+  const forest = state.forest;
+  if (!forest) return;
+  // Instances keep their content as plain branches.
+  const detachAll = (node: TreeNode): TreeNode => (isBranch(node) ? { ...(node.instance?.component === componentId ? detachInstance(node) : node), children: node.children.map(detachAll) } : node);
+  if (isComponentTreeId(state.treeId) && state.treeId === componentTreeId(componentId)) leaveComponent();
+  commit({ ...forest, components: (forest.components ?? []).filter((c) => c.id !== componentId), trees: forest.trees.map((t) => ({ ...t, root: detachAll(t.root) as Branch })) });
+}
+
+/** Set an instance's props or variants. */
+export function updateInstance(branchId: string, fn: (instance: ComponentInstance) => ComponentInstance): void {
+  editTree((root) => updateNode(root, branchId, (n) => (isBranch(n) && n.instance ? { ...n, instance: fn(n.instance) } : n)));
+}
+
+export function detachInstanceAt(branchId: string): void {
+  editTree((root) => updateNode(root, branchId, (n) => (isBranch(n) ? detachInstance(n) : n)));
+}
+
+export const componentUses = (componentId: string): number => (state.forest ? instancesOf(state.forest, componentId).length : 0);
+export { findComponent };
 
 export function addTree(templateId = 'blank', name?: string): void {
   const forest = state.forest;
@@ -971,7 +1074,9 @@ export function exportStorybookCurrent(scope: 'tree' | 'forest'): ExportOutput {
 export function exportComponentCurrent(framework: ComponentFramework, styling: ComponentStyling): ExportOutput {
   const tree = currentTree()!;
   // Only the forest's kits: the deployment's stylesheets are the host app's to load.
-  const out = exportComponent(tree, { framework, styling, kits: state.forest!.kits });
+  // With a component open, export the component itself: its props and variants become code.
+  const def = editingComponent();
+  const out = def ? exportComponentDef(def, { framework, styling, kits: state.forest!.kits }) : exportComponent(tree, { framework, styling, kits: state.forest!.kits });
   if (out.files.length === 1) {
     const file = out.files[0];
     return { text: file.contents, fileName: file.path, mime: 'text/plain' };

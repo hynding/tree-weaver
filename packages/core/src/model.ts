@@ -1,3 +1,4 @@
+import type { ComponentDef, ComponentInstance } from './components';
 import type { DesignToken } from './tokens';
 /**
  * The Tree Weaver vocabulary:
@@ -45,6 +46,11 @@ export interface Branch {
   attrs: Record<string, string>;
   styles: DisplayStyles;
   children: TreeNode[];
+  /**
+   * Set on an instance of a reusable component: which component, its prop values and its
+   * variant per display. The branch's content is the expanded component (see `components.ts`).
+   */
+  instance?: ComponentInstance;
 }
 
 export type TreeNode = Branch | Leaf;
@@ -98,6 +104,8 @@ export interface Forest {
   version: 1;
   trees: Tree[];
   kits: DesignKit[];
+  /** Reusable components the trees can use as linked instances. */
+  components?: ComponentDef[];
   createdAt: string;
   updatedAt: string;
 }

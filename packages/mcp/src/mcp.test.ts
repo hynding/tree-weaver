@@ -38,10 +38,11 @@ describe('Tree Weaver MCP server', () => {
   it('lists its tools, resources and prompt, with instructions', async () => {
     const { client } = await connect();
     const tools = (await client.listTools()).tools.map((t) => t.name);
-    expect(tools).toEqual(expect.arrayContaining(['create_tree', 'outline', 'patch_tree', 'validate', 'render_html', 'export_component', 'convert', 'check_layout', 'screenshot', 'catalog', 'kit_manifest', 'list_tokens', 'set_tokens']));
+    expect(tools).toEqual(expect.arrayContaining(['create_tree', 'outline', 'patch_tree', 'validate', 'render_html', 'export_component', 'convert', 'check_layout', 'screenshot', 'catalog', 'kit_manifest', 'list_tokens', 'set_tokens', 'list_components', 'save_component', 'insert_component']));
     expect(client.getInstructions()).toContain('patch_tree');
     const resources = (await client.listResources()).resources.map((r) => r.uri);
     expect(resources).toContain('tree-weaver://schema/document');
+    expect(resources).toContain('tree-weaver://guide/components');
     const schema = await client.readResource({ uri: 'tree-weaver://schema/patch' });
     expect(JSON.parse((schema.contents[0] as { text: string }).text).$schema).toContain('2020-12');
     const guide = await client.readResource({ uri: 'tree-weaver://guide/shorthand' });
@@ -195,6 +196,61 @@ describe('Tree Weaver MCP server', () => {
     expect((await call('set_tokens', { path: 'tokens.tree.json', tokens: [{ name: 'bad name', value: 'x' }] })).text).toContain('Nothing was changed');
     const reset = await call('set_tokens', { path: 'tokens.tree.json', reset: ['tw-color-accent'] });
     expect(reset.text).toContain('--tw-color-accent: #2f6f4f  [color]');
+  });
+
+  it('saves, lists, inserts and exports reusable components', async () => {
+    const { call } = await connect();
+    const site = {
+      format: 'tree-weaver',
+      version: 1,
+      forest: {
+        name: 'Site',
+        trees: [
+          {
+            name: 'Home',
+            root: {
+              tag: 'body',
+              children: [
+                { id: 'b_card', tag: 'article', name: 'Card', styles: { lg: { display: 'flex' } }, children: [{ tag: 'h3', children: [{ type: 'text', value: '{{title}}' }] }, { tag: 'span', attrs: { 'data-show-if': 'badge' }, children: ['New'] }] },
+              ],
+            },
+          },
+        ],
+      },
+    };
+    writeFileSync(join(root, 'site.json'), JSON.stringify(site));
+    const saved = await call('save_component', { path: 'site.json', branch: 'b_card' });
+    expect(saved.isError).toBeFalsy();
+    expect(saved.text).toContain('Saved component "Card"');
+    expect(saved.text).toContain('title: text, badge: boolean');
+    expect(saved.text).toContain('Saved the previous file as version');
+    let doc = file('site.json');
+    const def = doc.forest.components[0];
+    expect(doc.forest.trees[0].root.children[0].instance).toEqual({ component: def.id });
+
+    // A variant added by hand, then an instance that uses it on phones.
+    def.variants = [{ name: 'stacked', styles: { [def.root.id]: { lg: { 'flex-direction': 'column' } } } }];
+    writeFileSync(join(root, 'site.json'), JSON.stringify(doc));
+    const ins = await call('insert_component', { path: 'site.json', component: 'card', props: { title: 'Hello', badge: 'true' }, variants: { 'mobile-portrait': 'stacked' }, keepVersion: false });
+    expect(ins.isError).toBeFalsy();
+    doc = file('site.json');
+    const inst = doc.forest.trees[0].root.children[1];
+    expect(inst.instance).toEqual({ component: def.id, props: { title: 'Hello', badge: 'true' }, variants: { 'mobile-portrait': 'stacked' } });
+    expect(inst.styles['mobile-portrait']).toEqual({ 'flex-direction': 'column' });
+    expect(JSON.stringify(inst.children)).toContain('Hello');
+
+    expect((await call('insert_component', { path: 'site.json', component: 'Card', props: { nope: 'x' } })).text).toContain('has no prop nope');
+    expect((await call('insert_component', { path: 'site.json', component: 'Card', variants: { lg: 'wide' } })).text).toContain('Variants: stacked');
+    expect((await call('insert_component', { path: 'site.json', component: 'Nope' })).text).toContain('Components: Card');
+
+    const list = await call('list_components', { path: 'site.json' });
+    expect(list.text).toContain('Card (' + def.id + '), 2 in use');
+    expect(list.text).toContain('variants: stacked');
+
+    const out = await call('export_component', { path: 'site.json', component: 'Card', framework: 'react' });
+    expect(out.isError).toBeFalsy();
+    expect(out.text).toContain('Card: component "Card" as react');
+    expect(out.text).toContain('variant = ""');
   });
 
   it('keeps every path inside the workspace', async () => {

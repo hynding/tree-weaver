@@ -57,7 +57,7 @@ or set `TW_CHROMIUM_PATH` to a Chrome or Chromium binary. Every other tool works
 | `diff` | What changed between two documents (`before` and `after`, each a `path` or `document`). |
 | `validate` | The strict check, with a path and a fix hint for every problem. |
 | `render_html` | A standalone HTML page with kits and responsive CSS inlined. |
-| `export_component` | A tree as a React, Vue or Svelte component, HTML with CSS files (styled with a CSS file or Tailwind classes), a SwiftUI view or a Flutter widget. Returns every file, or writes them into `outputDir`. See [exporting components](export.md). |
+| `export_component` | A tree (or, with `component`, a reusable component with its props) as a React, Vue or Svelte component, HTML with CSS files (styled with a CSS file or Tailwind classes), a SwiftUI view or a Flutter widget. Returns every file, or writes them into `outputDir`. See [exporting components](export.md). |
 | `convert` | Between JSON, YAML, XML, HTML, Markdown and SVG. |
 | `check_layout` | Layout and accessibility problems per display, each with a path and a fix: sideways overflow, contrast (with kits), alt text, heading order, labels, duplicate ids, empty branches, fixed widths. Renders in Chromium when Playwright is installed; `render: false` checks the tree alone. See [layout checks](checks.md). |
 | `screenshot` | A PNG per display (default `lg`, `tablet`, `mobile-portrait`) from headless Chromium, with page height and a warning when content overflows sideways. Scripts are disabled while rendering. |
@@ -65,6 +65,9 @@ or set `TW_CHROMIUM_PATH` to a Chrome or Chromium binary. Every other tool works
 | `kit_manifest` | Classes, tokens and media queries of `.css` files or a document's kits. |
 | `list_tokens` | The document's design tokens with kinds, resolved values and which are edited. |
 | `set_tokens` | Set, add or reset design tokens in the document's token kit; saves a version first. See [design tokens](tokens.md). |
+| `list_components` | A forest's reusable components with their props, variants and instance counts. |
+| `save_component` | Save a branch as a reusable component; the branch becomes its first instance. Saves a version first. |
+| `insert_component` | Insert a linked instance of a component with `props` and a variant per display (`variants`). Saves a version first. See [components](components.md). |
 
 Tools that read a document take either `path` (a workspace file) or `document` (its text), so an
 agent can also work without files. Failures come back as tool errors with a message that says what

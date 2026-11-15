@@ -11,6 +11,11 @@ an app, rather than a standalone page.
 - **MCP:** the `export_component` tool (`framework`, `styling`, `outputDir`).
 - **Code:** `exportComponent(tree, { framework, styling, kits })` from `@tree-weaver/formats`.
 
+To export a [reusable component](components.md) with its props (React and Vue props, Svelte
+`export let`) and its variants (a `variant` prop), pass `--component <name>` to the CLI,
+`component` to `export_component`, or open the component in the editor before **Export →
+Component**. In code it is `exportComponentDef(def, options)`.
+
 ## What you get
 
 | Framework | Files |

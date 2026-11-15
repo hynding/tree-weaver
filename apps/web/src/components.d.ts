@@ -16,6 +16,13 @@ export namespace Components {
     interface TwClassesPanel {
     }
     /**
+     * Reusable components in the inspector: the component being edited (name, props, variants),
+     * the instance the selection belongs to (prop values, a variant per display), or a button to
+     * save the selected branch as a component.
+     */
+    interface TwComponentPanel {
+    }
+    /**
      * Preview sizes and breakpoints of the display types, and how to fix them with environment variables.
      */
     interface TwDisplaySettings {
@@ -110,6 +117,17 @@ declare global {
     var HTMLTwClassesPanelElement: {
         prototype: HTMLTwClassesPanelElement;
         new (): HTMLTwClassesPanelElement;
+    };
+    /**
+     * Reusable components in the inspector: the component being edited (name, props, variants),
+     * the instance the selection belongs to (prop values, a variant per display), or a button to
+     * save the selected branch as a component.
+     */
+    interface HTMLTwComponentPanelElement extends Components.TwComponentPanel, HTMLStencilElement {
+    }
+    var HTMLTwComponentPanelElement: {
+        prototype: HTMLTwComponentPanelElement;
+        new (): HTMLTwComponentPanelElement;
     };
     /**
      * Preview sizes and breakpoints of the display types, and how to fix them with environment variables.
@@ -247,6 +265,7 @@ declare global {
         "tw-app": HTMLTwAppElement;
         "tw-canvas": HTMLTwCanvasElement;
         "tw-classes-panel": HTMLTwClassesPanelElement;
+        "tw-component-panel": HTMLTwComponentPanelElement;
         "tw-display-settings": HTMLTwDisplaySettingsElement;
         "tw-forest-panel": HTMLTwForestPanelElement;
         "tw-history-panel": HTMLTwHistoryPanelElement;
@@ -272,6 +291,13 @@ declare namespace LocalJSX {
      * Custom classes and selectors: CSS rules written in the editor, styled per display.
      */
     interface TwClassesPanel {
+    }
+    /**
+     * Reusable components in the inspector: the component being edited (name, props, variants),
+     * the instance the selection belongs to (prop values, a variant per display), or a button to
+     * save the selected branch as a component.
+     */
+    interface TwComponentPanel {
     }
     /**
      * Preview sizes and breakpoints of the display types, and how to fix them with environment variables.
@@ -352,6 +378,7 @@ declare namespace LocalJSX {
         "tw-app": TwApp;
         "tw-canvas": TwCanvas;
         "tw-classes-panel": TwClassesPanel;
+        "tw-component-panel": TwComponentPanel;
         "tw-display-settings": TwDisplaySettings;
         "tw-forest-panel": TwForestPanel;
         "tw-history-panel": TwHistoryPanel;
@@ -378,6 +405,12 @@ declare module "@stencil/core" {
              * Custom classes and selectors: CSS rules written in the editor, styled per display.
              */
             "tw-classes-panel": LocalJSX.IntrinsicElements["tw-classes-panel"] & JSXBase.HTMLAttributes<HTMLTwClassesPanelElement>;
+            /**
+             * Reusable components in the inspector: the component being edited (name, props, variants),
+             * the instance the selection belongs to (prop values, a variant per display), or a button to
+             * save the selected branch as a component.
+             */
+            "tw-component-panel": LocalJSX.IntrinsicElements["tw-component-panel"] & JSXBase.HTMLAttributes<HTMLTwComponentPanelElement>;
             /**
              * Preview sizes and breakpoints of the display types, and how to fix them with environment variables.
              */

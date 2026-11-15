@@ -509,3 +509,56 @@ describe('tree-weaver tokens', () => {
     expect(r.files['ios/Page.swift']).toContain('.background(DesignTokens.brand)');
   });
 });
+
+describe('tree-weaver components', () => {
+  const forest = () => ({
+    'site.json': JSON.stringify({
+      format: 'tree-weaver',
+      version: 1,
+      forest: {
+        name: 'Site',
+        trees: [
+          {
+            name: 'Home',
+            root: {
+              tag: 'body',
+              children: [
+                { id: 'b_card', tag: 'article', name: 'Card', styles: { lg: { display: 'flex' } }, children: [{ tag: 'h3', children: [{ type: 'text', value: '{{title}}' }] }, { tag: 'span', attrs: { 'data-show-if': 'badge' }, children: ['New'] }] },
+              ],
+            },
+          },
+        ],
+      },
+    }),
+  });
+
+  it('saves a branch as a component, inserts instances with props and variants, lists and exports it', async () => {
+    const saved = await cli(['components', 'site.json', 'save', 'b_card', '-n', 'Card', '--no-version', '--json'], forest());
+    expect(saved.code).toBe(0);
+    const id = JSON.parse(saved.out).component.id;
+    let doc = JSON.parse(saved.files['site.json']);
+    expect(doc.forest.components[0]).toMatchObject({ id, name: 'Card', props: [{ name: 'title' }, { name: 'badge', type: 'boolean' }] });
+    expect(doc.forest.trees[0].root.children[0]).toMatchObject({ id: 'b_card', instance: { component: id } });
+
+    // Add a variant by hand, then insert an instance that uses it on phones.
+    doc.forest.components[0].variants = [{ name: 'stacked', styles: { [doc.forest.components[0].root.id]: { lg: { 'flex-direction': 'column' } } } }];
+    const files = { 'site.json': JSON.stringify(doc) };
+    const ins = await cli(['components', 'site.json', 'insert', 'Card', '--prop', 'title=Hello', '--prop', 'badge=true', '--variant', 'mobile-portrait=stacked', '--no-version'], files);
+    expect(ins.code).toBe(0);
+    doc = JSON.parse(ins.files['site.json']);
+    const inst = doc.forest.trees[0].root.children[1];
+    expect(inst.instance).toEqual({ component: id, props: { title: 'Hello', badge: 'true' }, variants: { 'mobile-portrait': 'stacked' } });
+    expect(inst.styles['mobile-portrait']).toEqual({ 'flex-direction': 'column' });
+    expect(JSON.stringify(inst.children)).toContain('Hello');
+    expect((await cli(['components', 'site.json', 'insert', 'Card', '--variant', 'nope'], files)).code).toBe(2);
+
+    const list = await cli(['components', 'site.json', '--json'], ins.files);
+    expect(JSON.parse(list.out).components[0]).toMatchObject({ name: 'Card', variants: ['stacked'], instances: 2 });
+
+    const out = await cli(['export', 'site.json', '--component', 'Card', '-f', 'react'], ins.files);
+    expect(out.code).toBe(0);
+    expect(out.out).toContain('export default function Card({ title = "", badge = false, variant = "" })');
+    expect(out.out).toContain('{badge && (<span>New</span>)}');
+    expect((await cli(['export', 'site.json', '--component', 'Nope'], ins.files)).err).toContain('Components: Card');
+  });
+});

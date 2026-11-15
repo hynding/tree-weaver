@@ -1,5 +1,5 @@
 import { Component, Event, EventEmitter, h } from '@stencil/core';
-import { DISPLAYS } from '@tree-weaver/core';
+import { componentTreeId, DISPLAYS } from '@tree-weaver/core';
 import { redo, renameForest, setDisplay, switchTree, undo } from '../../store/actions';
 import { state } from '../../store/editor';
 import { isEmbedded } from '../../store/embed-flags';
@@ -45,6 +45,15 @@ export class TwToolbar {
               {t.name}
             </option>
           ))}
+          {forest.components?.length ? (
+            <optgroup label="Components">
+              {forest.components.map((c) => (
+                <option value={componentTreeId(c.id)} selected={componentTreeId(c.id) === state.treeId}>
+                  {c.name}
+                </option>
+              ))}
+            </optgroup>
+          ) : null}
         </select>
       </div>,
       <div class="displays" role="group" aria-label="Display type">

@@ -43,6 +43,7 @@ export {
 export { slugify } from './slug';
 export {
   exportComponent,
+  exportComponentDef,
   tailwindClass,
   tailwindVariant,
   jsxAttrName,

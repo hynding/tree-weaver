@@ -72,8 +72,62 @@ export const TREE_WEAVER_SCHEMA = {
         version: { const: SCHEMA_VERSION },
         trees: { type: 'array', items: ref('tree') },
         kits: { type: 'array', items: ref('kit') },
+        components: { type: 'array', items: ref('component'), description: 'Reusable components the trees use as linked instances.' },
         createdAt: str('ISO 8601 timestamp. Optional.'),
         updatedAt: str('ISO 8601 timestamp. Optional.'),
+      },
+    },
+    component: {
+      type: 'object',
+      description:
+        'A reusable component: a template branch with props ({{name}} placeholders in text, attributes, image URLs and classes; data-show-if="prop" to show a branch only when a prop is set) and variants (style overrides per template branch id, per display).',
+      required: ['name', 'root'],
+      additionalProperties: false,
+      properties: {
+        id: str('Optional. Filled in on import. Instances refer to it.'),
+        name: str('Shown in the palette; the exported component name.'),
+        description: { type: 'string' },
+        root: { allOf: [ref('branch')], description: 'The template. Variants refer to its branch ids, so keep them stable.' },
+        props: { type: 'array', items: ref('componentProp') },
+        variants: { type: 'array', items: ref('componentVariant') },
+      },
+    },
+    componentProp: {
+      type: 'object',
+      required: ['name'],
+      additionalProperties: false,
+      properties: {
+        name: { type: 'string', pattern: '^[A-Za-z][A-Za-z0-9_]*$', description: 'The placeholder name: {{name}}.' },
+        type: { enum: ['text', 'url', 'image', 'boolean', 'enum'], default: 'text' },
+        default: { type: 'string', default: '', description: 'Used when an instance leaves the prop out. Booleans: "true" or "".' },
+        options: { type: 'array', items: { type: 'string' }, description: 'Choices of an enum prop.' },
+        description: { type: 'string' },
+      },
+    },
+    componentVariant: {
+      type: 'object',
+      required: ['name', 'styles'],
+      additionalProperties: false,
+      properties: {
+        name: { type: 'string', minLength: 1 },
+        description: { type: 'string' },
+        styles: { type: 'object', description: 'Template branch id -> per-display style overrides.', additionalProperties: ref('displayStyles') },
+      },
+    },
+    componentInstance: {
+      type: 'object',
+      description: 'Makes a branch a linked instance of a component. Its content is the expanded component and is rewritten whenever the component changes.',
+      required: ['component'],
+      additionalProperties: false,
+      properties: {
+        component: str('Id of a component in the forest.'),
+        props: { type: 'object', additionalProperties: { type: 'string' }, description: 'Prop values; missing props use their defaults.' },
+        variants: {
+          type: 'object',
+          description: 'Variant name per display, e.g. { "lg": "row", "mobile-portrait": "stacked" }. Displays left out inherit, like styles.',
+          propertyNames: ref('displayId'),
+          additionalProperties: { type: 'string' },
+        },
       },
     },
     tree: {
@@ -118,6 +172,7 @@ export const TREE_WEAVER_SCHEMA = {
         attrs: ref('attrs'),
         styles: ref('displayStyles'),
         children: { type: 'array', items: ref('node') },
+        instance: ref('componentInstance'),
       },
     },
     leaf: {

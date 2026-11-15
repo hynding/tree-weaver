@@ -2,10 +2,10 @@ import { Component, State, h } from '@stencil/core';
 import { BLUEPRINT_CATEGORIES, BLUEPRINTS } from '@tree-weaver/branches';
 import { groupStories } from '@tree-weaver/formats';
 import { STORYBOOK_IMPORT_ENABLED } from '../../config';
-import { insertBlueprint } from '../../store/actions';
+import { componentUses, editComponent, insertBlueprint, insertComponent } from '../../store/actions';
 import { state, type StorybookLibrary } from '../../store/editor';
 import { insertLibraryBranch, libraryDragData, refreshLibrary, removeLibrary } from '../../store/storybook';
-import { BLUEPRINT_MIME, LIBRARY_MIME } from '../../utils/dnd';
+import { BLUEPRINT_MIME, COMPONENT_MIME, LIBRARY_MIME } from '../../utils/dnd';
 import { Icon } from '../../utils/icons';
 
 /** Two-letter glyph for a Storybook component, e.g. `Bu` for `Example/Button`. */
@@ -14,6 +14,42 @@ const glyph = (title: string): string => (title.split('/').pop() ?? title).trim(
 @Component({ tag: 'tw-palette' })
 export class TwPalette {
   @State() query = '';
+
+  /** The forest's reusable components: click to insert an instance, or open one to edit it. */
+  private renderComponents(q: string) {
+    const list = (state.forest?.components ?? []).filter((c) => !q || `${c.name} ${c.description ?? ''} component`.toLowerCase().includes(q));
+    if (!list.length) return null;
+    return (
+      <section class="panel-section">
+        <h3 class="panel-title">Components</h3>
+        <div class="palette-grid">
+          {list.map((c) => (
+            <div class="component-tile">
+              <button
+                class="blueprint"
+                title={`${c.description ?? 'Insert an instance'} · ${componentUses(c.id)} in use`}
+                draggable={true}
+                onDragStart={(e) => {
+                  e.dataTransfer!.setData(COMPONENT_MIME, c.id);
+                  e.dataTransfer!.setData('text/plain', c.name);
+                  e.dataTransfer!.effectAllowed = 'copy';
+                }}
+                onClick={() => insertComponent(c.id)}
+              >
+                <span class="glyph" aria-hidden="true">
+                  <Icon name="component" />
+                </span>
+                <span class="name">{c.name}</span>
+              </button>
+              <button class="icon-btn component-edit" title={`Edit ${c.name}`} aria-label={`Edit ${c.name}`} onClick={() => editComponent(c.id)}>
+                <Icon name="edit" />
+              </button>
+            </div>
+          ))}
+        </div>
+      </section>
+    );
+  }
 
   render() {
     const q = this.query.trim().toLowerCase();
@@ -30,6 +66,7 @@ export class TwPalette {
         />
         <p class="hint">Click to add into the selection, or drag onto the canvas or outline.</p>
       </div>,
+      this.renderComponents(q),
       BLUEPRINT_CATEGORIES.map((category) => {
         const items = matches.filter((b) => b.category === category);
         if (!items.length) return null;

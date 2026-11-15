@@ -25,6 +25,13 @@ import {
   type TokenKind,
   themeTokens,
   tokensToDtcg,
+  componentProps,
+  createTree,
+  expandComponent,
+  IF_ATTR,
+  isPropName,
+  type ComponentDef,
+  type ComponentProp,
 } from '@tree-weaver/core';
 import { slugify } from './slug';
 import { DESIGN_TOKENS_DART, DESIGN_TOKENS_SWIFT, dartFileName, exportFlutter, exportFlutterTokens, exportSwiftUI, exportSwiftUITokens, nativeTypeName } from './native';
@@ -237,7 +244,17 @@ function tailwindClasses(branch: Branch, tokenKinds: ReadonlyMap<string, TokenKi
 
 /** A rendered element, before it is written as HTML, JSX or a template. */
 type El =
-  | { kind: 'el'; tag: string; attrs: [string, string][]; children: El[]; svg: boolean }
+  | {
+      kind: 'el';
+      tag: string;
+      attrs: [string, string][];
+      children: El[];
+      svg: boolean;
+      /** Component exports: render only when this prop is set (`negate`: when it isn't). */
+      cond?: { prop: string; negate: boolean };
+      /** Component exports: the root's class, which gets a `--<variant>` modifier from the `variant` prop. */
+      variantClass?: string;
+    }
   | { kind: 'text'; value: string };
 
 interface Build {
@@ -245,6 +262,12 @@ interface Build {
   classOf: (b: Branch) => string;
   rules: DisplayRule[];
   tokenKinds: ReadonlyMap<string, TokenKind>;
+  /** Component exports: `{{prop}}` placeholders become expressions, `data-show-if` a condition. */
+  props?: boolean;
+  /** Branches that need a generated class even without styles (variants style them). */
+  forceClass?: Set<string>;
+  /** Generated class per branch id, for variant rules. */
+  classes?: Map<string, string>;
 }
 
 function leafEl(leaf: Leaf, inSvg: boolean): El {
@@ -267,24 +290,58 @@ function branchEl(branch: Branch, b: Build, inSvg: boolean, asTag?: string): El 
   const svg = inSvg || tag === 'svg';
   const childSvg = childrenInSvg(branch, inSvg);
   const classes = branch.classes.filter(Boolean);
-  if (hasStyles(branch)) {
+  const forced = b.forceClass?.has(branch.id) && b.styling === 'css';
+  if (hasStyles(branch) || forced) {
     if (b.styling === 'tailwind') classes.push(...tailwindClasses(branch, b.tokenKinds));
     else {
       const cls = b.classOf(branch);
       classes.push(cls);
-      b.rules.push({ selector: `.${cls}`, styles: branch.styles });
+      b.classes?.set(branch.id, cls);
+      if (hasStyles(branch)) b.rules.push({ selector: `.${cls}`, styles: branch.styles });
     }
   }
   const attrs: [string, string][] = [];
   if (classes.length) attrs.push(['class', classes.join(' ')]);
+  let cond: { prop: string; negate: boolean } | undefined;
   for (const [name, value] of Object.entries(branch.attrs)) {
+    if (b.props && name === IF_ATTR) {
+      const prop = value.trim().replace(/^!/, '');
+      if (isPropName(prop)) cond = { prop, negate: value.trim().startsWith('!') };
+      continue;
+    }
     if (name === 'class' || name === 'style' || !isSafeAttr(name, value)) continue;
     attrs.push([name, value]);
   }
   if (tag === 'svg' && !inSvg && !branch.attrs.xmlns) attrs.push(['xmlns', 'http://www.w3.org/2000/svg']);
   const children = branch.children.map((c: TreeNode) => (isBranch(c) ? branchEl(c, b, childSvg) : leafEl(c, childSvg)));
-  return { kind: 'el', tag, attrs, children, svg };
+  return cond ? { kind: 'el', tag, attrs, children, svg, cond } : { kind: 'el', tag, attrs, children, svg };
 }
+
+/* ------------------------------------------------------ props in markup */
+
+/** Split a value at its `{{prop}}` placeholders: literal strings and prop names, alternating. */
+function segments(value: string): { lit: string; prop?: string }[] {
+  const out: { lit: string; prop?: string }[] = [];
+  let last = 0;
+  for (const m of value.matchAll(/\{\{\s*([A-Za-z][A-Za-z0-9_]*)\s*\}\}/g)) {
+    out.push({ lit: value.slice(last, m.index), prop: m[1] });
+    last = m.index! + m[0].length;
+  }
+  out.push({ lit: value.slice(last) });
+  return out;
+}
+const hasProps = (value: string) => /\{\{\s*[A-Za-z][A-Za-z0-9_]*\s*\}\}/.test(value);
+/** A JS template literal for a value with placeholders: `card-${tone}`. */
+const templateLiteral = (value: string, extra = ''): string =>
+  `\`${segments(value)
+    .map((s) => s.lit.replace(/[`\\]/g, '\\$&').replace(/\$\{/g, '\\${') + (s.prop ? `\${${s.prop}}` : ''))
+    .join('')}${extra}\``;
+/** A JS expression for a value: the bare prop when the value is just `{{prop}}`. */
+const propExpr = (value: string): string => {
+  const segs = segments(value);
+  return segs.length === 2 && !segs[0].lit && !segs[1].lit ? segs[0].prop! : templateLiteral(value);
+};
+const variantSuffix = (cls: string) => `\${variant ? \` ${cls}--\${variant}\` : ''}`;
 
 /* ------------------------------------------------------------- writers */
 
@@ -294,7 +351,18 @@ const isInlineEl = (el: El): boolean => el.kind === 'text' || INLINE.has(el.tag)
 const oneLine = (children: El[]): boolean => children.some((c) => c.kind === 'text') || children.every(isInlineEl);
 
 /** HTML (also Vue and Svelte templates). */
-function writeHtml(el: El, depth: number, mode: 'html' | 'vue' | 'svelte'): string {
+function writeHtml(el: El, depth: number, mode: 'html' | 'vue' | 'svelte', props = false): string {
+  if (el.kind === 'text' && props && mode !== 'html' && hasProps(el.value)) {
+    // Vue: {{ title }}; Svelte: {title}. Literal parts are escaped as usual.
+    return segments(el.value)
+      .map((s) => writeHtml({ kind: 'text', value: s.lit }, depth, mode) + (s.prop ? (mode === 'vue' ? `{{ ${s.prop} }}` : `{${s.prop}}`) : ''))
+      .join('');
+  }
+  if (el.kind === 'el' && props && mode !== 'html') {
+    const inner = writePropsEl(el, depth, mode);
+    if (el.cond && mode === 'svelte') return `{#if ${el.cond.negate ? '!' : ''}${el.cond.prop}}${inner}{/if}`;
+    return inner;
+  }
   if (el.kind === 'text') {
     const text = escapeHtml(el.value);
     // `{` starts an expression in Svelte, `{{` in Vue.
@@ -351,24 +419,58 @@ export function jsxAttrName(name: string): string {
   return name.replace(/[-:]([a-z])/g, (_m, c: string) => c.toUpperCase());
 }
 
+/** An element of a Vue or Svelte component template, with prop bindings. */
+function writePropsEl(el: El & { kind: 'el' }, depth: number, mode: 'vue' | 'svelte'): string {
+  // Escape for HTML first, then Svelte's braces, so the &#123; entities are not escaped again.
+  const esc = (v: string) => (mode === 'svelte' ? escapeAttr(v).replace(/[{}]/g, (c) => (c === '{' ? '&#123;' : '&#125;')) : escapeAttr(v));
+  const attrs = el.attrs
+    .map(([n, v]) => {
+      const variant = n === 'class' && el.variantClass;
+      if (!hasProps(v) && !variant) return v === '' && !el.svg ? ` ${n}` : ` ${n}="${esc(v)}"`;
+      if (mode === 'vue') return ` :${n}="${escapeAttr(variant ? templateLiteral(v, variantSuffix(el.variantClass!)) : propExpr(v))}"`;
+      // Svelte: attribute values can hold {expressions} between literal text.
+      const body = segments(v)
+        .map((s) => esc(s.lit) + (s.prop ? `{${s.prop}}` : ''))
+        .join('');
+      return ` ${n}="${body}${variant ? `{variant ? ' ${el.variantClass}--' + variant : ''}` : ''}"`;
+    })
+    .join('');
+  const cond = mode === 'vue' && el.cond ? ` v-if="${el.cond.negate ? '!' : ''}${el.cond.prop}"` : '';
+  if (!el.svg && VOID_TAGS.has(el.tag)) return `<${el.tag}${cond}${attrs}>`;
+  if (!el.children.length) return el.svg ? `<${el.tag}${cond}${attrs} />` : `<${el.tag}${cond}${attrs}></${el.tag}>`;
+  if (oneLine(el.children)) return `<${el.tag}${cond}${attrs}>${el.children.map((c) => writeHtml(c, depth + 1, mode, true)).join('')}</${el.tag}>`;
+  const pad = '  '.repeat(depth + 1);
+  return `<${el.tag}${cond}${attrs}>\n${el.children.map((c) => pad + writeHtml(c, depth + 1, mode, true)).join('\n')}\n${'  '.repeat(depth)}</${el.tag}>`;
+}
+
 const jsxString = (value: string): string => JSON.stringify(value);
 
-function writeJsx(el: El, depth: number): string {
+function writeJsx(el: El, depth: number, props = false): string {
   if (el.kind === 'text') {
+    if (props && hasProps(el.value))
+      return segments(el.value)
+        .map((s) => (s.lit ? writeJsx({ kind: 'text', value: s.lit }, depth) : '') + (s.prop ? `{${s.prop}}` : ''))
+        .join('');
     // Plain text is fine unless it holds JSX syntax characters; then use a string expression.
     return /[{}<>]/.test(el.value) || /^\s|\s$/.test(el.value) ? `{${jsxString(el.value)}}` : el.value.replace(/&/g, '&amp;');
+  }
+  if (props && el.cond) {
+    const { cond, ...rest } = el;
+    return `{${cond.negate ? '!' : ''}${cond.prop} && (${writeJsx(rest, depth, props)})}`;
   }
   const attrs = el.attrs
     .map(([n, v]) => {
       const name = jsxAttrName(n);
+      if (props && n === 'class' && el.variantClass) return ` ${name}={${templateLiteral(v, variantSuffix(el.variantClass))}}`;
+      if (props && hasProps(v)) return ` ${name}={${propExpr(v)}}`;
       if (v === '' && !el.svg && n !== 'alt' && n !== 'class') return ` ${name}`;
       return /["\\{}<>\n]/.test(v) ? ` ${name}={${jsxString(v)}}` : ` ${name}="${v.replace(/&/g, '&amp;')}"`;
     })
     .join('');
   if (!el.children.length) return `<${el.tag}${attrs} />`;
-  if (oneLine(el.children)) return `<${el.tag}${attrs}>${el.children.map((c) => writeJsx(c, depth + 1)).join('')}</${el.tag}>`;
+  if (oneLine(el.children)) return `<${el.tag}${attrs}>${el.children.map((c) => writeJsx(c, depth + 1, props)).join('')}</${el.tag}>`;
   const pad = '  '.repeat(depth + 1);
-  return `<${el.tag}${attrs}>\n${el.children.map((c) => pad + writeJsx(c, depth + 1)).join('\n')}\n${'  '.repeat(depth)}</${el.tag}>`;
+  return `<${el.tag}${attrs}>\n${el.children.map((c) => pad + writeJsx(c, depth + 1, props)).join('\n')}\n${'  '.repeat(depth)}</${el.tag}>`;
 }
 
 /* --------------------------------------------------------------- files */
@@ -472,5 +574,103 @@ export function exportComponent(tree: Tree, opts: ComponentOptions): ComponentEx
       if (theme) files.push({ path: 'tailwind.theme.css', contents: theme }, { path: 'tailwind.tokens.cjs', contents: tailwindPreset(tokens) });
     }
   }
+  return { name, framework, styling, entry, files };
+}
+
+/* ------------------------------------------------- reusable components */
+
+/** A prop's default as a JS literal. */
+const jsDefault = (p: ComponentProp): string => (p.type === 'boolean' ? String(!!p.default && p.default !== 'false') : JSON.stringify(p.default));
+
+/**
+ * Export a reusable component (see `components.ts` in core) as a React, Vue or Svelte component
+ * with its props: `{{title}}` placeholders become expressions, `data-show-if` branches render
+ * conditionally, and each variant becomes a `variant` prop value that adds a `--variant`
+ * modifier class to the root, with the variant's styles per display in the CSS. Tailwind
+ * exports keep props but not variants (they would need one class list per variant). HTML and
+ * native exports write the component as it looks with its default props.
+ */
+export function exportComponentDef(def: ComponentDef, opts: ComponentOptions): ComponentExport {
+  const framework = opts.framework;
+  const styling = opts.styling ?? 'css';
+  const name = pascalName(opts.name ?? def.name);
+  if (framework === 'html' || framework === 'swiftui' || framework === 'flutter') {
+    // No props in these targets: export the component as it looks by default.
+    const tree = createTree(def.name, { kind: 'branch', id: 'b_body', tag: 'body', type: 'root', classes: [], attrs: {}, styles: {}, children: [expandComponent(def, { component: def.id }, 'b_c')] });
+    return exportComponent(tree, { ...opts, name });
+  }
+  const props = componentProps(def);
+  const variants = styling === 'css' ? def.variants : [];
+  const tokens = themeTokens((opts.kits ?? []).filter((k) => k.enabled));
+  const prefix = `${cssIdent(slugify(def.name, 'component'))}__`;
+  const build: Build = {
+    styling,
+    classOf: classNamer(prefix),
+    rules: [],
+    tokenKinds: new Map(tokens.map((t) => [t.name, t.kind])),
+    props: true,
+    forceClass: new Set([def.root.id, ...variants.flatMap((v) => Object.keys(v.styles))]),
+    classes: new Map(),
+  };
+  const root = branchEl(def.root, build, false);
+  const rootCls = build.classes!.get(def.root.id);
+  if (root.kind === 'el' && variants.length && rootCls) root.variantClass = rootCls;
+  // Variant rules: `.root.root--compact` for the root, `.root--compact .card__title` inside.
+  for (const v of variants) {
+    const mod = `${rootCls}--${slugify(v.name, 'variant')}`;
+    for (const [id, styles] of Object.entries(v.styles)) {
+      const cls = build.classes!.get(id);
+      if (!cls) continue;
+      build.rules.push({ selector: id === def.root.id ? `.${rootCls}.${mod}` : `.${mod} .${cls}`, styles });
+    }
+  }
+  const allProps = variants.length ? [...props, { name: 'variant', type: 'enum' as const, default: '', options: variants.map((v) => slugify(v.name, 'variant')) }] : props;
+
+  const css = styling === 'css' ? renderDisplayCss(build.rules) : '';
+  const kitCss = kitsCss(opts.kits ?? []);
+  const files: ComponentFile[] = [];
+  const header = `Generated by Tree Weaver from the component "${def.name.replace(/\*\/|-->/g, '')}".${variants.length ? ` Variants: ${variants.map((v) => slugify(v.name, 'variant')).join(', ')}.` : ''}`;
+  const cssFile = `${name}.css`;
+  const docs = allProps.map((p) => `${p.name}${p.description ? `: ${p.description}` : ''}`);
+  let entry: string;
+  switch (framework) {
+    case 'react': {
+      const ext = opts.typescript ? 'tsx' : 'jsx';
+      entry = `${name}.${ext}`;
+      const imports = [kitCss ? `import './kits.css';` : '', css ? `import './${cssFile}';` : ''].filter(Boolean).join('\n');
+      const tsType = (p: ComponentProp) => (p.type === 'boolean' ? 'boolean' : p.type === 'enum' && p.options?.length ? p.options.map((o) => JSON.stringify(o)).join(' | ') + " | ''" : 'string');
+      const iface = opts.typescript ? `\nexport interface ${name}Props {\n${allProps.map((p) => `  ${p.name}?: ${tsType(p)};`).join('\n')}\n}\n` : '';
+      const params = allProps.length ? `{ ${allProps.map((p) => `${p.name} = ${jsDefault(p)}`).join(', ')} }${opts.typescript ? `: ${name}Props` : ''}` : '';
+      files.push({
+        path: entry,
+        contents: `// ${header}\n${imports ? `${imports}\n` : ''}${iface}\nexport default function ${name}(${params}) {\n  return (\n    ${writeJsx(root, 2, true)}\n  );\n}\n`,
+      });
+      break;
+    }
+    case 'vue': {
+      entry = `${name}.vue`;
+      const vueType = (p: ComponentProp) => (p.type === 'boolean' ? 'Boolean' : 'String');
+      const script = allProps.length
+        ? `<script setup>\ndefineProps({\n${allProps.map((p) => `  ${p.name}: { type: ${vueType(p)}, default: ${jsDefault(p)} },`).join('\n')}\n});\n</script>\n\n`
+        : '';
+      const style = [kitCss ? `<style src="./kits.css"></style>` : '', css ? `<style>\n${css}\n</style>` : ''].filter(Boolean).join('\n');
+      files.push({ path: entry, contents: `<!-- ${header} -->\n${script}<template>\n  ${writeHtml(root, 1, 'vue', true)}\n</template>\n${style ? `\n${style}\n` : ''}` });
+      break;
+    }
+    case 'svelte': {
+      entry = `${name}.svelte`;
+      const lines = [kitCss ? `  import './kits.css';` : '', ...allProps.map((p) => `  export let ${p.name} = ${jsDefault(p)};`)].filter(Boolean);
+      const script = lines.length ? `<script>\n${lines.join('\n')}\n</script>\n\n` : '';
+      const style = css ? `\n<style>\n  /* Global: the classes are generated, so scoping only gets in the way of overrides. */\n${css.replace(/^(\s*)(\.[^{}\n]*?)\s*\{/gm, '$1:global($2) {')}\n</style>\n` : '';
+      files.push({ path: entry, contents: `<!-- ${header} -->\n${script}${writeHtml(root, 0, 'svelte', true)}\n${style}` });
+      break;
+    }
+    default:
+      throw new Error(`Unknown framework "${String(framework)}"`);
+  }
+  if (docs.length) files[0].contents = files[0].contents.replace(header, `${header} Props: ${docs.join('; ')}.`);
+  if (css && framework === 'react') files.push({ path: cssFile, contents: `/* ${header} */\n${css}\n` });
+  if (kitCss) files.push({ path: 'kits.css', contents: kitCss });
+  if (tokens.length) files.push({ path: 'tokens.json', contents: `${JSON.stringify(tokensToDtcg(tokens), null, 2)}\n` });
   return { name, framework, styling, entry, files };
 }

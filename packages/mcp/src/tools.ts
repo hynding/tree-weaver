@@ -1,6 +1,16 @@
 import { createRequire } from 'node:module';
 import {
   addVersion,
+  componentProps,
+  DISPLAY_IDS,
+  findComponent,
+  insertNode,
+  instancesOf,
+  instantiateComponent,
+  resolveRef,
+  saveComponent,
+  type ComponentInstance,
+  type Forest,
   resetToken,
   setToken,
   themeTokens,
@@ -36,6 +46,7 @@ import {
   detectFormat,
   diffDocuments,
   exportComponent,
+  exportComponentDef,
   isNativeFramework,
   exportForest,
   exportTree,
@@ -288,15 +299,25 @@ export class Tools {
   }
 
   async exportComponent(
-    args: Source & { framework: ComponentFramework; styling?: ComponentStyling; tree?: string; name?: string; typescript?: boolean; outputDir?: string; kits?: string[] },
+    args: Source & { framework: ComponentFramework; styling?: ComponentStyling; tree?: string; component?: string; name?: string; typescript?: boolean; outputDir?: string; kits?: string[] },
   ): Promise<ToolOutput> {
     const { doc } = await this.load(args);
-    const tree = pickTree(doc, args.tree);
     const kits = [...kitsOf(doc)];
     for (const file of args.kits ?? []) kits.push(kitFromFile(file, await this.ws.read(file)));
-    const out = exportComponent(tree, { framework: args.framework, styling: args.styling, kits, name: args.name, typescript: args.typescript });
+    const options = { framework: args.framework, styling: args.styling, kits, name: args.name, typescript: args.typescript };
+    let source: string;
+    let out;
+    if (args.component !== undefined) {
+      const def = componentRef(doc, args.component);
+      source = `component "${def.name}"`;
+      out = exportComponentDef(def, options);
+    } else {
+      const tree = pickTree(doc, args.tree);
+      source = `"${tree.name}"`;
+      out = exportComponent(tree, options);
+    }
     const native = isNativeFramework(out.framework);
-    const summary = `${out.name}: "${tree.name}" as ${args.framework}${native ? '' : ` with ${out.styling === 'tailwind' ? 'Tailwind classes' : 'a CSS file'}`} (${out.files.length} file${out.files.length === 1 ? '' : 's'}, entry ${out.entry}).`;
+    const summary = `${out.name}: ${source} as ${args.framework}${native ? '' : ` with ${out.styling === 'tailwind' ? 'Tailwind classes' : 'a CSS file'}`} (${out.files.length} file${out.files.length === 1 ? '' : 's'}, entry ${out.entry}).`;
     const meta = { name: out.name, framework: out.framework, styling: out.styling, entry: out.entry };
     if (args.outputDir) {
       const dir = args.outputDir.replace(/[\\/]+$/, '');
@@ -494,6 +515,85 @@ export class Tools {
     return { text: `Wrote ${written}.${versionNote}\nTokens:\n${list}`, data: { tokens, path: written } };
   }
 
+  async listComponents(args: Source): Promise<ToolOutput> {
+    const { doc } = await this.load(args);
+    const forest = doc.kind === 'forest' ? doc.forest : undefined;
+    const components = (forest?.components ?? []).map((c) => ({
+      id: c.id,
+      name: c.name,
+      ...(c.description ? { description: c.description } : {}),
+      props: componentProps(c).map((p) => ({ name: p.name, type: p.type, default: p.default, ...(p.options ? { options: p.options } : {}) })),
+      variants: c.variants.map((v) => v.name),
+      instances: forest ? instancesOf(forest, c.id).length : 0,
+    }));
+    const text = components.length
+      ? `Components (${components.length}). Insert one with insert_component; its props fill {{placeholders}} and variants pick style overrides per display.\n${components
+          .map(
+            (c) =>
+              `  ${c.name} (${c.id}), ${c.instances} in use\n    props: ${c.props.map((p) => `${p.name}: ${p.type}${p.options ? ` [${p.options.join('|')}]` : ''}${p.default ? ` = ${JSON.stringify(p.default)}` : ''}`).join(', ') || 'none'}\n    variants: ${c.variants.join(', ') || 'none'}`,
+          )
+          .join('\n')}`
+      : doc.kind === 'forest'
+        ? 'No components. Save a branch as one with save_component.'
+        : 'This is a single tree; components live in forests.';
+    return { text, data: { components } };
+  }
+
+  async saveComponent(args: Source & { branch: string; name?: string; description?: string; tree?: string; output?: string; keepVersion?: boolean }): Promise<ToolOutput> {
+    const loaded = await this.load(args);
+    const forest = forestOf(loaded.doc);
+    const tree = pickTree(loaded.doc, args.tree);
+    const { node } = resolveRef(tree.root, args.branch);
+    if (!isBranch(node)) throw new ToolError(`"${args.branch}" is a leaf; save a branch`);
+    const saved = saveComponent({ ...forest, updatedAt: new Date().toISOString() }, tree.id, node.id, args.name ?? node.name ?? 'Component', args.description ? { description: args.description } : {});
+    if (!saved) throw new ToolError(`Could not find "${args.branch}" in "${tree.name}"`);
+    const def = saved.component;
+    const props = componentProps(def);
+    const summary = `Saved component "${def.name}" (${def.id})${props.length ? ` with props ${props.map((p) => `${p.name}: ${p.type}`).join(', ')}` : ''}.${
+      node.id !== tree.root.id ? ` The branch is now its first instance (${node.id}).` : ''
+    }${props.length ? '' : ' Add props by putting {{name}} placeholders in its text, attributes or classes (patch the component tree, or edit it in the editor).'}`;
+    return this.writeForest(loaded, saved.forest, args, `Before saving "${def.name}"`, summary, { component: { id: def.id, name: def.name, props: props.map((p) => p.name) } });
+  }
+
+  async insertComponent(
+    args: Source & { component: string; parent?: string; index?: number; props?: Record<string, string>; variants?: Partial<Record<DisplayId, string>>; tree?: string; output?: string; keepVersion?: boolean },
+  ): Promise<ToolOutput> {
+    const loaded = await this.load(args);
+    const forest = forestOf(loaded.doc);
+    const def = componentRef(loaded.doc, args.component);
+    const tree = pickTree(loaded.doc, args.tree);
+    const parent = resolveRef(tree.root, args.parent).node;
+    if (!isBranch(parent)) throw new ToolError(`"${args.parent}" is a leaf; insert into a branch`);
+    const known = componentProps(def).map((p) => p.name);
+    const unknown = Object.keys(args.props ?? {}).filter((p) => !known.includes(p));
+    if (unknown.length) throw new ToolError(`"${def.name}" has no prop ${unknown.join(', ')}. Props: ${known.join(', ') || 'none'}`);
+    const variants: NonNullable<ComponentInstance['variants']> = {};
+    for (const [display, name] of Object.entries(args.variants ?? {})) {
+      if (!(DISPLAY_IDS as readonly string[]).includes(display)) throw new ToolError(`Unknown display "${display}". Displays: ${DISPLAY_IDS.join(', ')}`);
+      if (name && name !== '-' && !def.variants.some((v) => v.name === name)) throw new ToolError(`"${def.name}" has no variant "${name}". Variants: ${def.variants.map((v) => v.name).join(', ') || 'none'}`);
+      if (name) variants[display as DisplayId] = name;
+    }
+    const inst = instantiateComponent(def, args.props, variants);
+    const root = insertNode(tree.root, parent.id, inst, args.index);
+    const next: Forest = { ...forest, trees: forest.trees.map((t) => (t.id === tree.id ? { ...t, root } : t)), updatedAt: new Date().toISOString() };
+    const summary = `Inserted "${def.name}" as ${inst.id} into ${parent.name ?? `<${parent.tag}>`} (${parent.id}).`;
+    return this.writeForest(loaded, next, args, `Before inserting "${def.name}"`, summary, { id: inst.id, component: def.id });
+  }
+
+  /** Write a changed forest back (in place unless `output`), saving a version first. */
+  private async writeForest(loaded: Loaded, forest: Forest, args: { output?: string; keepVersion?: boolean }, versionName: string, summary: string, extra: Record<string, unknown>): Promise<ToolOutput> {
+    const serialized = this.serialize({ kind: 'forest', forest }, loaded.format);
+    const output = args.output ?? loaded.path;
+    if (!output) return { text: `${summary}\n\n${serialized}`, data: { ...extra, document: serialized } };
+    let versionNote = '';
+    if (loaded.path && output === loaded.path && args.keepVersion !== false && serialized !== loaded.text) {
+      const v = await this.keepVersion(loaded.path, loaded.text, loaded.format, { name: versionName, source: 'agent', auto: true });
+      versionNote = `\nSaved the previous file as version ${v.id} (restore_version to roll back).`;
+    }
+    const written = await this.ws.write(output, serialized);
+    return { text: `${summary}\nWrote ${written}.${versionNote}`, data: { ...extra, path: written } };
+  }
+
   async kitManifest(args: { paths: string[] }): Promise<ToolOutput> {
     if (!args.paths.length) throw new ToolError('Give at least one .css file or document');
     const kits: DesignKit[] = [];
@@ -515,6 +615,18 @@ function treesOf(doc: TreeDocument): Tree[] {
 
 function kitsOf(doc: TreeDocument): DesignKit[] {
   return doc.kind === 'forest' ? doc.forest.kits : doc.kits;
+}
+
+function forestOf(doc: TreeDocument): Forest {
+  if (doc.kind !== 'forest') throw new ToolError('Components live in forests, and this document is a single tree. Convert it to a forest first (json, yaml or xml with a "forest").');
+  return doc.forest;
+}
+
+function componentRef(doc: TreeDocument, ref: string) {
+  const components = doc.kind === 'forest' ? (doc.forest.components ?? []) : [];
+  const def = findComponent(components, ref);
+  if (!def) throw new ToolError(`No component "${ref}". ${components.length ? `Components: ${components.map((c) => `${c.name} (${c.id})`).join(', ')}` : 'The document has none; save one with save_component.'}`);
+  return def;
 }
 
 /** A tree by id, name (any case) or 1-based number; the first tree when not given. */

@@ -4,6 +4,14 @@ import { dirname } from 'node:path';
 import { parseArgs, type ParseArgsConfig } from 'node:util';
 import {
   applyPatch,
+  saveComponent,
+  findComponent,
+  instantiateComponent,
+  insertNode,
+  componentProps,
+  isDisplayId,
+  type Forest,
+  type ComponentInstance,
   resetToken,
   setToken,
   themeTokens,
@@ -55,6 +63,7 @@ import {
   diffDocuments,
   detectFormat,
   exportComponent,
+  exportComponentDef,
   exportForest,
   exportTree,
   FORMATS,
@@ -140,6 +149,7 @@ Commands:
   outline <file>           List a tree's branches and leaves with their ids and paths
   kit <file...>            List the classes and tokens of CSS files or a document's kits
   tokens <file>            List, edit and export design tokens (colours, spacing, type)
+  components <file> [action] List reusable components, save a branch as one, insert an instance
   schema                   Print the JSON Schema for Tree Weaver documents
   link <file|url>          Print a link that opens a document in the live editor
   versions <file> [action] List, save, compare and restore saved versions of a file
@@ -203,6 +213,8 @@ Tailwind ones a theme (tailwind.theme.css for v4, tailwind.tokens.cjs for v3).
   -t, --tree <ref>        Tree in a forest: name, id or 1-based number (default: first)
   -n, --name <name>       Component name (default: from the tree's name)
       --ts                React: write a .tsx file
+  -c, --component <name>  Export a reusable component of the forest (by name or id) with its
+                          props and a variant prop, instead of a tree
   -k, --kit <css>         Add a CSS file as a design kit (repeatable)
   -F, --from <fmt>        Input format, when the extension doesn't say
       --json              Print { name, entry, files: [{ path, contents }] } (or the paths written)
@@ -308,6 +320,30 @@ must allow cross-origin requests).
       --editor <url>    Editor to link to (default: ${EDITOR_URL})
   -F, --from <fmt>      Input format, when the extension doesn't say
       --json            Print { url, length }
+`,
+  components: `Usage: tree-weaver components <forest> [list|save|insert] [options]
+
+Reusable components live in a forest: a template branch with props ({{title}}
+placeholders; data-show-if="prop" shows a branch only when the prop is set) and
+variants (style overrides per display). Trees use them as linked instances that
+follow the component.
+
+  list                      List components with their props, variants and use
+  save <branch>             Save a branch (id or path, see "outline") as a component;
+                            the branch becomes its first instance
+      -n, --name <name>     Component name (default: the branch's name)
+  insert <component>        Insert an instance of a component (name or id)
+      --parent <ref>        Branch to insert into (default: the tree's root)
+      --index <n>           Position among the parent's children (default: last)
+      --prop <name=value>   Set a prop (repeatable)
+      --variant <d=name>    Use a variant on a display, e.g. lg=row or
+                            mobile-portrait=stacked (repeatable); "name" alone = lg
+  -t, --tree <ref>          Tree in the forest (default: first)
+  -o, --output <file>       Write here instead of back to <forest>
+      --no-version          Don't save the file as a version before changing it
+      --json                Machine-readable output
+
+Export one with its props: tree-weaver export site.json --component Card -f react
 `,
   tokens: `Usage: tree-weaver tokens <file> [options]
 
@@ -610,6 +646,7 @@ async function cmdExport(cli: Cli, args: string[]): Promise<number> {
     ts: { type: 'boolean' },
     kit: { type: 'string', short: 'k', multiple: true },
     from: { type: 'string', short: 'F' },
+    component: { type: 'string', short: 'c' },
   });
   if (positionals.length !== 1) throw new UsageError('export needs one file (or "-" for stdin)');
   const ids = COMPONENT_FRAMEWORKS.map((f) => f.id) as string[];
@@ -618,10 +655,15 @@ async function cmdExport(cli: Cli, args: string[]): Promise<number> {
   const styling = (values.styling ?? 'css').toLowerCase();
   if (styling !== 'css' && styling !== 'tailwind') throw new UsageError(`--styling must be css or tailwind, not "${values.styling}"`);
   const { doc } = await cli.load(positionals[0], asFormat(values.from, '--from'));
-  const tree = pickTree(cli, doc, values.tree, 'a component holds one tree');
   const kits = [...kitsOf(doc)];
   for (const file of values.kit ?? []) kits.push(kitFromFile(file, await cli.read(file)));
-  const out = exportComponent(tree, { framework: framework as ComponentFramework, styling, kits, name: values.name, typescript: !!values.ts });
+  const options = { framework: framework as ComponentFramework, styling: styling as 'css' | 'tailwind', kits, name: values.name, typescript: !!values.ts };
+  let out;
+  if (values.component !== undefined) {
+    const def = findComponent(doc.kind === 'forest' ? doc.forest.components : undefined, values.component);
+    if (!def) throw new Error(`No component "${values.component}"${doc.kind === 'forest' && doc.forest.components?.length ? `. Components: ${doc.forest.components.map((c) => c.name).join(', ')}` : ' (components live in forests)'}`);
+    out = exportComponentDef(def, options);
+  } else out = exportComponent(pickTree(cli, doc, values.tree, 'a component holds one tree'), options);
   const json = !!values.json;
   if (values.output && values.output !== '-') {
     const dir = values.output.replace(/\/+$/, '');
@@ -936,6 +978,102 @@ async function cmdKit(cli: Cli, args: string[]): Promise<number> {
   return 0;
 }
 
+async function cmdComponents(cli: Cli, args: string[]): Promise<number> {
+  const { values, positionals } = parse(args, {
+    name: { type: 'string', short: 'n' },
+    parent: { type: 'string' },
+    index: { type: 'string' },
+    prop: { type: 'string', multiple: true },
+    variant: { type: 'string', multiple: true },
+    tree: { type: 'string', short: 't' },
+    output: { type: 'string', short: 'o' },
+    'no-version': { type: 'boolean' },
+    from: { type: 'string', short: 'F' },
+  });
+  const [file, action = 'list', ref, ...rest] = positionals;
+  if (!file) throw new UsageError('components needs a forest file');
+  if (rest.length) throw new UsageError(`Unexpected "${rest[0]}"`);
+  const loaded = await cli.load(file, asFormat(values.from, '--from'));
+  const { doc } = loaded;
+  const json = !!values.json;
+  const components = doc.kind === 'forest' ? (doc.forest.components ?? []) : [];
+  const write = async (forest: Forest, label: string) => {
+    const data = exportForest(forest, loaded.format);
+    const target = values.output ?? (file === '-' ? undefined : file);
+    if (!values['no-version'] && target && target === file && loaded.text !== data) await keepVersion(cli, file, loaded.text, loaded.format, { name: label, source: 'agent', auto: true });
+    await cli.emit(target, data);
+    return target;
+  };
+  switch (action) {
+    case 'list': {
+      const list = components.map((c) => ({
+        id: c.id,
+        name: c.name,
+        props: componentProps(c).map((p) => ({ name: p.name, type: p.type, default: p.default, ...(p.options ? { options: p.options } : {}) })),
+        variants: c.variants.map((v) => v.name),
+        instances: doc.kind === 'forest' ? doc.forest.trees.reduce((n, t) => n + countInstances(t.root, c.id), 0) : 0,
+      }));
+      const lines = list.map(
+        (c) =>
+          `${c.name}  #${c.id}  (${c.instances} in use)\n  props: ${c.props.map((p) => `${p.name}:${p.type}${p.default ? `=${p.default}` : ''}`).join(', ') || 'none'}\n  variants: ${c.variants.join(', ') || 'none'}`,
+      );
+      cli.report(json, { components: list }, lines.length ? lines.join('\n') : 'No components. Save one with "components <forest> save <branch>".');
+      return 0;
+    }
+    case 'save': {
+      if (doc.kind !== 'forest') throw new UsageError('Components live in forests: convert the tree to a forest first (tree-weaver new --forest), or pass a forest file');
+      if (!ref) throw new UsageError('save needs a branch: an id or a path from "outline"');
+      const tree = pickTree(cli, doc, values.tree, '');
+      const { node } = resolveRef(tree.root, ref);
+      if (!isBranch(node)) throw new Error(`"${ref}" is a leaf; save a branch`);
+      const saved = saveComponent({ ...doc.forest, updatedAt: now() }, tree.id, node.id, values.name ?? node.name ?? 'Component');
+      if (!saved) throw new Error(`Could not save "${ref}"`);
+      const { forest, component: def } = saved;
+      const target = await write(forest, 'Before saving a component');
+      cli.report(json, { component: { id: def.id, name: def.name, props: def.props.map((p) => p.name) }, output: target }, `Saved component "${def.name}" #${def.id}${def.props.length ? ` with props ${def.props.map((p) => p.name).join(', ')}` : ''}${target ? ` to ${target}` : ''}`);
+      return 0;
+    }
+    case 'insert': {
+      if (doc.kind !== 'forest') throw new UsageError('Components live in forests');
+      if (!ref) throw new UsageError('insert needs a component name or id');
+      const def = findComponent(components, ref);
+      if (!def) throw new Error(`No component "${ref}"${components.length ? `. Components: ${components.map((c) => c.name).join(', ')}` : ''}`);
+      const tree = pickTree(cli, doc, values.tree, '');
+      const parent = resolveRef(tree.root, values.parent).node;
+      if (!isBranch(parent)) throw new Error(`"${values.parent}" is a leaf; insert into a branch`);
+      const props: Record<string, string> = {};
+      for (const a of values.prop ?? []) {
+        const i = a.indexOf('=');
+        if (i < 1) throw new UsageError(`--prop needs name=value, got "${a}"`);
+        props[a.slice(0, i)] = a.slice(i + 1);
+      }
+      const variants: NonNullable<ComponentInstance['variants']> = {};
+      for (const a of values.variant ?? []) {
+        const i = a.indexOf('=');
+        const [display, name] = i < 0 ? ['lg', a] : [a.slice(0, i), a.slice(i + 1)];
+        if (!isDisplayId(display)) throw new UsageError(`Unknown display "${display}". Displays: ${DISPLAY_IDS.join(', ')}`);
+        if (!def.variants.some((v) => v.name === name)) throw new UsageError(`"${def.name}" has no variant "${name}"${def.variants.length ? `. Variants: ${def.variants.map((v) => v.name).join(', ')}` : ''}`);
+        variants[display] = name;
+      }
+      const unknown = Object.keys(props).filter((p) => !componentProps(def).some((q) => q.name === p));
+      if (unknown.length) cli.note(`"${def.name}" has no prop ${unknown.join(', ')}; ignored when rendering`);
+      const inst = instantiateComponent(def, props, variants);
+      const index = values.index !== undefined ? Number(values.index) : undefined;
+      const root = insertNode(tree.root, parent.id, inst, index);
+      const target = await write(replaceTree(doc.forest, { ...tree, root }), `Before inserting "${def.name}"`);
+      cli.report(json, { id: inst.id, component: def.id, output: target }, `Inserted "${def.name}" #${inst.id} into ${parent.name ?? parent.tag}${target ? ` in ${target}` : ''}`);
+      return 0;
+    }
+    default:
+      throw new UsageError(`Unknown action "${action}": use list, save or insert`);
+  }
+}
+
+function countInstances(node: TreeNode, componentId: string): number {
+  if (!isBranch(node)) return 0;
+  return (node.instance?.component === componentId ? 1 : 0) + node.children.reduce((n, c) => n + countInstances(c, componentId), 0);
+}
+
 const TOKEN_FORMATS = ['css', 'json', 'tailwind', 'tailwind-v3', 'swift', 'dart'] as const;
 
 /** `brand=#fff` or `--brand=#fff` → ['--brand', '#fff']. */
@@ -1131,6 +1269,7 @@ const COMMANDS: Record<string, (cli: Cli, args: string[]) => Promise<number>> = 
   outline: cmdOutline,
   kit: cmdKit,
   tokens: cmdTokens,
+  components: cmdComponents,
   schema: cmdSchema,
   link: cmdLink,
 };
