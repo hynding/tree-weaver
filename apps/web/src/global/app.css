@@ -294,13 +294,14 @@ tw-toolbar {
 
 .tabs {
   display: flex;
+  /* Wrap rather than scroll, so every tab stays in view in a narrow sidebar. */
+  flex-wrap: wrap;
   border-bottom: 1px solid var(--line);
   background: var(--panel-2);
-  overflow-x: auto;
-  scrollbar-width: none;
 }
 .tabs button {
-  flex: 1 0 auto;
+  /* Four to a row when they wrap, so the rows line up. */
+  flex: 1 0 22%;
   border: 0;
   background: transparent;
   padding: 10px 3px 9px;
@@ -1915,4 +1916,60 @@ details.areas .hint {
 }
 .share-dialog .people .peer-dot {
   box-shadow: none;
+}
+
+/* Tokens tab */
+.token-row {
+  padding: 6px 0 8px;
+  border-bottom: 1px solid var(--line);
+}
+.token-row:last-child {
+  border-bottom: 0;
+}
+.token-row.edited .token-name {
+  font-weight: 600;
+}
+.token-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.token-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12px;
+}
+.token-swatch {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  background: none;
+  flex: none;
+  cursor: pointer;
+}
+.token-kind {
+  font: inherit;
+  font-size: 11px;
+  max-width: 96px;
+  padding: 2px 4px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel);
+  color: inherit;
+}
+.token-value {
+  width: 100%;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12px;
+}
+.token-meta {
+  margin: 3px 0 0;
+  font-size: 11px;
 }

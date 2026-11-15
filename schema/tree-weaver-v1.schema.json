@@ -327,7 +327,7 @@
     },
     "kit": {
       "type": "object",
-      "description": "A design kit: CSS inlined in css, a stylesheet linked by href, or editable rules.",
+      "description": "A design kit: CSS inlined in css, a stylesheet linked by href, editable rules, or design token edits.",
       "additionalProperties": false,
       "properties": {
         "id": {
@@ -348,7 +348,7 @@
         },
         "source": {
           "type": "string",
-          "description": "Where the kit came from: a file name, a URL, \"builtin\", \"custom\" or \"env\"."
+          "description": "Where the kit came from: a file name, a URL, \"builtin\", \"custom\", \"tokens\" or \"env\"."
         },
         "href": {
           "type": "string",
@@ -361,6 +361,52 @@
             "$ref": "#/$defs/styleRule"
           },
           "description": "Editable rules. When present, css is generated from them."
+        },
+        "tokens": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/designToken"
+          },
+          "description": "Design token edits (a token kit, source \"tokens\"). When present, css is generated from them as :root custom properties."
+        }
+      }
+    },
+    "designToken": {
+      "type": "object",
+      "description": "A design token: a CSS custom property the exports carry as a named colour, length or font.",
+      "required": [
+        "name",
+        "value"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^--[A-Za-z_][A-Za-z0-9_-]*$",
+          "description": "Custom property name, e.g. --brand."
+        },
+        "value": {
+          "type": "string",
+          "pattern": "^[^{};]+$",
+          "description": "Any CSS value, including var(--other)."
+        },
+        "kind": {
+          "enum": [
+            "color",
+            "space",
+            "radius",
+            "font-family",
+            "font-size",
+            "font-weight",
+            "line-height",
+            "shadow",
+            "other"
+          ],
+          "description": "Optional. Inferred from the name and value when left out."
+        },
+        "description": {
+          "type": "string",
+          "description": "Optional note shown in the editor and written to tokens.json."
         }
       }
     },

@@ -15,16 +15,21 @@ an app, rather than a standalone page.
 
 | Framework | Files |
 | --- | --- |
-| `react` | `Home.jsx` (or `Home.tsx` with `--ts`), `Home.css`, `kits.css` |
+| `react` | `Home.jsx` (or `Home.tsx` with `--ts`), `Home.css`, `kits.css`, `tokens.json` |
 | `vue` | `Home.vue` (template plus a `<style>` block; `kits.css` linked with `<style src>`), `kits.css` |
 | `svelte` | `Home.svelte` (markup plus a `<style>` block of `:global` rules; `kits.css` imported), `kits.css` |
 | `html` | `index.html`, `base.css` (the editor's base styles), `Home.css`, `kits.css` |
-| `swiftui` | `Home.swift`, one file with the styles built in (see [native apps](#native-apps-swiftui-and-flutter)) |
-| `flutter` | `home.dart`, one file with the styles built in (see [native apps](#native-apps-swiftui-and-flutter)) |
+| `swiftui` | `Home.swift` with the styles built in, and `DesignTokens.swift` (see [native apps](#native-apps-swiftui-and-flutter)) |
+| `flutter` | `home.dart` with the styles built in, and `design_tokens.dart` (see [native apps](#native-apps-swiftui-and-flutter)) |
 
 `kits.css` holds the forest's enabled design kits: kits with CSS are copied in, and linked kits
 (with a URL) become `@import url(...)`. It is left out when there are no kits. The deployment's own
 stylesheets (`TW_CSS_URLS`) are not included; the app loads its own.
+
+When the kits define [design tokens](tokens.md) (`:root` custom properties), web exports add
+`tokens.json` (W3C Design Tokens), Tailwind exports also add `tailwind.theme.css` (v4) and
+`tailwind.tokens.cjs` (v3 preset) and use theme utilities such as `bg-brand`, and native exports
+add a `DesignTokens` type that styles refer to by name. Without tokens these files are left out.
 
 The component's name comes from the tree's name in PascalCase (`Landing page` → `LandingPage`), or
 `--name`. A name that starts with a digit gets a `Layout` prefix.
@@ -63,7 +68,8 @@ exported files. If the forest's display settings use other breakpoints, the vari
 
 `--framework swiftui` writes a SwiftUI `View` (iOS 16, iPadOS 16, macOS 13 or later);
 `--framework flutter` writes a Flutter `StatelessWidget` (Flutter 3.27 or later). Each is one file
-with the layout and its styles in it; `--styling` doesn't apply. The page scrolls vertically.
+with the layout and its styles in it, plus `DesignTokens.swift` or `design_tokens.dart` when the
+kits define tokens; `--styling` doesn't apply. The page scrolls vertically.
 
 The tree is read into native building blocks rather than translated tag by tag:
 

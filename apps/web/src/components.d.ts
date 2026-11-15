@@ -75,6 +75,13 @@ export namespace Components {
      */
     interface TwStorybookImport {
     }
+    /**
+     * Design tokens: the colours, spacing and type sizes the forest's kits define as `:root`
+     * custom properties. Edits go into the forest's token kit, so every `var(--name)` on the
+     * canvas and in every export follows, and the kit's own CSS stays as imported.
+     */
+    interface TwTokensPanel {
+    }
     interface TwToolbar {
     }
 }
@@ -208,6 +215,17 @@ declare global {
         prototype: HTMLTwStorybookImportElement;
         new (): HTMLTwStorybookImportElement;
     };
+    /**
+     * Design tokens: the colours, spacing and type sizes the forest's kits define as `:root`
+     * custom properties. Edits go into the forest's token kit, so every `var(--name)` on the
+     * canvas and in every export follows, and the kit's own CSS stays as imported.
+     */
+    interface HTMLTwTokensPanelElement extends Components.TwTokensPanel, HTMLStencilElement {
+    }
+    var HTMLTwTokensPanelElement: {
+        prototype: HTMLTwTokensPanelElement;
+        new (): HTMLTwTokensPanelElement;
+    };
     interface HTMLTwToolbarElementEventMap {
         "twTogglePanel": 'left' | 'right';
     }
@@ -241,6 +259,7 @@ declare global {
         "tw-share-dialog": HTMLTwShareDialogElement;
         "tw-sidebar": HTMLTwSidebarElement;
         "tw-storybook-import": HTMLTwStorybookImportElement;
+        "tw-tokens-panel": HTMLTwTokensPanelElement;
         "tw-toolbar": HTMLTwToolbarElement;
     }
 }
@@ -314,6 +333,13 @@ declare namespace LocalJSX {
      */
     interface TwStorybookImport {
     }
+    /**
+     * Design tokens: the colours, spacing and type sizes the forest's kits define as `:root`
+     * custom properties. Edits go into the forest's token kit, so every `var(--name)` on the
+     * canvas and in every export follows, and the kit's own CSS stays as imported.
+     */
+    interface TwTokensPanel {
+    }
     interface TwToolbar {
         "onTwTogglePanel"?: (event: TwToolbarCustomEvent<'left' | 'right'>) => void;
     }
@@ -338,6 +364,7 @@ declare namespace LocalJSX {
         "tw-share-dialog": TwShareDialog;
         "tw-sidebar": TwSidebar;
         "tw-storybook-import": TwStorybookImport;
+        "tw-tokens-panel": TwTokensPanel;
         "tw-toolbar": TwToolbar;
     }
 }
@@ -395,6 +422,12 @@ declare module "@stencil/core" {
              * as new trees, or both, with the Storybook's styles as design kits.
              */
             "tw-storybook-import": LocalJSX.IntrinsicElements["tw-storybook-import"] & JSXBase.HTMLAttributes<HTMLTwStorybookImportElement>;
+            /**
+             * Design tokens: the colours, spacing and type sizes the forest's kits define as `:root`
+             * custom properties. Edits go into the forest's token kit, so every `var(--name)` on the
+             * canvas and in every export follows, and the kit's own CSS stays as imported.
+             */
+            "tw-tokens-panel": LocalJSX.IntrinsicElements["tw-tokens-panel"] & JSXBase.HTMLAttributes<HTMLTwTokensPanelElement>;
             "tw-toolbar": LocalJSX.IntrinsicElements["tw-toolbar"] & JSXBase.HTMLAttributes<HTMLTwToolbarElement>;
         }
     }

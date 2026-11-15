@@ -7,8 +7,9 @@
  * The samples are every example tree in examples/, every tree template, and one tree that
  * holds every palette blueprint, exported with the Weaver Basic kit plus the tree's own kits.
  * Output:
- *   <out>/swift/Sources/TreeWeaverSamples/*.swift   a Swift package (swift build / xcodebuild)
- *   <out>/flutter/lib/samples/*.dart + lib/main.dart a Flutter app, with a widget test that lays
+ *   <out>/swift/Sources/<Sample>/*.swift           a Swift package, one target per sample (each has
+ *                                                  its own DesignTokens), plus TreeWeaverSamples
+ *   <out>/flutter/lib/samples/<sample>/*.dart + lib/main.dart a Flutter app, with a widget test that lays
  *     every sample out at desktop, tablet and phone widths (flutter analyze / flutter test)
  *
  * Build the packages first (pnpm build:packages).
@@ -19,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const load = (pkg) => import(join(root, 'packages', pkg, 'dist', 'index.js'));
-const [{ createBranch, createKit, createTree }, { exportSwiftUI, exportFlutter, importJson, dartFileName }, { BLUEPRINTS, TEMPLATES }, { WEAVER_BASIC_CSS }] = await Promise.all(
+const [{ createBranch, createKit, createTree }, { exportComponent, importJson, dartFileName }, { BLUEPRINTS, TEMPLATES }, { WEAVER_BASIC_CSS }] = await Promise.all(
   ['core', 'formats', 'branches', 'kits'].map(load),
 );
 
@@ -67,14 +68,25 @@ let package = Package(
     name: "TreeWeaverSamples",
     platforms: [.iOS(.v16), .macOS(.v13)], // the oldest the exports support,
     products: [.library(name: "TreeWeaverSamples", targets: ["TreeWeaverSamples"])],
-    targets: [.target(name: "TreeWeaverSamples")]
+    targets: [
+${names.map((n) => `        .target(name: "${n}"),`).join('\n')}
+        .target(name: "TreeWeaverSamples", dependencies: [${names.map((n) => `"${n}"`).join(', ')}]),
+    ]
 )
 `,
 );
-samples.forEach(({ tree, kits }, i) => write(join(swift, 'Sources', 'TreeWeaverSamples', `${names[i]}.swift`), exportSwiftUI(tree, { name: names[i], kits })));
+// Each sample is its own module, so each can have its own DesignTokens; the view is made public
+// so the list view can use it.
+samples.forEach(({ tree, kits }, i) => {
+  for (const f of exportComponent(tree, { framework: 'swiftui', name: names[i], kits }).files) {
+    const contents = f.path === `${names[i]}.swift` ? f.contents.replace(`struct ${names[i]}: View {`, `public struct ${names[i]}: View {\n    public init() {}`).replace('    var body: some View {', '    public var body: some View {') : f.contents;
+    write(join(swift, 'Sources', names[i], f.path), contents);
+  }
+});
 write(
   join(swift, 'Sources', 'TreeWeaverSamples', 'AllSamples.swift'),
   `import SwiftUI
+${names.map((n) => `import ${n}`).join('\n')}
 
 public struct AllSamples: View {
     public init() {}
@@ -111,11 +123,14 @@ flutter:
 `,
 );
 write(join(flutter, 'analysis_options.yaml'), 'include: package:flutter_lints/flutter.yaml\n');
-samples.forEach(({ tree, kits }, i) => write(join(flutter, 'lib', 'samples', dartFileName(names[i])), exportFlutter(tree, { name: names[i], kits })));
+samples.forEach(({ tree, kits }, i) => {
+  const dir = join(flutter, 'lib', 'samples', dartFileName(names[i]).replace(/\.dart$/, ''));
+  for (const f of exportComponent(tree, { framework: 'flutter', name: names[i], kits }).files) write(join(dir, f.path), f.contents);
+});
 write(
   join(flutter, 'lib', 'main.dart'),
   `import 'package:flutter/material.dart';
-${names.map((n) => `import 'samples/${dartFileName(n)}';`).join('\n')}
+${names.map((n) => `import 'samples/${dartFileName(n).replace(/\.dart$/, '')}/${dartFileName(n)}';`).join('\n')}
 
 void main() => runApp(const SamplesApp());
 

@@ -4,6 +4,11 @@ import { dirname } from 'node:path';
 import { parseArgs, type ParseArgsConfig } from 'node:util';
 import {
   applyPatch,
+  resetToken,
+  setToken,
+  themeTokens,
+  TOKEN_KINDS,
+  type TokenKind,
   canHaveChildren,
   checkRendered,
   checkTree,
@@ -42,6 +47,11 @@ import {
 import {
   COMPONENT_FRAMEWORKS,
   isNativeFramework,
+  exportFlutterTokens,
+  exportSwiftUITokens,
+  tailwindPreset,
+  tailwindThemeCss,
+  tokensJson,
   diffDocuments,
   detectFormat,
   exportComponent,
@@ -129,6 +139,7 @@ Commands:
   expand <file>            Turn shorthand ("h2: Title", { "grid": 3 }) into a full document
   outline <file>           List a tree's branches and leaves with their ids and paths
   kit <file...>            List the classes and tokens of CSS files or a document's kits
+  tokens <file>            List, edit and export design tokens (colours, spacing, type)
   schema                   Print the JSON Schema for Tree Weaver documents
   link <file|url>          Print a link that opens a document in the live editor
   versions <file> [action] List, save, compare and restore saved versions of a file
@@ -181,8 +192,10 @@ Write a standalone HTML page (inlined kits and responsive CSS) for a tree.
 
 Write a tree as source code for a codebase: a component with a CSS file (readable,
 namespaced class names) or with Tailwind classes, plus kits.css for its design kits.
-swiftui and flutter write one native file (a SwiftUI view or a Flutter widget) with
-the styles and design kit rules in it; --styling does not apply to them.
+swiftui and flutter write a SwiftUI view or a Flutter widget with the styles and
+design kit rules in it, plus DesignTokens.swift / design_tokens.dart when the kits
+define tokens; --styling does not apply to them. Web exports add tokens.json, and
+Tailwind ones a theme (tailwind.theme.css for v4, tailwind.tokens.cjs for v3).
 
   -f, --framework <name>  ${COMPONENT_FRAMEWORKS.map((f) => f.id).join(', ')} (default: react)
   -s, --styling <name>    css or tailwind (default: css; web frameworks only)
@@ -295,6 +308,22 @@ must allow cross-origin requests).
       --editor <url>    Editor to link to (default: ${EDITOR_URL})
   -F, --from <fmt>      Input format, when the extension doesn't say
       --json            Print { url, length }
+`,
+  tokens: `Usage: tree-weaver tokens <file> [options]
+
+List a document's design tokens: the :root custom properties of its kits, with the
+edits in its token kit on top. --set and --reset edit the token kit and write the
+document back; --format writes the tokens for a platform.
+
+      --set <name=value>  Set (or add) a token, repeatable: --set brand=#2f6f4f sets
+                          --brand (write the name without its leading dashes)
+      --kind <name=kind>  Set a token's kind (repeatable): ${TOKEN_KINDS.join(', ')}
+      --reset <name>      Drop an edit so the kit value shows again (repeatable)
+  -f, --format <name>     Print the tokens as css, json (W3C Design Tokens), tailwind
+                          (v4 @theme), tailwind-v3 (preset), swift or dart
+  -o, --output <file>     Write the document (or the --format output) here instead
+      --no-version        Don't save the file as a version before changing it
+      --json              Print { tokens: [{ name, value, resolved, kind, source, edited }] }
 `,
   versions: `Usage: tree-weaver versions <file> [list|save|diff|restore|remove] [version] [options]
 
@@ -907,6 +936,78 @@ async function cmdKit(cli: Cli, args: string[]): Promise<number> {
   return 0;
 }
 
+const TOKEN_FORMATS = ['css', 'json', 'tailwind', 'tailwind-v3', 'swift', 'dart'] as const;
+
+/** `brand=#fff` or `--brand=#fff` → ['--brand', '#fff']. */
+function tokenPair(arg: string, flag: string): [string, string] {
+  const i = arg.indexOf('=', arg.startsWith('--') ? 2 : 0);
+  if (i < 1) throw new UsageError(`${flag} needs name=value, got "${arg}"`);
+  const name = arg.slice(0, i).trim();
+  return [name.startsWith('--') ? name : `--${name}`, arg.slice(i + 1).trim()];
+}
+
+async function cmdTokens(cli: Cli, args: string[]): Promise<number> {
+  const { values, positionals } = parse(args, {
+    set: { type: 'string', multiple: true },
+    kind: { type: 'string', multiple: true },
+    reset: { type: 'string', multiple: true },
+    format: { type: 'string', short: 'f' },
+    output: { type: 'string', short: 'o' },
+    'no-version': { type: 'boolean' },
+    from: { type: 'string', short: 'F' },
+  });
+  if (positionals.length !== 1) throw new UsageError('tokens needs one file (or "-" for stdin)');
+  const file = positionals[0];
+  const loaded = await cli.load(file, asFormat(values.from, '--from'));
+  const { doc } = loaded;
+  let kits = doc.kind === 'forest' ? doc.forest.kits : doc.kits;
+  const sets = (values.set ?? []).map((a) => tokenPair(a, '--set'));
+  const kindsSet = (values.kind ?? []).map((a) => tokenPair(a, '--kind'));
+  const edits = sets.length + kindsSet.length + (values.reset?.length ?? 0);
+  if (edits && values.format) throw new UsageError('Use --format on its own, after editing');
+  if (edits) {
+    for (const name of values.reset ?? []) kits = resetToken(kits, name.startsWith('--') ? name : `--${name}`);
+    for (const [name, value] of sets) kits = setToken(kits, { name, value });
+    for (const [name, kind] of kindsSet) {
+      if (!TOKEN_KINDS.includes(kind as TokenKind)) throw new UsageError(`Unknown kind "${kind}". Kinds: ${TOKEN_KINDS.join(', ')}`);
+      const current = themeTokens(kits).find((t) => t.name === name);
+      if (!current) throw new Error(`No token ${name}`);
+      kits = setToken(kits, { name, value: current.value, kind: kind as TokenKind });
+    }
+    const next: TreeDocument = doc.kind === 'forest' ? { kind: 'forest', forest: { ...doc.forest, kits, updatedAt: now() } } : { ...doc, kits };
+    const data = next.kind === 'forest' ? exportForest(next.forest, loaded.format) : exportTree(next.tree, loaded.format, next.kits);
+    const target = values.output ?? (file === '-' ? undefined : file);
+    if (!values['no-version'] && target && target === file && loaded.text !== data) await keepVersion(cli, file, loaded.text, loaded.format, { name: 'Before tokens', source: 'agent', auto: true });
+    await cli.emit(target, data);
+    if (target) cli.note(`Wrote ${target}`);
+  }
+  const tokens = themeTokens(kits);
+  if (values.format) {
+    const format = values.format as (typeof TOKEN_FORMATS)[number];
+    if (!TOKEN_FORMATS.includes(format)) throw new UsageError(`--format must be one of ${TOKEN_FORMATS.join(', ')}`);
+    const out =
+      format === 'css'
+        ? tokens.length ? `:root {\n${tokens.map((t) => `  ${t.name}: ${t.value};`).join('\n')}\n}\n` : ''
+        : format === 'json'
+          ? tokensJson(kits)
+          : format === 'tailwind'
+            ? tailwindThemeCss(tokens)
+            : format === 'tailwind-v3'
+              ? tailwindPreset(tokens)
+              : format === 'swift'
+                ? exportSwiftUITokens(kits)
+                : exportFlutterTokens(kits);
+    if (!out) cli.note('No tokens to write for that format');
+    await cli.emit(values.output, out);
+    return 0;
+  }
+  if (edits && values.output === undefined && file === '-') return 0;
+  const width = Math.max(4, ...tokens.map((t) => t.name.length));
+  const lines = tokens.map((t) => `${t.name.padEnd(width)}  ${t.kind.padEnd(11)}  ${t.value}${t.resolved !== t.value ? `  (${t.resolved})` : ''}${t.edited ? `  [edited${t.kitValue ? `, kit: ${t.kitValue}` : ''}]` : ''}`);
+  cli.report(!!values.json, { tokens }, tokens.length ? lines.join('\n') : 'No tokens: add :root { --name: value } to a kit, or use --set');
+  return 0;
+}
+
 async function cmdSchema(cli: Cli, args: string[]): Promise<number> {
   const { values, positionals } = parse(args, { output: { type: 'string', short: 'o' }, patch: { type: 'boolean' } });
   if (positionals.length) throw new UsageError('schema takes no files; use -o to write one');
@@ -1029,6 +1130,7 @@ const COMMANDS: Record<string, (cli: Cli, args: string[]) => Promise<number>> = 
   export: cmdExport,
   outline: cmdOutline,
   kit: cmdKit,
+  tokens: cmdTokens,
   schema: cmdSchema,
   link: cmdLink,
 };

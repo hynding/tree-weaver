@@ -202,7 +202,7 @@ export function renderDocument(tree: Tree, opts: DocumentOptions = {}): string {
   const kits = (opts.kits ?? []).filter((k) => k.enabled);
   const kitStyles = kits
     .map((k) => {
-      const attrs = `data-tw-kit="${escapeAttr(k.id)}" data-tw-kit-name="${escapeAttr(k.name)}"${k.source === 'env' ? ' data-tw-env' : ''}${k.rules ? ' data-tw-kit-editable' : ''}`;
+      const attrs = `data-tw-kit="${escapeAttr(k.id)}" data-tw-kit-name="${escapeAttr(k.name)}"${k.source === 'env' ? ' data-tw-env' : ''}${k.rules ? ' data-tw-kit-editable' : ''}${k.tokens ? ' data-tw-kit-tokens' : ''}`;
       if (k.href) return `<link rel="stylesheet" href="${escapeAttr(k.href)}" ${attrs}>`;
       return `<style ${attrs}>\n${k.css.replace(/<\/style/gi, '<\\/style')}\n</style>`;
     })

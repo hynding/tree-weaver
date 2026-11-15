@@ -27,7 +27,7 @@ patch_tree (small edits by path or id; nodes may be shorthand such as "h2: Prici
 validate -> check_layout (problems per display, with fixes) and screenshot (see each display) or render_html, and export_component to hand the layout to a
 React, Vue or Svelte codebase. Every in-place patch_tree saves the file as a version first: diff_versions shows
 what an edit changed and restore_version rolls it back. Prefer the design kit's classes
-(kit_manifest) over inline styles. Read tree-weaver://guide/shorthand and tree-weaver://guide/patch
+(kit_manifest) and design tokens (list_tokens, set_tokens) over inline styles. Read tree-weaver://guide/shorthand and tree-weaver://guide/patch
 for the full syntax. File paths are relative to the server's workspace folder.`;
 
 const FORMAT_IDS = FORMATS.map((f) => f.id) as [FormatId, ...FormatId[]];
@@ -302,6 +302,46 @@ export function createServer(options: ServerOptions = {}): McpServer {
     wrap((args) => tools.catalog(args)),
   );
 
+  const tokenKinds = ['color', 'space', 'radius', 'font-family', 'font-size', 'font-weight', 'line-height', 'shadow', 'other'] as const;
+  server.registerTool(
+    'list_tokens',
+    {
+      title: 'List design tokens',
+      description:
+        'List a document\'s design tokens: the :root custom properties of its kits (colours, spacing, type), with edits on top, their kinds and resolved values. Style with var(--token) so exports keep the names (DesignTokens in SwiftUI/Flutter, theme utilities in Tailwind, tokens.json).',
+      inputSchema: { ...source },
+      annotations: { ...reads, title: 'List design tokens' },
+    },
+    wrap((args) => tools.listTokens(args)),
+  );
+
+  server.registerTool(
+    'set_tokens',
+    {
+      title: 'Edit design tokens',
+      description:
+        'Set or add design tokens (written to the document\'s token kit, which wins over the other kits) or reset edits back to the kit values. Every use of var(--token) in the canvas and every export follows. Edits the file in place unless output is given; saves a version first.',
+      inputSchema: {
+        ...source,
+        tokens: z
+          .array(
+            z.object({
+              name: z.string().describe('Custom property, e.g. --brand (the leading -- is optional)'),
+              value: z.string().describe('Any CSS value, e.g. #2f6f4f, 1.5rem or var(--other)'),
+              kind: z.enum(tokenKinds).optional().describe('Optional; inferred from the name and value when left out'),
+              description: z.string().optional(),
+            }),
+          )
+          .optional(),
+        reset: z.array(z.string()).optional().describe('Token names whose edits to drop'),
+        output,
+        keepVersion: z.boolean().optional().describe('Save the file as a version before changing it in place (default true)'),
+      },
+      annotations: { ...writes, title: 'Edit design tokens' },
+    },
+    wrap((args) => tools.setTokens(args)),
+  );
+
   server.registerTool(
     'kit_manifest',
     {
@@ -323,6 +363,7 @@ export function createServer(options: ServerOptions = {}): McpServer {
     { name: 'shorthand-guide', uri: 'tree-weaver://guide/shorthand', title: 'Shorthand guide', description: 'Compact authoring syntax for nodes and documents', mimeType: 'text/markdown', read: () => readDoc('shorthand.md') },
     { name: 'patch-guide', uri: 'tree-weaver://guide/patch', title: 'Patch guide', description: 'Every patch operation with examples', mimeType: 'text/markdown', read: () => readDoc('patch.md') },
     { name: 'export-guide', uri: 'tree-weaver://guide/export', title: 'Component export guide', description: 'React, Vue, Svelte and HTML exports, class naming and Tailwind display variants', mimeType: 'text/markdown', read: () => readDoc('export.md') },
+    { name: 'tokens-guide', uri: 'tree-weaver://guide/tokens', title: 'Design tokens guide', description: 'Kit :root variables as tokens, editing them, and how each export names them', mimeType: 'text/markdown', read: () => readDoc('tokens.md') },
     { name: 'checks-guide', uri: 'tree-weaver://guide/checks', title: 'Layout checks guide', description: 'Every check_layout rule and how rendered checks work', mimeType: 'text/markdown', read: () => readDoc('checks.md') },
     { name: 'blueprints', uri: 'tree-weaver://catalog/blueprints', title: 'Blueprints', description: 'Ready-made branches', mimeType: 'application/json', read: () => json(BLUEPRINTS.map(({ id, label, category, description }) => ({ id, label, category, description }))) },
     { name: 'templates', uri: 'tree-weaver://catalog/templates', title: 'Templates', description: 'Tree templates for create_tree', mimeType: 'application/json', read: () => json(TEMPLATES.map(({ id, label, description }) => ({ id, label, description }))) },
