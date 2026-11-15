@@ -22,3 +22,68 @@ jobs:
         run: pnpm test
       - name: Install the packed packages and run them in plain Node
         run: pnpm smoke
+
+  # The SwiftUI and Flutter exports are only strings in the unit tests. These jobs export
+  # every example, template and blueprint and compile (and, for Flutter, lay out) the result.
+  native-samples:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:packages
+      - name: Export the native samples
+        run: node scripts/native-samples.mjs native-samples
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-samples
+          path: native-samples
+
+  swiftui:
+    needs: native-samples
+    runs-on: macos-15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-samples
+          path: native-samples
+      - name: Show the toolchain
+        run: xcodebuild -version && swift --version
+      - name: Build for macOS
+        working-directory: native-samples/swift
+        run: swift build
+      - name: Build for iOS (compact size class paths)
+        working-directory: native-samples/swift
+        run: xcodebuild -scheme TreeWeaverSamples -destination 'generic/platform=iOS Simulator' -quiet build
+
+  flutter:
+    needs: native-samples
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The oldest Flutter the exports support (Flex spacing), and the current stable.
+        flutter: ['3.27.4', '']
+    name: flutter (${{ matrix.flutter || 'stable' }})
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-samples
+          path: native-samples
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ matrix.flutter }}
+      - name: Get packages
+        working-directory: native-samples/flutter
+        run: flutter pub get
+      - name: Analyze (warnings and errors fail)
+        working-directory: native-samples/flutter
+        run: flutter analyze --no-fatal-infos
+      - name: Lay out every sample at desktop, tablet and phone widths
+        working-directory: native-samples/flutter
+        run: flutter test

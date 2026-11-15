@@ -678,8 +678,10 @@ function dartDecorate(look: Tiered<Look>, o: Out, d: number, inner: (d: number) 
     depth--;
     closers.push(')');
   }
+  // Only a size: a SizedBox (the lint `sized_box_for_whitespace` flags a Container here).
+  const sizeOnly = !anyPad && !deco.length && !has('maxWidth') && !has('minHeight');
   if (needsBox) {
-    open('Container(');
+    open(sizeOnly ? 'SizedBox(' : 'Container(');
     if (anyPad) {
       const uniform = TIERS.every((t) => pad[t].top === pad[t].right && pad[t].top === pad[t].bottom && pad[t].top === pad[t].left);
       o.line(depth, uniform ? `padding: EdgeInsets.all(${dartPick(pad, (e) => dbl(e.top))}),` : `padding: EdgeInsets.fromLTRB(${(['left', 'top', 'right', 'bottom'] as const).map((s) => dartPick(pad, (e) => dbl(e[s]))).join(', ')}),`);
@@ -811,8 +813,8 @@ function dartView(v: NView, o: Out, d: number): void {
         const spacing = dartPick(L, (l) => dbl(l.gap));
         if (L.lg.kind === 'grid') {
           const cols = dartPick(L, (l) => String(l.columns));
-          const min = TIERS.some((t) => L[t].minColumn !== undefined) ? `, minColumnWidth: ${dartPick(L, (l) => (l.minColumn !== undefined ? dbl(l.minColumn) : 'null'))}` : '';
-          o.line(dd, `_Grid(columns: ${cols}${min}, spacing: ${spacing}, children: [`);
+          const min = TIERS.some((t) => L[t].minColumn !== undefined) ? dartPick(L, (l) => (l.minColumn !== undefined ? dbl(l.minColumn) : 'null')) : 'null';
+          o.line(dd, `_Grid(columns: ${cols}, minColumnWidth: ${min}, spacing: ${spacing}, children: [`);
           dartChildren(v.children, o, dd + 1);
           o.line(dd, '])');
           return;
@@ -857,7 +859,7 @@ function dartView(v: NView, o: Out, d: number): void {
 const GRID_HELPER = `
 /// Lays children out in rows of [columns] (or as many [minColumnWidth]-wide columns as fit).
 class _Grid extends StatelessWidget {
-  const _Grid({required this.columns, this.minColumnWidth, required this.spacing, required this.children});
+  const _Grid({required this.columns, required this.minColumnWidth, required this.spacing, required this.children});
 
   final int columns;
   final double? minColumnWidth;
