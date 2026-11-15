@@ -22,6 +22,10 @@ jobs:
         run: pnpm test
       - name: Install the packed packages and run them in plain Node
         run: pnpm smoke
+      - name: Install Chromium for the browser checks
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Component variant exports match the editor at every display size
+        run: pnpm e2e:variants
 
   # The SwiftUI and Flutter exports are only strings in the unit tests. These jobs export
   # every example, template and blueprint and compile (and, for Flutter, lay out) the result.

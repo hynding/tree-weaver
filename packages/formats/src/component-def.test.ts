@@ -23,17 +23,44 @@ describe('exportComponentDef', () => {
     const out = exportComponentDef(cardDef(), { framework: 'react', typescript: true });
     const tsx = file(out, '.tsx');
     expect(tsx).toContain('export interface CardProps');
-    expect(tsx).toContain('variant?: "stacked" | \'\';');
+    expect(tsx).toContain('export type CardVariant = "stacked";');
+    expect(tsx).toContain("variant?: CardVariant | '' | Partial<Record<CardDisplay, CardVariant | '-'>>;");
+    expect(tsx).toContain("function variantClasses(variant: CardProps['variant']): string {");
     expect(tsx).toContain('export default function Card({ title = "Card \\"title\\"", tone = "", image = "", badge = false, link = "", variant = "" }: CardProps)');
-    expect(tsx).toContain('className={`card card-${tone} card__article${variant ? ` card__article--${variant}` : \'\'}`}');
+    expect(tsx).toContain('className={`card card-${tone} card__article${variantClasses(variant)}`}');
     expect(tsx).toContain('{badge && (<span>New</span>)}');
     expect(tsx).toContain('<img src={image} alt={title} />');
     // Literal backticks, backslashes and ${ are escaped in template literals.
     expect(tsx).toContain('title={`Say "hi" \\`\\${x}\\` \\\\ ${title}`}');
     const css = file(out, '.css');
-    expect(css).toContain('.card__article.card__article--stacked {\n  flex-direction: column;');
-    expect(css).toContain('.card__article--stacked .card__h3 {\n  font-size: 14px;');
-    expect(css).toMatch(/@media \(max-width: 600px\) and \(orientation: portrait\) \{\n {2}\.card__article\.card__article--stacked \{\n {4}gap: 4px;/);
+    expect(css).toContain('.card__article.card__article--lg-stacked {\n  flex-direction: column;');
+    expect(css).toContain('.card__article.card__article--lg-stacked .card__h3 {\n  font-size: 14px;');
+    // A phone can switch to the variant, or back to the base look, at its own breakpoint.
+    const phone = css.slice(css.indexOf('@media (max-width: 600px) and (orientation: portrait)'));
+    expect(phone).toContain('.card__article.card__article--tablet-base.card__article--mobile-portrait-stacked {\n    gap: 4px;\n    flex-direction: column;');
+    expect(css).toContain('.card__article.card__article--tablet-stacked.card__article--mobile-portrait-base .card__h3 {\n    font-size: unset;');
+  });
+
+  it('turns a variant name or a pick per display into one modifier class per display', () => {
+    const jsx = file(exportComponentDef(cardDef(), { framework: 'react' }), '.jsx');
+    const fn = jsx.slice(jsx.indexOf('const VARIANT_DISPLAYS'), jsx.indexOf('export default'));
+    const variantClasses = new Function(`${fn}; return variantClasses;`)() as (v: unknown) => string;
+    expect(variantClasses('')).toBe('');
+    expect(variantClasses('stacked').trim().split(' ')).toEqual([
+      'card__article--lg-stacked',
+      'card__article--xl-stacked',
+      'card__article--tablet-stacked',
+      'card__article--mobile-landscape-stacked',
+      'card__article--mobile-portrait-stacked',
+    ]);
+    // Phones inherit the tablet pick; `-` goes back to the base look.
+    expect(variantClasses({ tablet: 'stacked', 'mobile-portrait': '-' }).trim().split(' ')).toEqual([
+      'card__article--lg-base',
+      'card__article--xl-base',
+      'card__article--tablet-stacked',
+      'card__article--mobile-landscape-stacked',
+      'card__article--mobile-portrait-base',
+    ]);
   });
 
   it('writes Vue props, bindings and v-if, escaping quotes inside bound attributes', () => {
@@ -42,16 +69,19 @@ describe('exportComponentDef', () => {
     expect(vue).toContain('badge: { type: Boolean, default: false },');
     expect(vue).toContain('<h3 class="card__h3">{{ title }}</h3>');
     expect(vue).toContain('<span v-if="badge">New</span>');
+    expect(vue).toContain('variant: { type: [String, Object], default: "" },');
+    expect(vue).toContain(':class="`card card-${tone} card__article${variantClasses(variant)}`"');
     expect(vue).toContain('<a :href="link" :title="`Say &quot;hi&quot; \\`\\${x}\\` \\\\ ${title}`">');
   });
 
   it('writes Svelte props and blocks, escaping braces in literal text once', () => {
     const svelte = file(exportComponentDef(cardDef(), { framework: 'svelte' }), '.svelte');
     expect(svelte).toContain('export let badge = false;');
-    expect(svelte).toContain(`<article class="card card-{tone} card__article{variant ? ' card__article--' + variant : ''}">`);
+    expect(svelte).toContain(`<article class="card card-{tone} card__article{variantClasses(variant)}">`);
+    expect(svelte).toContain('  function variantClasses(variant) {');
     expect(svelte).toContain('{#if badge}<span>New</span>{/if}');
     expect(svelte).toContain('title="Say &quot;hi&quot; `$&#123;x&#125;` \\ {title}"');
-    expect(svelte).toContain(':global(.card__article--stacked .card__h3) {');
+    expect(svelte).toContain(':global(.card__article.card__article--lg-stacked .card__h3) {');
   });
 
   it('keeps props but drops variants with Tailwind', () => {
