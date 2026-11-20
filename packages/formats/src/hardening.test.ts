@@ -1218,3 +1218,43 @@ describe('pass 35 fixes', () => {
     expect(html).toMatch(/<a [^>]*><div[^>]*>Title<\/div><img[^>]*><\/a><span/);
   });
 });
+
+describe('pass 36 fixes', () => {
+  const rootOf = (doc: ReturnType<typeof importDocument>) => (doc.kind === 'tree' ? doc.tree.root : doc.forest.trees[0].root);
+
+  it('keeps class and for as written on custom elements in JSX', () => {
+    const tree = page([createBranch({ tag: 'my-badge', classes: ['k'], attrs: { for: 'x' }, children: [text('hi')] })]);
+    const jsx = exportComponent(tree, { framework: 'react' }).files[0].contents;
+    expect(jsx).toMatch(/<my-badge class="k[^"]*" for="x">/);
+  });
+
+  it('does not take Toggle, SecureField or Checkbox as a native component name', () => {
+    const root = createBranch({ tag: 'label', children: [createBranch({ tag: 'input', attrs: { type: 'checkbox', 'aria-label': 'A' } })] });
+    const def = createComponent('Toggle', root);
+    expect(exportComponentDef(def, { framework: 'swiftui' }).entry).not.toBe('Toggle.swift');
+    expect(exportComponentDef({ ...def, name: 'SecureField' }, { framework: 'swiftui' }).entry).not.toBe('SecureField.swift');
+    expect(exportComponentDef({ ...def, name: 'Checkbox' }, { framework: 'flutter' }).files[0].contents).not.toMatch(/class Checkbox /);
+  });
+
+  it('keeps whitespace in SVG text with xml:space="preserve"', () => {
+    const doc = importDocument('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><text xml:space="preserve" x="0" y="5">a    b</text></svg>', 'svg');
+    expect(JSON.stringify(rootOf(doc))).toContain('a    b');
+  });
+
+  it('keeps the space between inline-block elements on import', () => {
+    const doc = importDocument('<body><div><div style="display:inline-block">A</div> <div style="display:inline-block">B</div></div></body>', 'html');
+    const outer = rootOf(doc).children.find((c) => c.kind === 'branch') as Branch;
+    expect(outer.children.map((c) => (c.kind === 'leaf' ? JSON.stringify(c.value) : c.tag))).toEqual(['div', '" "', 'div']);
+  });
+
+  it('finds classes in nested CSS rules', async () => {
+    const { analyzeKit } = await import('@tree-weaver/kits');
+    expect(analyzeKit('.card { padding: 1rem; & .card-title { font-weight: bold } .nested-child { color: red } }').classes).toEqual(['card', 'card-title', 'nested-child']);
+  });
+
+  it('maps only flex-start/flex-end justify and align keywords to Tailwind utilities', () => {
+    const tree = page([createBranch({ tag: 'div', styles: { lg: { display: 'flex', 'flex-direction': 'row-reverse', 'justify-content': 'start' } }, children: [text('A')] })]);
+    const out = exportComponent(tree, { framework: 'html', styling: 'tailwind' }).files.map((f) => f.contents).join('\n');
+    expect(out).not.toMatch(/\bjustify-start\b/);
+  });
+});

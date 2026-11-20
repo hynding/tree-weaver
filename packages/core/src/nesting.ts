@@ -23,6 +23,22 @@ const TABLE_CHILDREN: Record<string, Set<string>> = {
   colgroup: new Set(['col', 'template']),
 };
 const HEADING = /^h[1-6]$/;
+/** The parents each table part needs. */
+const PART_PARENTS: Record<string, string[]> = {
+  td: ['tr'],
+  th: ['tr'],
+  tr: ['table', 'thead', 'tbody', 'tfoot'],
+  caption: ['table'],
+  colgroup: ['table'],
+  thead: ['table'],
+  tbody: ['table'],
+  tfoot: ['table'],
+  col: ['colgroup', 'table'],
+};
+/** HTML start tags that end MathML content (the parser's "breakout" list). */
+const MATH_BREAKOUT = new Set(
+  'b big blockquote body br center code dd div dl dt em embed h1 h2 h3 h4 h5 h6 head hr i img li listing menu meta nobr ol p pre ruby s small span strong strike sub sup table tt u ul var'.split(' '),
+);
 /** Elements whose content is read as text, not markup. */
 const RAW_TEXT = new Set(['textarea', 'title', 'noscript', 'template']);
 /** Obsolete raw-text elements, which also show entities as written: nothing the editor writes in them reads back. */
@@ -50,6 +66,12 @@ export function nestingProblem(ancestors: readonly Branch[], node: TreeNode): st
   }
   if (!isBranch(node)) return null;
   const tag = node.tag.toLowerCase();
+  // Elements the parser drops (another <body>) or renames (<image> is read as <img>).
+  if (/^(html|head|body)$/.test(tag)) return `A <${tag}> can't go inside the page; the browser drops it and keeps only what it holds`;
+  if (tag === 'image') return 'The browser reads <image> as <img>; use an image leaf or <img>';
+  // Table parts outside their table part are ignored by the parser.
+  const partOf = Object.hasOwn(PART_PARENTS, tag) ? PART_PARENTS[tag] : undefined;
+  if (partOf && !partOf.includes(parentTag)) return `A <${tag}> only works inside ${partOf.map((t) => `<${t}>`).join(' or ')}; elsewhere the browser drops it and keeps only what it holds`;
   // Open elements the parser would find from here, up to a scope boundary.
   const inScope = (want: (t: string) => boolean, stop: Set<string> = SCOPE): boolean => {
     for (let i = ancestors.length - 1; i >= 0; i--) {
@@ -67,5 +89,16 @@ export function nestingProblem(ancestors: readonly Branch[], node: TreeNode): st
   if (tag === 'li' && inScope((t) => t === 'li', new Set([...SCOPE, 'ul', 'ol']))) return `An <li> can't go inside another <li> without a list around it; the browser would end the outer item`;
   if ((tag === 'dd' || tag === 'dt') && inScope((t) => t === 'dd' || t === 'dt', new Set([...SCOPE, 'dl']))) return `A <${tag}> can't go inside a <dd> or <dt> without a <dl> around it; the browser would end the outer one`;
   if (tag === 'option' && parentTag === 'option') return `An <option> can't go inside another <option>`;
+  if (/^(input|select|textarea|keygen)$/.test(tag) && inScope((t) => t === 'select', new Set(['template']))) return `A <${tag}> can't go inside a <select>; the browser would end the select there`;
+  if (tag === 'nobr' && inScope((t) => t === 'nobr')) return 'A <nobr> can\'t go inside another <nobr>; the browser would end the outer one';
+  if ((tag === 'rt' || tag === 'rp') && inScope((t) => t === 'rt' || t === 'rp', new Set([...SCOPE, 'ruby']))) return `A <${tag}> can't go inside an <rt> or <rp>; the browser would end the outer one`;
+  // HTML in MathML (outside <mtext> and the like) breaks out of the formula.
+  if (MATH_BREAKOUT.has(tag)) {
+    for (let i = ancestors.length - 1; i >= 0; i--) {
+      const t = ancestors[i].tag.toLowerCase();
+      if (/^(mi|mo|mn|ms|mtext|annotation-xml|foreignobject)$/.test(t)) break;
+      if (t === 'math') return `<${tag}> can't go inside <math> (outside an <mtext>); the browser would move it out of the formula`;
+    }
+  }
   return null;
 }

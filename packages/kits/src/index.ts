@@ -28,20 +28,24 @@ export function analyzeKit(css: string): KitAnalysis {
   const media = new Set<string>();
   let ruleCount = 0;
 
-  const visit = (nodes: CssNode[]) => {
+  const visit = (nodes: CssNode[], depth = 0, nested = false) => {
     for (const node of nodes) {
       if (node.type === 'rule') {
         ruleCount++;
+        // In a nested rule body the declarations before the nested selector parse as part of it.
+        const raw = nested ? (node.selector.split(';').pop() ?? '') : node.selector;
         // Ignore attribute selectors and strings so `[href$=".pdf"]` doesn't yield a class.
-        const selector = node.selector.replace(/\[[^\]]*\]/g, '').replace(/(["'])(?:\\.|(?!\1).)*\1/g, '');
+        const selector = raw.replace(/\[[^\]]*\]/g, '').replace(/(["'])(?:\\.|(?!\1).)*\1/g, '');
         for (const m of selector.matchAll(CLASS)) classes.add(m[1].replace(/\\/g, ''));
+        // CSS nesting: rules inside a rule's body (`.card { & .title { … } }`).
+        if (node.body.includes('{') && depth < 32) visit(parseCss(node.body), depth + 1, true);
       } else {
         if (node.name === 'import') {
           const m = IMPORT_URL.exec(node.prelude);
           if (m) imports.push(m[1]);
         }
         if (node.name === 'media' && node.prelude) media.add(node.prelude);
-        if (node.children) visit(node.children);
+        if (node.children) visit(node.children, depth + 1, nested);
       }
     }
   };

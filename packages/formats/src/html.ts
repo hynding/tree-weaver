@@ -133,7 +133,17 @@ function parseDirectiveJson(text: string): RawNode {
   }
 }
 
-const inlineish = (n: ChildNode | undefined): boolean => !!n && (n.type === 'text' || (isElement(n) && isInlineTag(n.name)));
+/** Whether a node sits in a line: text, or an element whose display (its imported styles, its inline style, or its tag's default) is inline. */
+const inlineish = (n: ChildNode | undefined, ctx: Ctx): boolean => {
+  if (!n) return false;
+  if (n.type === 'text') return true;
+  if (!isElement(n)) return false;
+  const id = n.attribs[BRANCH_ATTR];
+  const inlineDisplay = n.attribs.style ? parseDeclarations(n.attribs.style).display : undefined;
+  const display = inlineDisplay ?? (id ? ctx.styles.get(id)?.lg?.display : undefined);
+  if (typeof display === 'string' && display.trim()) return /^inline\b|^inline-/.test(display.trim().toLowerCase());
+  return isInlineTag(n.name);
+};
 
 /** A browser drops one line break straight after `<pre>`, `<textarea>` or `<listing>`; so does the import. */
 function dropLeadingNewline(tag: string, children: RawNode[]): RawNode[] {
@@ -199,7 +209,7 @@ function convertChildren(nodes: ChildNode[], ctx: Ctx, raw: boolean, svg = false
         if (i === kept.length - 1 && !inline) value = value.replace(/ $/, '');
         // Whitespace only matters between two pieces of inline content.
         // At an inline element's edge the other side is the text around the element.
-        const side = (n: ChildNode | undefined) => (n ? inlineish(n) : inline);
+        const side = (n: ChildNode | undefined) => (n ? inlineish(n, ctx) : inline);
         if (!/[^ ]/.test(value)) value = !svg && side(kept[i - 1]) && side(kept[i + 1]) ? ' ' : '';
       }
       if (value) items.push({ kind: 'leaf', type: 'text', value });
@@ -295,7 +305,7 @@ export function convertParts(tag: string, attribs: Record<string, string>, child
     classes: a.class ?? '',
     attrs,
     styles,
-    children: dropLeadingNewline(tag, impliedTbody(tag, convertChildren(children, ctx, raw || RAW_TEXT_TAGS.has(tag) || keepsWhitespace({ tag, styles } as Branch), childrenInSvg({ tag }, svg), !svg && isInlineTag(tag)))),
+    children: dropLeadingNewline(tag, impliedTbody(tag, convertChildren(children, ctx, raw || RAW_TEXT_TAGS.has(tag) || keepsWhitespace({ tag, styles } as Branch) || (inSvg && a['xml:space'] === 'preserve'), childrenInSvg({ tag }, svg), !svg && isInlineTag(tag)))),
   };
 }
 

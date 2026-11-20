@@ -182,11 +182,11 @@ const KEYWORD_UTILITIES: Record<string, Record<string, string>> = {
   'flex-direction': { row: 'flex-row', column: 'flex-col', 'row-reverse': 'flex-row-reverse', 'column-reverse': 'flex-col-reverse' },
   'flex-wrap': { wrap: 'flex-wrap', nowrap: 'flex-nowrap', 'wrap-reverse': 'flex-wrap-reverse' },
   'text-align': { left: 'text-left', center: 'text-center', right: 'text-right', justify: 'text-justify', start: 'text-start', end: 'text-end' },
-  'align-items': { start: 'items-start', 'flex-start': 'items-start', end: 'items-end', 'flex-end': 'items-end', center: 'items-center', baseline: 'items-baseline', stretch: 'items-stretch' },
+  'align-items': { 'flex-start': 'items-start', 'flex-end': 'items-end', center: 'items-center', baseline: 'items-baseline', stretch: 'items-stretch' },
+  // Only flex-start/flex-end: `justify-start` compiles to flex-start, which flips in a reversed
+  // flex box where `start` doesn't, so `start` and `end` stay arbitrary properties.
   'justify-content': {
-    start: 'justify-start',
     'flex-start': 'justify-start',
-    end: 'justify-end',
     'flex-end': 'justify-end',
     center: 'justify-center',
     'space-between': 'justify-between',
@@ -814,7 +814,9 @@ function writeJsx(el: El, depth: number, props: false | ReadonlySet<string> = fa
     .map(([n, v]) => {
       // Without onChange, React makes `value`/`checked` read-only; the default* props keep fields editable.
       const formField = (el.tag === 'input' || el.tag === 'textarea' || el.tag === 'select') && (n === 'value' || n === 'checked');
-      const name = formField ? (n === 'value' ? 'defaultValue' : 'defaultChecked') : jsxAttrName(n);
+      // A custom element gets `class` and `for` as written: React 18 would write `classname=` there.
+      const custom = el.tag.includes('-') && /^(class|for)$/i.test(n);
+      const name = formField ? (n === 'value' ? 'defaultValue' : 'defaultChecked') : custom ? n.toLowerCase() : jsxAttrName(n);
       if (props && n === 'class' && el.variantClass) return ` ${name}={${templateLiteral(v, variantSuffix)}}`;
       const numeric = !el.svg && NUMERIC_ATTRS.has(n.toLowerCase());
       // `hidden="until-found"` too: React takes `hidden` as a boolean only and renders a string as `hidden=""`.

@@ -593,3 +593,18 @@ describe('pass 35 fixes', () => {
     expect(svg).not.toContain('javascript');
   });
 });
+
+describe('pass 36 fixes', () => {
+  it('refuses table parts outside their table, nested bodies, and HTML in math', async () => {
+    const { insertionProblem } = await import('./index');
+    const div = createBranch({ tag: 'div' });
+    const math = createBranch({ tag: 'math' });
+    const sel = createBranch({ tag: 'select' });
+    const root = createBranch({ tag: 'body', type: 'root', children: [div, math, sel] });
+    expect(insertionProblem(root, div.id, createBranch({ tag: 'td' }))).toMatch(/only works inside <tr>/);
+    expect(insertionProblem(root, div.id, createBranch({ tag: 'body' }))).toMatch(/drops it/);
+    expect(insertionProblem(root, math.id, createBranch({ tag: 'div' }))).toMatch(/inside <math>/);
+    expect(insertionProblem(root, sel.id, createBranch({ tag: 'input' }))).toMatch(/inside a <select>/);
+    expect(insertionProblem(root, div.id, createBranch({ tag: 'table', children: [createBranch({ tag: 'tr', children: [createBranch({ tag: 'td' })] })] }))).toBeNull();
+  });
+});
