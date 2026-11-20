@@ -343,7 +343,7 @@ function container(b: Branch): string {
   return inner.length ? `${open}\n\n${inner.join('\n\n')}\n\n<!-- /tw:branch -->` : `${open}\n<!-- /tw:branch -->`;
 }
 
-function list(b: Branch, pad = ''): string | null {
+function list(b: Branch, pad = '', alt = false): string | null {
   const ordered = b.tag === 'ol';
   const lines: string[] = [];
   const start = Number.parseInt(b.attrs.start ?? '1', 10);
@@ -356,17 +356,22 @@ function list(b: Branch, pad = ''): string | null {
     const nested = item.children.filter((c) => !isInlineNode(c));
     // Inline content must come first; nested lists after it.
     if (item.children.slice(0, inlineKids.length).some((c) => !isInlineNode(c))) return null;
-    const marker = ordered ? `${n++}.` : '-';
+    const marker = ordered ? `${n++}${alt ? ')' : '.'}` : alt ? '*' : '-';
     // Edge non-breaking spaces as references: a trailing one would read as a paragraph of its own.
     const text = inlineLine(inlineKids).replace(/^\u00a0+|\u00a0+$/g, (m) => '&#160;'.repeat(m.length));
     if (opensHtmlBlock(text)) return null;
     // An empty nested item (`  -`) would read as a heading underline for the item above.
     if (!text && pad) return null;
     lines.push(`${pad}${marker} ${text}`);
+    let prev: Branch | undefined;
+    let subAlt = false;
     for (const sub of nested) {
       if (!isBranch(sub) || (sub.tag !== 'ul' && sub.tag !== 'ol') || needsMeta(sub)) return null;
+      // Two lists of a kind in a row would read back as one: the second switches marker (`*`, `)`).
+      subAlt = prev?.tag === sub.tag ? !subAlt : false;
+      prev = sub;
       // A nested list lines up with its item's text: past the marker (`10.` is wider than `-`).
-      const md = list(sub, pad + ' '.repeat(marker.length + 1));
+      const md = list(sub, pad + ' '.repeat(marker.length + 1), subAlt);
       if (md === null) return null;
       lines.push(md);
     }

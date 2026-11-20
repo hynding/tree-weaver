@@ -596,6 +596,16 @@ function swiftModifiers(look: Tiered<Look>, opts: { text?: TextRole; fill?: bool
 
 const DEFAULT_SIZE: Record<TextRole, number> = { h1: 34, h2: 28, h3: 22, h4: 20, h5: 17, h6: 15, body: 17, small: 13, code: 15 };
 
+/** Each item's number on each tier: hidden items don't count, as a `display: none` <li> doesn't. */
+function listNumbers(v: Extract<NView, { kind: 'list' }>): Tiered<number>[] {
+  const seen = tiered(() => 0);
+  return v.items.map((item) => {
+    const n = tiered((t) => v.start + v.step * seen[t]);
+    for (const t of TIERS) if (!('look' in item && item.look[t].hidden)) seen[t]++;
+    return n;
+  });
+}
+
 function swiftView(v: NView, o: Out, d: number, fill: boolean): void {
   const look = 'look' in v ? v.look : undefined;
   // Hidden on some widths.
@@ -658,11 +668,18 @@ function swiftBody(v: NView, o: Out, d: number, fill: boolean): void {
       return;
     case 'list':
       o.line(d, 'VStack(alignment: .leading, spacing: 4) {');
+      const nums = listNumbers(v);
       v.items.forEach((item, i) => {
-        o.line(d + 1, 'HStack(alignment: .firstTextBaseline, spacing: 8) {');
-        o.line(d + 2, `Text(verbatim: ${swiftString(v.ordered ? `${v.start + v.step * i}.` : '•')})`);
-        swiftView(item, o, d + 2, false);
-        o.line(d + 1, '}');
+        // A hidden item takes its marker with it, and doesn't count (as a `display: none` <li>).
+        const look = 'look' in item ? item.look : undefined;
+        if (look?.lg.hidden && look.phone.hidden) return;
+        let dd = d + 1;
+        if (look && (look.lg.hidden || look.phone.hidden)) o.line(dd++, `if ${look.phone.hidden ? '!compact' : 'compact'} {`);
+        o.line(dd, 'HStack(alignment: .firstTextBaseline, spacing: 8) {');
+        o.line(dd + 1, `Text(verbatim: ${v.ordered ? swiftPick(nums[i], (n) => swiftString(`${n}.`)) : swiftString('•')})`);
+        swiftBody(item, o, dd + 1, false);
+        o.line(dd, '}');
+        if (dd > d + 1) o.line(d + 1, '}');
       });
       o.line(d, '}');
       mods(v.look, { fill });
@@ -945,11 +962,12 @@ function dartView(v: NView, o: Out, d: number): void {
         o.line(dd, 'Column(');
         o.line(dd + 1, 'crossAxisAlignment: CrossAxisAlignment.start,');
         o.line(dd + 1, 'children: [');
+        const nums = listNumbers(v);
         v.items.forEach((item, i) => {
           const cond = dartShown(item);
           if (cond === 'false') return;
           o.line(dd + 2, `${cond ? `if (${cond}) ` : ''}Row(crossAxisAlignment: CrossAxisAlignment.start, children: [`);
-          o.line(dd + 3, `Text(${dartString(v.ordered ? `${v.start + v.step * i}. ` : '•  ')}),`);
+          o.line(dd + 3, `Text(${v.ordered ? dartPick(nums[i], (n) => dartString(`${n}. `)) : dartString('•  ')}),`);
           o.line(dd + 3, 'Expanded(child:');
           dartView(item, o, dd + 4);
           o.line(dd + 3, '),');

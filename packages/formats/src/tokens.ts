@@ -79,6 +79,8 @@ export function tailwindTokenClass(prop: string, value: string, kinds: ReadonlyM
   // those take the arbitrary-value form instead.
   const key = tailwindTokenKey(m[1]);
   if (use.kind === 'space' && (SPACE_KEYWORDS.has(key) || (SIZING.has(use.prefix) && /^(\d?xs|sm|md|lg|\d?xl|prose)$/.test(key)))) return undefined;
+  // Tailwind v3's `text-lg` sets the font size as well as a colour named `lg`.
+  if (use.kind === 'color' && use.prefix === 'text' && /^(xs|sm|base|lg|\d?xl)$/.test(key)) return undefined;
   // `background` is a shorthand that also clears any background image; `bg-x` sets only the colour.
   return `${prop === 'background' ? 'bg-none ' : ''}${use.prefix}-${tailwindTokenKey(m[1])}`;
 }

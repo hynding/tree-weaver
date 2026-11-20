@@ -314,9 +314,8 @@ export class TwInspector {
           {ATTR_LABELS[name] ?? name}
         </label>
         {name === 'd' || name === 'points' ? (
-          <textarea id={`shape-${name}`} class="textarea mono" rows={3} onChange={(e) => set(name, (e.target as HTMLTextAreaElement).value)}>
-            {attrs[name] ?? ''}
-          </textarea>
+          // `value`, not child text: child text only sets the default, which typing makes stale (undo, a peer's edit).
+          <textarea id={`shape-${name}`} class="textarea mono" rows={3} value={attrs[name] ?? ''} onChange={(e) => set(name, (e.target as HTMLTextAreaElement).value)} />
         ) : (
           <input id={`shape-${name}`} class="input mono" value={attrs[name] ?? ''} list={SUGGEST[name] ? `tw-dl-${name}` : undefined} onChange={(e) => set(name, (e.target as HTMLInputElement).value)} />
         )}
@@ -355,10 +354,9 @@ export class TwInspector {
             class="textarea prose"
             aria-label="Text"
             rows={5}
+            value={leaf.value}
             onChange={(e) => updateLeaf(leaf.id, { value: (e.target as HTMLTextAreaElement).value })}
-          >
-            {leaf.value}
-          </textarea>
+          />
         ) : (
           [
             <div class="field" key={`${leaf.id}-src`}>
@@ -398,8 +396,13 @@ export class TwInspector {
               value={branch.tag}
               list={this.inSvg(branch) ? 'tw-dl-svg-tags' : 'tw-dl-tags'}
               onChange={(e) => {
-                const tag = canonicalTag((e.target as HTMLInputElement).value);
+                const input = e.target as HTMLInputElement;
+                const tag = canonicalTag(input.value);
                 if (/^[a-z][a-zA-Z0-9-]*$/.test(tag)) updateBranch(branch.id, { tag });
+                else {
+                  toast(`“${input.value}” isn't a valid tag name`, 'error');
+                  input.value = branch.tag;
+                }
               }}
             />
           </div>

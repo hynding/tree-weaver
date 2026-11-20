@@ -14,6 +14,7 @@ import {
   LEAF_ATTR,
   parseCss,
   parseDeclarations,
+  stripCssComments,
   renderDocument,
   type CssNode,
   type DesignKit,
@@ -145,7 +146,7 @@ const inlineish = (n: ChildNode | undefined, ctx: Ctx): boolean => {
   if (n.type === 'text') return true;
   if (!isElement(n)) return false;
   const id = n.attribs[BRANCH_ATTR];
-  const inlineDisplay = n.attribs.style ? parseDeclarations(n.attribs.style).display : undefined;
+  const inlineDisplay = n.attribs.style ? parseDeclarations(stripCssComments(n.attribs.style)).display : undefined;
   const display = inlineDisplay ?? (id ? ctx.styles.get(id)?.lg?.display : undefined);
   if (typeof display === 'string' && display.trim()) return /^inline\b|^inline-/.test(display.trim().toLowerCase());
   return isInlineTag(n.name);
@@ -283,7 +284,7 @@ function svgLeaf(tag: string, a: Record<string, string>): RawNode | null {
   // Inline style beats presentation attributes, as in the browser. What an attribute can't say
   // (CSS-only properties, a transform in CSS units) goes on a <g> around the shape.
   const outer: Record<string, string> = {};
-  if (a.style) for (const [prop, value] of Object.entries(parseDeclarations(a.style))) {
+  if (a.style) for (const [prop, value] of Object.entries(parseDeclarations(stripCssComments(a.style)))) {
     if (asAttribute(prop, value)) attrs[prop] = value;
     else outer[prop] = value;
   }
@@ -309,7 +310,7 @@ export function convertParts(tag: string, attribs: Record<string, string>, child
     if (leaf) return leaf;
   }
   // An <img> with inline styles becomes an img branch, which keeps them (an image leaf has no styles).
-  if (tag === 'img' && a[BRANCH_ATTR] === undefined && !Object.keys(a.style ? parseDeclarations(a.style) : {}).length) {
+  if (tag === 'img' && a[BRANCH_ATTR] === undefined && !Object.keys(a.style ? parseDeclarations(stripCssComments(a.style)) : {}).length) {
     const attrs: Record<string, string> = {};
     for (const [k, v] of Object.entries(a)) if (k !== 'src' && k !== LEAF_ATTR && k !== 'style' && !k.startsWith('on')) attrs[k] = v;
     return { kind: 'leaf', id: a[LEAF_ATTR], type: 'image', value: a.src ?? '', attrs };
@@ -321,7 +322,7 @@ export function convertParts(tag: string, attribs: Record<string, string>, child
 
   const id = a[BRANCH_ATTR] || createId('b');
   const styles: DisplayStyles = { ...ctx.styles.get(id) };
-  if (a.style) styles.lg = { ...styles.lg, ...parseDeclarations(a.style) };
+  if (a.style) styles.lg = { ...styles.lg, ...parseDeclarations(stripCssComments(a.style)) };
   const attrs: Record<string, string> = {};
   for (const [k, v] of Object.entries(a)) {
     const n = k.toLowerCase();

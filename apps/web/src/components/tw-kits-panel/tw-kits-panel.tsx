@@ -208,9 +208,7 @@ export class TwKitsPanel {
               ) : kit.href ? null : (
                 <details>
                   <summary class="hint">Edit CSS</summary>
-                  <textarea class="textarea" rows={10} aria-label={`${kit.name} CSS`} onChange={(e) => updateKit(kit.id, { css: (e.target as HTMLTextAreaElement).value })}>
-                    {kit.css}
-                  </textarea>
+                  <textarea class="textarea" rows={10} aria-label={`${kit.name} CSS`} value={kit.css} onChange={(e) => updateKit(kit.id, { css: (e.target as HTMLTextAreaElement).value })} />
                   <button class="btn small" title="Edit this kit's rules one by one, per display, in the Classes tab" onClick={() => this.makeEditable(kit)}>
                     Edit as classes
                   </button>

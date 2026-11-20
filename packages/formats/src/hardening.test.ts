@@ -1668,3 +1668,43 @@ describe('pass 52 fixes', () => {
     expect(out).toContain('"tag":"a"');
   });
 });
+
+describe('pass 53 fixes', () => {
+  it('ignores comments in an inline style attribute on import', () => {
+    const doc = importDocument('<p style="/* color: red; */ color: blue; font-weight: bold">Note</p>', 'html');
+    const p = doc.kind === 'tree' ? (doc.tree.root.children[0] as Branch) : undefined;
+    expect(p?.styles.lg).toEqual({ color: 'blue', 'font-weight': 'bold' });
+  });
+
+  it('keeps two nested lists in one item apart in Markdown', () => {
+    const li = (t: string) => createBranch({ tag: 'li', children: [text(t)] });
+    for (const tag of ['ul', 'ol']) {
+      const item = createBranch({ tag: 'li', children: [text('x'), createBranch({ tag, children: [li('a'), li('b')] }), createBranch({ tag, children: [li('c')] })] });
+      const md = exportTree(page([createBranch({ tag, children: [item] })]), 'markdown');
+      const doc = importDocument(md, 'markdown');
+      const outer = doc.kind === 'tree' ? (doc.tree.root.children[0] as Branch) : undefined;
+      const kids = (outer?.children[0] as Branch).children.filter((c): c is Branch => 'tag' in c && c.tag === tag);
+      expect(kids.map((k) => k.children.length)).toEqual([2, 1]);
+    }
+  });
+
+  it('numbers only the list items shown on each width in native exports', () => {
+    const li = (t: string, styles = {}) => createBranch({ tag: 'li', styles, children: [text(t)] });
+    const tree = page([createBranch({ tag: 'ol', children: [li('One'), li('Desktop only', { 'mobile-portrait': { display: 'none' } }), li('Three')] })]);
+    const swift = exportComponent(tree, { framework: 'swiftui' }).files[0].contents;
+    expect(swift).toContain('(compact ? "2." : "3.")');
+    // The hidden item's marker goes with it.
+    expect(swift).toMatch(/if !compact \{\s*HStack/);
+    const dart = exportComponent(tree, { framework: 'flutter' }).files[0].contents;
+    expect(dart).toContain("(phone ? '2. ' : '3. ')");
+  });
+
+  it('writes a colour token named like a text size as an arbitrary value in Tailwind', async () => {
+    const { createTokenKit } = await import('@tree-weaver/core');
+    const kits = [createTokenKit([{ name: '--lg', value: '#0f0' }])];
+    const tree = page([createBranch({ tag: 'p', styles: { lg: { color: 'var(--lg)' } }, children: [text('Hi')] })]);
+    const jsx = exportComponent(tree, { framework: 'react', styling: 'tailwind', kits }).files[0].contents;
+    expect(jsx).not.toMatch(/\btext-lg\b/);
+    expect(jsx).toContain('[color:var(--lg)]');
+  });
+});
