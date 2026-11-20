@@ -201,8 +201,10 @@ function delimitersFit(before: string, out: string, after: string, mark: string)
   const open = mark.length;
   const first = core.charAt(open);
   const last = core.charAt(core.length - open - 1);
-  if (isPunct(first) && !isSpace(prev) && !isPunct(prev)) return false;
-  if (isPunct(last) && !isSpace(next) && !isPunct(next)) return false;
+  // The importer (marked, GFM) doesn't count a neighbouring `~` as punctuation.
+  const punctBeside = (c: string) => c !== '~' && isPunct(c);
+  if (isPunct(first) && !isSpace(prev) && !punctBeside(prev)) return false;
+  if (isPunct(last) && !isSpace(next) && !punctBeside(next)) return false;
   return true;
 }
 /**
@@ -263,6 +265,14 @@ function blocks(nodes: TreeNode[]): string[] {
 const withMeta = (b: Branch, md: string, allowed?: Set<string>): string =>
   needsMeta(b, allowed) ? `${directive('meta', metaOf(b, allowed))}\n\n${md}` : md;
 
+/**
+ * Whether a line would start a CommonMark HTML block rather than a paragraph: one opening with
+ * `<textarea` (or `<pre`, `<script`, `<style>`), or one that is a single tag and nothing else
+ * (`<img … width="320">`, `<br>`). Its Markdown after the tag would stay raw, and the paragraph go.
+ */
+const opensHtmlBlock = (line: string): boolean =>
+  /^ {0,3}<(script|pre|style|textarea)(\s|>|$)/i.test(line) || /^ {0,3}<\/?[A-Za-z][A-Za-z0-9-]*(\s+[^\s"'=<>`/]+(\s*=\s*("[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*\s*\/?>\s*$/.test(line);
+
 function container(b: Branch): string {
   const inner = blocks(b.children);
   const open = directive('branch', { tag: b.tag, ...metaOf(b) });
@@ -284,7 +294,9 @@ function list(b: Branch, pad = ''): string | null {
     if (item.children.slice(0, inlineKids.length).some((c) => !isInlineNode(c))) return null;
     const marker = ordered ? `${n++}.` : '-';
     // Edge non-breaking spaces as references: a trailing one would read as a paragraph of its own.
-    lines.push(`${pad}${marker} ${inlineLine(inlineKids).replace(/^\u00a0+|\u00a0+$/g, (m) => '&#160;'.repeat(m.length))}`);
+    const text = inlineLine(inlineKids).replace(/^\u00a0+|\u00a0+$/g, (m) => '&#160;'.repeat(m.length));
+    if (opensHtmlBlock(text)) return null;
+    lines.push(`${pad}${marker} ${text}`);
     for (const sub of nested) {
       if (!isBranch(sub) || (sub.tag !== 'ul' && sub.tag !== 'ol') || needsMeta(sub)) return null;
       // A nested list lines up with its item's text: past the marker (`10.` is wider than `-`).
@@ -360,8 +372,11 @@ function block(b: Branch): string {
   const nbspRef = (m: string) => '&#160;'.repeat(m.length);
   const headingText = heading && allInline ? inlineLine(b.children).replace(/^\u00a0+/, nbspRef).replace(/\u00a0+$/, nbspRef) : '';
   if (heading && headingText) return withMeta(b, `${'#'.repeat(Number(heading[1]))} ${headingText}`);
+  // Text after a leading <textarea> would stay raw Markdown (an HTML block), so such a branch is
+  // written as one line of HTML; its tag starts the block, so the importer reads it as HTML.
+  if (allInline && HTML_BLOCK_TAGS.has(b.tag) && /^<textarea(\s|>|$)/i.test(inlineLine(b.children))) return inlineHtml(renderNodeHtml(b));
   const paragraph = b.tag === 'p' && allInline ? inlineLine(b.children) : '';
-  if (paragraph) return withMeta(b, paragraph);
+  if (paragraph && !opensHtmlBlock(paragraph)) return withMeta(b, paragraph);
   if (b.tag === 'hr' && !needsMeta(b)) return '---';
   if ((b.tag === 'ul' || b.tag === 'ol') && b.children.length) {
     const allowed = new Set(b.tag === 'ol' ? ['start'] : []);

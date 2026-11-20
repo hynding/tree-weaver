@@ -577,6 +577,8 @@ describe('tree-weaver components', () => {
     expect(inst.styles['mobile-portrait']).toEqual({ 'flex-direction': 'column' });
     expect(JSON.stringify(inst.children)).toContain('Hello');
     expect((await cli(['components', 'site.json', 'insert', 'Card', '--variant', 'nope'], files)).code).toBe(2);
+    // `-` is the base look on a display, as in the MCP tool and the docs.
+    expect((await cli(['components', 'site.json', 'insert', 'Card', '--variant', 'lg=stacked', '--variant', 'mobile-portrait=-', '--no-version'], { ...files })).code).toBe(0);
 
     const list = await cli(['components', 'site.json', '--json'], ins.files);
     expect(JSON.parse(list.out).components[0]).toMatchObject({ name: 'Card', variants: ['stacked'], instances: 2 });

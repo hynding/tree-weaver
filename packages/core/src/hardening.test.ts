@@ -514,3 +514,12 @@ describe('pass 28 fixes', () => {
     expect(normalizeComponent(JSON.parse(JSON.stringify(def))).variants.map((v) => v.name)).toEqual(['big']);
   });
 });
+
+describe('pass 29 fixes', () => {
+  it('refuses to put branches inside a void component root', async () => {
+    const { createComponent, componentTreeId, updateTreeRoot, insertNode, createForest } = await import('./index');
+    const def = createComponent('Rule', createBranch({ tag: 'hr' }));
+    const forest = { ...createForest('F', [createTree('Home')]), components: [def] };
+    expect(() => updateTreeRoot(forest, componentTreeId(def.id), (body) => insertNode(body, body.id, createBranch({ tag: 'p' })))).toThrow(/can't hold/);
+  });
+});

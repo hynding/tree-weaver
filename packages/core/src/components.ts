@@ -3,6 +3,7 @@ import { DISPLAY_IDS, getDisplay, resolveStyles } from './displays';
 import type { Branch, DisplayId, DisplayStyles, Forest, StyleMap, Tree, TreeNode } from './model';
 import { isBranch } from './model';
 import { isSvgOnly } from './svg';
+import { VOID_TAGS } from './ops';
 
 /**
  * Reusable components: a branch saved once in the forest, with props and variants, and used
@@ -447,8 +448,13 @@ export function updateComponentTree(forest: Forest, treeId: string, fn: (root: B
   else if (rootAt >= 0) {
     // Something added beside the template root goes inside it, before or after what it holds.
     const r = kids[rootAt] as Branch;
+    // A void root (`<hr>`, `<input>`) can't hold them: they would never render.
+    if (VOID_TAGS.has(r.tag.toLowerCase())) throw new Error(`The component's <${r.tag}> can't hold other branches`);
     nextRoot = { ...r, children: [...kids.slice(0, rootAt), ...r.children, ...kids.slice(rootAt + 1)] };
-  } else nextRoot = { ...def.root, children: kids };
+  } else {
+    if (kids.length && VOID_TAGS.has(def.root.tag.toLowerCase())) throw new Error(`The component's <${def.root.tag}> can't hold other branches`);
+    nextRoot = { ...def.root, children: kids };
+  }
   const v = variant ? def.variants.find((x) => x.name === variant) : undefined;
   let next: ComponentDef;
   if (v) {

@@ -1117,7 +1117,7 @@ async function cmdComponents(cli: Cli, args: string[]): Promise<number> {
         const i = a.indexOf('=');
         const [display, name] = i < 0 ? ['lg', a] : [a.slice(0, i), a.slice(i + 1)];
         if (!isDisplayId(display)) throw new UsageError(`Unknown display "${display}". Displays: ${DISPLAY_IDS.join(', ')}`);
-        if (!def.variants.some((v) => v.name === name)) throw new UsageError(`"${def.name}" has no variant "${name}"${def.variants.length ? `. Variants: ${def.variants.map((v) => v.name).join(', ')}` : ''}`);
+        if (name !== '-' && !def.variants.some((v) => v.name === name)) throw new UsageError(`"${def.name}" has no variant "${name}"${def.variants.length ? `. Variants: ${def.variants.map((v) => v.name).join(', ')}` : ''}`);
         variants[display] = name;
       }
       const unknown = Object.keys(props).filter((p) => !componentProps(def).some((q) => q.name === p));

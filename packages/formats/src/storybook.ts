@@ -118,8 +118,9 @@ function collectLeaves(node: TreeNode): { args: Record<string, string>; leaves: 
       current.children.forEach((child) => visit(child, current));
       return;
     }
-    // Shapes are drawing, not content an arg would fill.
-    if (current.type === 'shape') return;
+    // Shapes are drawing, not content an arg would fill. Text in a <textarea> or <title> is written
+    // raw, without the leaf marker the render helper fills, so a control for it would do nothing.
+    if (current.type === 'shape' || (parent && /^(textarea|title)$/i.test(parent.tag))) return;
     const owner = parent ? (parent.name ?? parent.type ?? parent.tag) : 'content';
     const base = camelCase(owner, 'content') + (current.type === 'image' ? 'Image' : 'Text');
     const key = unique(base);

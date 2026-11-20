@@ -1043,3 +1043,33 @@ describe('pass 28 fixes', () => {
     expect(out).not.toContain('important]');
   });
 });
+
+describe('pass 29 fixes', () => {
+  const shape = (n: TreeNode): unknown => ('children' in n ? { [n.tag]: n.children.map(shape) } : n.type === 'text' ? n.value : n.type);
+  const roundTrip = (tree: ReturnType<typeof page>) => {
+    const back = importDocument(exportTree(tree, 'markdown'), 'markdown');
+    return JSON.stringify(shape(back.kind === 'tree' ? back.tree.root : back.forest.trees[0].root));
+  };
+
+  it('keeps paragraphs and items that Markdown would read as an HTML block', () => {
+    const area = () => createBranch({ tag: 'textarea', children: [text('notes')] });
+    const em = () => createBranch({ tag: 'em', children: [text('this')] });
+    for (const tree of [
+      page([createBranch({ tag: 'p', children: [area(), text(' see '), em()] }), createBranch({ tag: 'p', children: [text('After')] })]),
+      page([createBranch({ tag: 'ul', children: [createBranch({ tag: 'li', children: [area(), text(' see '), em()] })] })]),
+      page([createBranch({ tag: 'p', children: [createBranch({ tag: 'br' })] }), createBranch({ tag: 'p', children: [text('After')] })]),
+      page([createBranch({ tag: 'p', children: [createLeaf('photo.jpg', 'image', { alt: 'Team', width: '320' })] }), createBranch({ tag: 'p', children: [text('Caption')] })]),
+    ])
+      expect(roundTrip(tree)).toBe(JSON.stringify(shape(tree.root)));
+  });
+
+  it('keeps bold next to strikethrough', () => {
+    const tree = page([createBranch({ tag: 'p', children: [createBranch({ tag: 'strong', children: [text('Price:')] }), createBranch({ tag: 'del', children: [text('$10')] }), text(' $8')] })]);
+    expect(roundTrip(tree)).toBe(JSON.stringify(shape(tree.root)));
+  });
+
+  it('makes no Storybook control for text inside a textarea', () => {
+    const tree = page([createBranch({ tag: 'textarea', name: 'Notes', children: [text('Hello')] })]);
+    expect(exportStorybook(createForest('Site', [tree])).files.map((f) => f.content).join('\n')).not.toContain('notesText');
+  });
+});

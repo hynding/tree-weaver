@@ -347,3 +347,44 @@ describe('pass 19 fixes', () => {
     expect(names(fa)).toBe(names(nb2));
   });
 });
+
+describe('pass 29 fixes', () => {
+  it('merges concurrent edits to different tokens, rules and style properties', async () => {
+    const { setToken, createTokenKit, createCustomKit, createRule } = await import('@tree-weaver/core');
+    const start = { ...sample(), kits: [createTokenKit([{ name: '--brand', value: 'red' }, { name: '--space', value: '8px' }]), createCustomKit('Custom', [createRule('.card', { lg: { padding: '8px' } }), createRule('.btn', { lg: { color: 'red' } })])] };
+    const { a, c, sync } = offline();
+    writeForest(a, null, start);
+    sync();
+    const fa = readForest(a)!;
+    const fc = readForest(c)!;
+    const editRule = (f: Forest, sel: string, styles: Record<string, string>): Forest => ({
+      ...f,
+      kits: f.kits.map((k, i) => (i === 1 ? { ...k, rules: k.rules!.map((r) => (r.selector === sel ? { ...r, styles: { lg: styles } } : r)) } : k)),
+    });
+    writeForest(a, fa, withRoot(editRule({ ...fa, kits: setToken(fa.kits, { name: '--brand', value: 'blue' }) }, '.card', { padding: '24px' }), (r) => setStyle(r, 'h', 'lg', 'color', 'blue')));
+    writeForest(c, fc, withRoot(editRule({ ...fc, kits: setToken(fc.kits, { name: '--space', value: '16px' }) }, '.btn', { color: 'green' }), (r) => setStyle(r, 'h', 'lg', 'margin', '0')));
+    sync();
+    for (const doc of [a, c]) {
+      const f = readForest(doc)!;
+      expect(f.kits[0].tokens).toEqual([{ name: '--brand', value: 'blue' }, { name: '--space', value: '16px' }]);
+      expect(f.kits[0].css).toContain('--brand: blue');
+      expect(f.kits[1].rules!.map((r) => [r.selector, r.styles.lg])).toEqual([['.card', { padding: '24px' }], ['.btn', { color: 'green' }]]);
+      expect(f.kits[1].css).toContain('padding: 24px');
+      expect((f.trees[0].root.children[0] as Branch).styles.lg).toEqual({ color: 'blue', margin: '0' });
+    }
+  });
+
+  it('reads a style or attribute named __proto__ as data', () => {
+    const doc = new Y.Doc();
+    writeForest(doc, null, sample());
+    const node = doc.getMap<Y.Map<unknown>>('nodes').get('h')!;
+    doc.transact(() => {
+      node.set('a:__proto__', 'x');
+      node.set('sp:lg:__proto__', 'y');
+    });
+    const h = readForest(doc)!.trees[0].root.children[0] as Branch;
+    expect(Object.getPrototypeOf(h.attrs)).toBe(Object.prototype);
+    expect(Object.hasOwn(h.attrs, '__proto__')).toBe(true);
+    expect(Object.hasOwn(h.styles.lg!, '__proto__')).toBe(true);
+  });
+});
