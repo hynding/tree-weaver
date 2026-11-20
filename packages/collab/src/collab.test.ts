@@ -315,3 +315,35 @@ describe('entries from peers that are not maps', () => {
     expect(() => readForest(doc)).not.toThrow();
   });
 });
+
+describe('pass 19 fixes', () => {
+  it('keeps a re-attached orphan where the editor shows it after an edit', async () => {
+    const core = await import('@tree-weaver/core');
+    const S = core.createBranch({ tag: 'section', name: 'S' });
+    const T = core.createBranch({ tag: 'div', name: 'T' });
+    const tree = core.createTree('Home');
+    tree.root = { ...tree.root, children: [S, T] };
+    const base = core.createForest('F', [tree]);
+    const a = new Y.Doc();
+    const b = new Y.Doc();
+    writeForest(a, null, base);
+    Y.applyUpdate(b, Y.encodeStateAsUpdate(a));
+    let fa = readForest(a)!;
+    let fb = readForest(b)!;
+    const names = (f: typeof base) => f.trees[0].root.children.map((c) => ('name' in c ? c.name : '')).join(',');
+    const na = core.replaceTree(fa, { ...fa.trees[0], root: core.removeNode(fa.trees[0].root, S.id) });
+    writeForest(a, fa, na);
+    const X = core.createBranch({ tag: 'p', name: 'X' });
+    const nb = core.replaceTree(fb, { ...fb.trees[0], root: core.insertNode(fb.trees[0].root, S.id, X) });
+    writeForest(b, fb, nb);
+    Y.applyUpdate(b, Y.encodeStateAsUpdate(a));
+    Y.applyUpdate(a, Y.encodeStateAsUpdate(b));
+    fb = readForest(b)!;
+    const nb2 = core.replaceTree(fb, { ...fb.trees[0], root: core.setStyle(fb.trees[0].root, X.id, 'lg', 'color', 'red') });
+    writeForest(b, fb, nb2);
+    expect(names(readForest(b)!)).toBe(names(nb2));
+    Y.applyUpdate(a, Y.encodeStateAsUpdate(b));
+    fa = readForest(a)!;
+    expect(names(fa)).toBe(names(nb2));
+  });
+});

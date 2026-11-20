@@ -716,3 +716,31 @@ describe('pass 18 fixes', () => {
     expect(exportComponent({ ...tree, name: 'self' }, { framework: 'swiftui' }).name).not.toBe('Self');
   });
 });
+
+describe('pass 19 fixes', () => {
+  const imported = (html: string) => {
+    const doc = importDocument(`<body>${html}</body>`, 'html');
+    return doc.kind === 'tree' ? doc.tree : doc.forest.trees[0];
+  };
+  const texts = (node: TreeNode): string[] => ('children' in node ? node.children.flatMap(texts) : node.type === 'text' ? [node.value] : []);
+
+  it('keeps non-breaking spaces on HTML and Markdown import', () => {
+    expect(texts(imported('<p>a&nbsp;&nbsp;b</p>').root)).toEqual(['a  b']);
+    expect(texts(imported('<p>a&nbsp;</p>').root)).toEqual(['a ']);
+    const md = importDocument('Price:&nbsp;&nbsp;$5', 'markdown');
+    expect(texts(md.kind === 'tree' ? md.tree.root : md.forest.trees[0].root).join('')).toContain('Price:  $5');
+  });
+
+  it('keeps an edge non-breaking space as written in Vue and Svelte', () => {
+    const tree = createTree('Home', createBranch({ tag: 'body', type: 'root', children: [createBranch({ tag: 'p', children: [text(' '), createBranch({ tag: 'b', children: [text('x')] }), text('  ')] })] }));
+    expect(exportComponent(tree, { framework: 'vue' }).files[0].contents).not.toContain("{{ ' ' }}");
+    expect(exportComponent(tree, { framework: 'svelte' }).files[0].contents).not.toContain("{' '}");
+  });
+
+  it('keeps whitespace in prop text under white-space: pre in Vue', () => {
+    const def = createComponent('Poem', createBranch({ tag: 'div', styles: { lg: { 'white-space': 'pre' } }, children: [text('Dear {{name}},\n    thanks!')] }), {
+      props: [{ name: 'name', type: 'text', default: 'Ann' }],
+    } as never);
+    expect(exportComponentDef(def, { framework: 'vue' }).files[0].contents).toContain('{{ name }}{{ ",\\n    thanks!" }}');
+  });
+});

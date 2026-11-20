@@ -156,7 +156,8 @@ export function normalizeTree(value: unknown, path = 'tree', seen = new Set<stri
   root.type ??= 'root';
   const ts = now();
   return {
-    id: str(value.id) || createId('t'),
+    // `component:` ids name a component opened as a tree (COMPONENT_TREE_PREFIX); a real tree can't use one.
+    id: (str(value.id).startsWith('component:') ? '' : str(value.id)) || createId('t'),
     name: str(value.name).trim() || 'Untitled tree',
     root,
     createdAt: str(value.createdAt) || ts,

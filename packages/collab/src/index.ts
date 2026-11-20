@@ -263,7 +263,13 @@ export function writeForest(doc: Y.Doc, prev: Forest | null, next: Forest, origi
       if (!isBranch(p.node)) continue;
       const ids = childIds(p.node);
       const old = before.get(id);
-      if (prev && old && sameList(ids, childIds(old.node)) && ids.every((c) => asMap(m.nodes.get(c))?.get('order') !== undefined)) continue;
+      // Kept only when every child is stored under this branch already: a child re-attached here
+      // after its parent was deleted elsewhere still names that parent and needs a new key.
+      const stored = (c: string) => {
+        const n = asMap(m.nodes.get(c));
+        return n?.get('order') !== undefined && n.get('parent') === id;
+      };
+      if (prev && old && sameList(ids, childIds(old.node)) && ids.every(stored)) continue;
       const keys = orderKeys(ids, (c) => (asMap(m.nodes.get(c))?.get('parent') === id ? (asMap(m.nodes.get(c))?.get('order') as string | undefined) : undefined));
       for (const [c, k] of keys) orders.set(c, k);
     }

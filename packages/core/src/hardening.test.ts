@@ -420,3 +420,17 @@ describe('pass 18 fixes', () => {
     expect(renderNodeHtml(div, { pretty: true })).not.toContain('\n');
   });
 });
+
+describe('pass 19 fixes', () => {
+  it('gives an imported tree with a component: id a fresh id', async () => {
+    const { normalizeTree } = await import('./index');
+    const t = normalizeTree({ id: 'component:c_1', name: 'X', root: { kind: 'branch', tag: 'body', children: [] } });
+    expect(t.id.startsWith('component:')).toBe(false);
+  });
+
+  it('writes text inside a textarea without leaf spans on the canvas', async () => {
+    const { renderNodeHtml } = await import('./index');
+    const ta = createBranch({ tag: 'textarea', children: [text('Hello')] });
+    expect(renderNodeHtml(ta, { designer: true })).not.toContain('<span');
+  });
+});

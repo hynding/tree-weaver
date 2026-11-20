@@ -499,14 +499,15 @@ function inlineChildren(children: El[], mode: 'html' | 'vue' | 'svelte', write: 
   if (pre) return parts.join('');
   if (mode === 'vue' && parts.length) {
     // Vue drops a whitespace-only first or last child.
-    const blank = (i: number) => children[i].kind === 'text' && parts[i] !== '' && parts[i].trim() === '';
+    // Only HTML whitespace: Vue and Svelte keep a non-breaking space.
+    const blank = (i: number) => children[i].kind === 'text' && parts[i] !== '' && !/[^ \t\n\f\r]/.test(parts[i]);
     if (blank(0)) parts[0] = `{{ ' ' }}`;
     if (blank(parts.length - 1)) parts[parts.length - 1] = `{{ ' ' }}`;
   }
   if (mode === 'svelte' && parts.length) {
-    if (children[0].kind === 'text' && /^\s/.test(parts[0])) parts[0] = `{' '}${parts[0].replace(/^\s+/, '')}`;
+    if (children[0].kind === 'text' && /^[ \t\n\f\r]/.test(parts[0])) parts[0] = `{' '}${parts[0].replace(/^[ \t\n\f\r]+/, '')}`;
     const last = parts.length - 1;
-    if (children[last].kind === 'text' && /\s$/.test(parts[last])) parts[last] = `${parts[last].replace(/\s+$/, '')}{' '}`;
+    if (children[last].kind === 'text' && /[ \t\n\f\r]$/.test(parts[last])) parts[last] = `${parts[last].replace(/[ \t\n\f\r]+$/, '')}{' '}`;
   }
   return parts.join('');
 }
@@ -517,7 +518,7 @@ function writeHtml(el: El, depth: number, mode: 'html' | 'vue' | 'svelte', props
   if (el.kind === 'text' && props && mode !== 'html' && hasProps(el.value)) {
     // Vue: {{ title }}; Svelte: {title}. Literal parts are escaped as usual.
     return segments(el.value)
-      .map((s) => writeHtml({ kind: 'text', value: s.lit }, depth, mode) + (s.prop ? (mode === 'vue' ? `{{ ${s.prop} }}` : `{${s.prop}}`) : ''))
+      .map((s) => writeHtml({ kind: 'text', value: s.lit, pre: el.pre }, depth, mode) + (s.prop ? (mode === 'vue' ? `{{ ${s.prop} }}` : `{${s.prop}}`) : ''))
       .join('');
   }
   if (el.kind === 'el' && props && mode !== 'html') {
@@ -528,7 +529,7 @@ function writeHtml(el: El, depth: number, mode: 'html' | 'vue' | 'svelte', props
   if (el.kind === 'text') {
     // Vue condenses whitespace and Svelte collapses it between nodes, even where CSS shows it; a
     // string expression keeps it. Escaped so neither template parser sees a tag or delimiter in it.
-    if (el.pre && mode !== 'html' && /\s\s|[\n\t]|^\s|\s$/.test(el.value)) {
+    if (el.pre && mode !== 'html' && /[ \t\n\f\r]{2}|[\n\t\f\r]|^[ \t\n\f\r]|[ \t\n\f\r]$/.test(el.value)) {
       const literal = JSON.stringify(el.value).replace(/[<>&{}]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
       return mode === 'vue' ? `{{ ${literal} }}` : `{${literal}}`;
     }

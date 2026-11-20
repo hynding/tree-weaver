@@ -191,15 +191,16 @@ function convertChildren(nodes: ChildNode[], ctx: Ctx, raw: boolean, svg = false
     if (node.type === 'text') {
       let value = node.data;
       if (!raw) {
-        value = value.replace(/\s+/g, ' ');
+        // HTML whitespace only: a non-breaking space (and other Unicode spaces) is content.
+        value = value.replace(/[ \t\n\f\r]+/g, ' ');
         // A space at the edge of an inline element (`<strong>Note: </strong>`) shows, so only a
         // block's edges are trimmed.
-        if (i === 0 && !inline) value = value.trimStart();
-        if (i === kept.length - 1 && !inline) value = value.trimEnd();
+        if (i === 0 && !inline) value = value.replace(/^ /, '');
+        if (i === kept.length - 1 && !inline) value = value.replace(/ $/, '');
         // Whitespace only matters between two pieces of inline content.
         // At an inline element's edge the other side is the text around the element.
         const side = (n: ChildNode | undefined) => (n ? inlineish(n) : inline);
-        if (value.trim() === '') value = !svg && side(kept[i - 1]) && side(kept[i + 1]) ? ' ' : '';
+        if (!/[^ ]/.test(value)) value = !svg && side(kept[i - 1]) && side(kept[i + 1]) ? ' ' : '';
       }
       if (value) items.push({ kind: 'leaf', type: 'text', value });
       return;

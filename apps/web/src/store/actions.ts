@@ -545,11 +545,20 @@ export function duplicateSelected(): void {
   const tree = currentTree();
   if (!id || !tree || id === tree.root.id) return;
   let newId = id;
-  editTree((root) => {
+  const dup = (root: Branch) => {
     const res = duplicateNode(root, id);
     newId = res.id;
     return res.root;
-  });
+  };
+  // In a variant view the node shows base and variant styles merged, and a copy (with new ids)
+  // would keep them as its base styles; so it is copied from the base template instead.
+  if (state.componentVariant && state.forest && state.treeId) {
+    try {
+      commit(updateTreeRoot(state.forest, state.treeId, dup, null));
+    } catch (err) {
+      toast((err as Error).message, 'error');
+    }
+  } else editTree(dup);
   state.selectedId = newId;
 }
 
@@ -1023,6 +1032,11 @@ export function extractClass(branchId: string, className: string): void {
   const tree = currentTree();
   const node = tree ? findNode(tree.root, branchId) : null;
   if (!forest || !tree || !isBranch(node)) return;
+  // A variant view shows base and variant styles merged; moving those into a class would lose the base.
+  if (state.componentVariant) {
+    toast('Switch to the base view to save styles as a class', 'error');
+    return;
+  }
   const selector = `.${className}`;
   if (findRule({ selector })) {
     toast(`“${selector}” already exists. Pick another name, or add the class from the list.`, 'error');

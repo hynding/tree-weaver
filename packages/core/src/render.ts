@@ -253,7 +253,9 @@ export function renderNodeHtml(node: TreeNode, opts: HtmlOptions = {}, depth = 0
   if (VOID_TAGS.has(tag) && !opts.inSvg) return opts.xml ? `${open.slice(0, -1)}/>` : open;
   if (!node.children.length) return `${open}</${tag}>`;
   const keep = keepsWhitespace(node);
-  const inner = { ...opts, inSvg, pretty: opts.pretty && !keep };
+  // Text in a <textarea> or <title> isn't markup, so the designer's leaf spans would show as text.
+  const rawText = !opts.inSvg && /^(textarea|title)$/i.test(tag);
+  const inner = { ...opts, inSvg, pretty: opts.pretty && !keep, designer: opts.designer && !rawText };
   const inline = !opts.pretty || keep || node.children.some(isInline);
   if (inline) return `${open}${node.children.map((c) => renderNodeHtml(c, inner, depth + 1)).join('')}</${tag}>`;
   const pad = '  '.repeat(depth + 1);
