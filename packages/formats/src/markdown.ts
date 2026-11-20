@@ -152,7 +152,9 @@ function inline(node: TreeNode, first: boolean): string {
     return isBranch(c) && (c.tag === 'a' || c.children.some(has));
   });
   if (tag === 'a' && !needsMeta(node, LINK_ATTRS) && node.attrs.href !== undefined && !nestsLink) {
-    return `[${content()}](${escapeUrl(node.attrs.href)}${titleOf(node.attrs.title)})`;
+    const md = `[${content()}](${escapeUrl(node.attrs.href)}${titleOf(node.attrs.title)})`;
+    // Link text marked can't read as written (a code span holding a backtick) goes in as HTML.
+    return readsBack(md, node) ? md : inlineHtml(renderNodeHtml(node));
   }
   if (tag === 'br' && !needsMeta(node)) return '<br>';
   return inlineHtml(renderNodeHtml(node));
@@ -358,6 +360,8 @@ function list(b: Branch, pad = ''): string | null {
     // Edge non-breaking spaces as references: a trailing one would read as a paragraph of its own.
     const text = inlineLine(inlineKids).replace(/^\u00a0+|\u00a0+$/g, (m) => '&#160;'.repeat(m.length));
     if (opensHtmlBlock(text)) return null;
+    // An empty nested item (`  -`) would read as a heading underline for the item above.
+    if (!text && pad) return null;
     lines.push(`${pad}${marker} ${text}`);
     for (const sub of nested) {
       if (!isBranch(sub) || (sub.tag !== 'ul' && sub.tag !== 'ol') || needsMeta(sub)) return null;

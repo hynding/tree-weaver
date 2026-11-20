@@ -325,8 +325,9 @@ export function applyGridLayout(root: Branch, branchId: string, display: Display
   set(branchId, 'grid-template-columns', layout.columns);
   const hadAreas = !!parseAreas(inherited['grid-template-areas'])?.length;
   set(branchId, 'grid-template-areas', layout.areas ? formatAreas(layout.areas) : hadAreas ? 'none' : null);
-  set(branchId, 'grid-template-rows', null);
-  if (!resolved.gap) set(branchId, 'gap', GAP_PRESETS.find((g) => g.id === 'medium')!.value);
+  // Rows inherited from a wider display would still size the new layout's rows.
+  set(branchId, 'grid-template-rows', inherited['grid-template-rows'] ? 'none' : null);
+  if (!resolved.gap && !resolved['row-gap'] && !resolved['column-gap'] && !resolved['grid-gap']) set(branchId, 'gap', GAP_PRESETS.find((g) => g.id === 'medium')!.value);
 
   const children = childBranches(branch);
   const created: string[] = [];

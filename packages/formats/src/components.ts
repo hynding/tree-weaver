@@ -708,10 +708,12 @@ function writeHtml(el: El, depth: number, mode: 'html' | 'vue' | 'svelte', props
     if (mode !== 'html') return text.replace(/[{}]/g, (c) => (c === '{' ? '&#123;' : '&#125;'));
     return text;
   }
-  // Escape for HTML first, then Svelte's braces, so the &#123; entities are not escaped again.
+  // Escape for HTML first, then braces, so the &#123; entities are not escaped again. Svelte reads
+  // `{…}` in any attribute; Vue reads `{{…}}` in an element inside a <textarea> or <title> (its
+  // content is text to Vue), so braces are escaped for both.
   const esc = (v: string, n = '') => {
     const out = n === 'class' ? escapeClassAttr(v) : escapeAttr(v);
-    return mode === 'svelte' ? out.replace(/[{}]/g, (c) => (c === '{' ? '&#123;' : '&#125;')) : out;
+    return mode !== 'html' ? out.replace(/[{}]/g, (c) => (c === '{' ? '&#123;' : '&#125;')) : out;
   };
   const attrs = el.attrs.map(([n, v]) => (v === '' && !el.svg ? ` ${n}` : ` ${n}="${esc(v, n)}"`)).join('');
   if (!el.svg && VOID_TAGS.has(el.tag)) return `<${el.tag}${attrs}>`;
@@ -813,10 +815,12 @@ export function jsxAttrName(name: string): string {
 
 /** An element of a Vue or Svelte component template, with prop bindings. */
 function writePropsEl(el: El & { kind: 'el' }, depth: number, mode: 'vue' | 'svelte', props: ReadonlySet<string>): string {
-  // Escape for HTML first, then Svelte's braces, so the &#123; entities are not escaped again.
+  // Escape for HTML first, then braces, so the &#123; entities are not escaped again. Svelte reads
+  // `{…}` in any attribute; Vue reads `{{…}}` in an element inside a <textarea> or <title> (its
+  // content is text to Vue), so braces are escaped for both.
   const esc = (v: string, n = '') => {
     const out = n === 'class' ? escapeClassAttr(v) : escapeAttr(v);
-    return mode === 'svelte' ? out.replace(/[{}]/g, (c) => (c === '{' ? '&#123;' : '&#125;')) : out;
+    return out.replace(/[{}]/g, (c) => (c === '{' ? '&#123;' : '&#125;'));
   };
   const attrs = el.attrs
     .map(([n, v]) => {
@@ -902,6 +906,8 @@ function selectedOptions(select: El & { kind: 'el' }, props: false | ReadonlySet
 
 /** `props` is false outside a component; in one, the names of its boolean props. */
 function writeJsx(el: El, depth: number, props: false | ReadonlySet<string> = false): string {
+  // React refuses children on a void element (`<img>x</img>`); HTML drops them anyway.
+  if (el.kind === 'el' && !el.svg && VOID_TAGS.has(el.tag.toLowerCase()) && el.children.length) return writeJsx({ ...el, children: [] }, depth, props);
   if (el.kind === 'text') {
     if (props && hasProps(el.value))
       return segments(el.value)
@@ -1024,6 +1030,7 @@ function kitFiles(kits: DesignKit[], layered = false): ComponentFile[] {
  * goes back to the browser's value; Tailwind's utilities and the kits, in later layers, still win.
  */
 const PREFLIGHT_UNDO = `/* The browser defaults Tailwind's Preflight resets, as the editor shows them. */
+*, ::before, ::after { border-style: revert; border-color: revert; }
 html, :host { line-height: revert; font-family: revert; tab-size: revert; -webkit-tap-highlight-color: revert; }
 h1, h2, h3, h4, h5, h6, p, blockquote, figure, dl, dd, ol, ul, menu, hr, pre, fieldset, legend { margin: revert; padding: revert; }
 h1, h2, h3, h4, h5, h6 { font-size: revert; font-weight: revert; }
@@ -1031,7 +1038,9 @@ ol, ul, menu { list-style: revert; }
 img, svg, video, canvas, audio, iframe, embed, object { display: revert; vertical-align: revert; }
 video { max-width: revert; height: revert; }
 hr { height: revert; color: revert; border-width: revert; border-style: revert; }
-td, th, option { padding: revert; }
+option { padding: revert; }
+/* Browsers give table cells 1px of padding through the table's own cellpadding default. */
+td, th { padding: 1px; }
 fieldset { border: revert; }
 dialog { margin: revert; padding: revert; border: revert; }
 a { color: revert; text-decoration: revert; }

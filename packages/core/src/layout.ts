@@ -27,8 +27,9 @@ function splitTracks(value: string): string[] {
   let depth = 0;
   let current = '';
   for (const ch of value.trim()) {
-    if (ch === '(') depth++;
-    if (ch === ')') depth--;
+    // A line-name list (`[content-start main-start]`) is one token, however many names it holds.
+    if (ch === '(' || ch === '[') depth++;
+    if (ch === ')' || ch === ']') depth--;
     if (/\s/.test(ch) && depth === 0) {
       if (current) out.push(current);
       current = '';

@@ -757,3 +757,28 @@ describe('pass 51 fixes', async () => {
     expect(core.parseDeclarations("font-family:Tom\\'s Font;color:red")).toEqual({ 'font-family': "Tom\\'s Font", color: 'red' });
   });
 });
+
+describe('pass 52 fixes', async () => {
+  const core = await import('./index');
+  it('counts a line-name list as no track', () => {
+    expect(core.countTracks('[full-start] minmax(0,1fr) [content-start main-start] 2fr [content-end]')).toBe(2);
+  });
+  it('clears inherited rows and keeps a branch’s own column gap when applying a grid layout', () => {
+    const grid = { ...core.createBranch({ tag: 'div', styles: { lg: { display: 'grid', 'grid-template-rows': '40px', 'column-gap': '0' } } }), id: 'g' };
+    const root = core.createBranch({ tag: 'body', children: [grid] });
+    const layout = core.GRID_LAYOUTS[0];
+    const tablet = core.applyGridLayout(root, 'g', 'tablet', layout).root;
+    const g = core.findNode(tablet, 'g') as import('./model').Branch;
+    expect(g.styles.tablet?.['grid-template-rows']).toBe('none');
+    const lg = core.findNode(core.applyGridLayout(root, 'g', 'lg', layout).root, 'g') as import('./model').Branch;
+    expect(lg.styles.lg?.gap).toBeUndefined();
+  });
+});
+
+describe('pass 52 nesting', async () => {
+  const core = await import('./index');
+  it('refuses an image in a <textarea>', () => {
+    const ta = core.createBranch({ tag: 'textarea' });
+    expect(core.nestingProblem([ta], core.createLeaf('a.png', 'image'))).toMatch(/only hold text/);
+  });
+});

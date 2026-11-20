@@ -68,6 +68,7 @@ export function nestingProblem(ancestors: readonly Branch[], node: TreeNode): st
   // The parser reads these elements' content as text, so a branch inside shows as its markup.
   if (OBSOLETE_RAW.has(parentTag)) return `A <${parentTag}> shows its content as raw text; use a <pre> instead`;
   if (RAW_TEXT.has(parentTag) && isBranch(node)) return `A <${parentTag}> can only hold text; the browser would show <${node.tag}> as its markup`;
+  if (RAW_TEXT.has(parentTag) && node.type !== 'text') return `A <${parentTag}> can only hold text; the browser would show the ${node.type} as its markup`;
   const table = Object.hasOwn(TABLE_CHILDREN, parentTag) ? TABLE_CHILDREN[parentTag] : undefined;
   if (table) {
     if (!isBranch(node)) return node.type === 'text' && !node.value.trim() ? null : `A <${parentTag}> can only hold ${[...table].filter((t) => !['script', 'template', 'style'].includes(t)).map((t) => `<${t}>`).join(', ')}; the browser would move this out in front of the table`;

@@ -1638,6 +1638,33 @@ describe('pass 51 fixes', () => {
     const tree = page([createBranch({ tag: 'search', children: [createBranch({ tag: 'table', children: [] })] })]);
     expect(exportComponent(tree, { framework: 'vue' }).files[0].contents).toContain("['search']");
     const base = exportComponent(tree, { framework: 'react', styling: 'tailwind' }).files.find((f) => f.path === 'base.css')?.contents;
-    expect(base).toContain('td, th, option { padding: revert; }');
+    expect(base).toContain('td, th { padding: 1px; }');
+  });
+});
+
+describe('pass 52 fixes', () => {
+  it('escapes braces in Vue attributes, so an element in a <textarea> runs nothing', () => {
+    const img = createLeaf('a.png', 'image', { alt: '{{ x() }}' });
+    const tree = page([createBranch({ tag: 'textarea', children: [img] })]);
+    const vue = exportComponent(tree, { framework: 'vue' }).files[0].contents;
+    expect(vue).not.toContain('{{ x() }}');
+    expect(vue).toContain('&#123;&#123; x() &#125;&#125;');
+  });
+
+  it('writes a void element without children in React', () => {
+    const tree = page([createBranch({ tag: 'img', attrs: { src: 'a.png', alt: '' }, children: [text('x')] })]);
+    const jsx = exportComponent(tree, { framework: 'react' }).files[0].contents;
+    expect(jsx).toMatch(/<img [^>]*\/>/);
+    expect(jsx).not.toContain('</img>');
+  });
+
+  it('keeps an empty nested list item and a link with an odd code span in Markdown', () => {
+    const nested = createBranch({ tag: 'ul', children: [createBranch({ tag: 'li' }), createBranch({ tag: 'li', children: [text('Milk')] })] });
+    const list = createBranch({ tag: 'ul', children: [createBranch({ tag: 'li', children: [text('Groceries'), nested] })] });
+    const link = createBranch({ tag: 'p', children: [text('See '), createBranch({ tag: 'a', attrs: { href: '/q' }, children: [createBranch({ tag: 'code', children: [text('`')] }), text(' rules')] })] });
+    const doc = importDocument(exportTree(page([list, link]), 'markdown'), 'markdown');
+    const out = JSON.stringify(doc.kind === 'tree' ? doc.tree.root : null);
+    expect(out).not.toContain('"tag":"h2"');
+    expect(out).toContain('"tag":"a"');
   });
 });
