@@ -81,7 +81,11 @@ export class TwHistoryPanel {
               ref={(el) => el?.focus()}
               onChange={(e) => void renameVersion(v.id, (e.target as HTMLInputElement).value)}
               onBlur={() => (this.renaming = null)}
-              onKeyDown={(e) => (e.key === 'Enter' || e.key === 'Escape') && (this.renaming = null)}
+              onKeyDown={(e) => {
+                    // Escape cancels: the typed name is put back before the input goes (and its change fires).
+                    if (e.key === 'Escape') (e.target as HTMLInputElement).value = v.name;
+                    if (e.key === 'Enter' || e.key === 'Escape') this.renaming = null;
+                  }}
             />
           ) : (
             <span class="title" title="Double-click to rename" onDblClick={() => (this.renaming = v.id)}>

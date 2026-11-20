@@ -989,7 +989,8 @@ function writeJsx(el: El, depth: number, props: false | ReadonlySet<string> = fa
  */
 function kitFiles(kits: DesignKit[], layered = false): ComponentFile[] {
   const enabled = kits.filter((k) => k.enabled && k.source !== 'env' && (k.href || k.css.trim()));
-  if (!enabled.length) return [];
+  // With Tailwind there is always a kits.css: it brings back the browser defaults Preflight resets.
+  if (!enabled.length && !layered) return [];
   // With Tailwind, kits go in the `components` layer. Tailwind v4's utilities are in a layer, and
   // unlayered kit CSS would beat every one of them, so a branch couldn't override its kit classes.
   const link = (href: string) => `@import url("${href.replace(/["\\\n\r]/g, '')}")${layered ? ' layer(components)' : ''};`;
@@ -998,7 +999,7 @@ function kitFiles(kits: DesignKit[], layered = false): ComponentFile[] {
   const together =
     firstInline < 0 || enabled.slice(firstInline).every((k, i) => !k.href && (i === 0 || !/@import/i.test(k.css)));
   const head = layered
-    ? '/* Design kits from Tree Weaver, in load order, below Tailwind\'s utilities (the same layer order Tailwind v4 declares). */\n@layer theme, base, components, utilities;\n'
+    ? '/* Design kits from Tree Weaver, in load order, below Tailwind\'s utilities (the same layer order Tailwind v4 declares).\n   base.css, first in the components layer (after Preflight), brings back the browser\'s own heading, list, margin\n   and form styles, which Preflight resets and the editor shows. */\n@layer theme, base, components, utilities;\n@import url("./base.css") layer(components);\n'
     : '/* Design kits from Tree Weaver, in load order. */\n';
   if (together && !layered) return [{ path: 'kits.css', contents: `${head}${enabled.map((k) => (k.href ? link(k.href) : inlineCss(k))).join('\n\n')}\n` }];
   const used = new Set<string>();
@@ -1012,8 +1013,34 @@ function kitFiles(kits: DesignKit[], layered = false): ComponentFile[] {
     files.push({ path: `kits/${slug}.css`, contents: `${inlineCss(k)}\n` });
     return link(`./kits/${slug}.css`);
   });
+  if (layered) files.push({ path: 'base.css', contents: `${PREFLIGHT_UNDO}\n${BASE_CSS}\n` });
   return [{ path: 'kits.css', contents: `${head}${lines.join('\n')}\n` }, ...files];
 }
+
+/**
+ * The browser's own styles for what Tailwind's Preflight resets, so a Tailwind export looks as
+ * the editor shows it (headings, block margins, lists, images, buttons and fields). `revert`
+ * goes back to the browser's value; Tailwind's utilities and the kits, in later layers, still win.
+ */
+const PREFLIGHT_UNDO = `/* The browser defaults Tailwind's Preflight resets, as the editor shows them. */
+html, :host { line-height: revert; font-family: revert; tab-size: revert; -webkit-tap-highlight-color: revert; }
+h1, h2, h3, h4, h5, h6, p, blockquote, figure, dl, dd, ol, ul, menu, hr, pre, fieldset, legend { margin: revert; padding: revert; }
+h1, h2, h3, h4, h5, h6 { font-size: revert; font-weight: revert; }
+ol, ul, menu { list-style: revert; }
+img, svg, video, canvas, audio, iframe, embed, object { display: revert; vertical-align: revert; }
+video { max-width: revert; height: revert; }
+hr { height: revert; color: revert; border-top-width: revert; border-style: revert; }
+a { color: revert; text-decoration: revert; }
+abbr:where([title]) { text-decoration: revert; }
+b, strong { font-weight: revert; }
+code, kbd, samp, pre { font-family: revert; font-size: revert; font-feature-settings: revert; font-variation-settings: revert; }
+small, sub, sup { font-size: revert; line-height: revert; }
+table { text-indent: revert; border-color: revert; border-collapse: revert; }
+button, input, select, optgroup, textarea, ::file-selector-button { font: revert; letter-spacing: revert; color: revert; background-color: revert; border: revert; border-radius: revert; opacity: revert; padding: revert; margin: revert; }
+button, input:where([type='button'], [type='reset'], [type='submit']), ::file-selector-button { appearance: revert; }
+::placeholder { opacity: revert; color: revert; }
+textarea { resize: revert; }
+summary { display: revert; }`;
 
 /** Export a tree as a component (or a plain HTML page) with its styles. */
 export function exportComponent(tree: Tree, opts: ComponentOptions): ComponentExport {

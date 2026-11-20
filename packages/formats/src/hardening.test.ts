@@ -1614,3 +1614,13 @@ describe('pass 49 fixes', () => {
     expect(jsx).toMatch(/\bp-gap\b/);
   });
 });
+
+describe('pass 50 fixes', () => {
+  it('ships base.css undoing Preflight with every Tailwind export', () => {
+    const tree = page([createBranch({ tag: 'h2', children: [text('Pricing')] })]);
+    const files = exportComponent(tree, { framework: 'html', styling: 'tailwind' }).files;
+    expect(files.find((f) => f.path === 'kits.css')?.contents).toContain('@import url("./base.css") layer(components);');
+    expect(files.find((f) => f.path === 'base.css')?.contents).toMatch(/h1, h2, h3, h4, h5, h6 \{ font-size: revert; font-weight: revert; \}/);
+    expect(files.find((f) => f.path === 'index.html')?.contents).toContain('href="kits.css"');
+  });
+});

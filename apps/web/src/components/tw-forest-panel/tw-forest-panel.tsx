@@ -35,7 +35,11 @@ export class TwForestPanel {
                   ref={(el) => el?.focus()}
                   onChange={(e) => renameTree(tree.id, (e.target as HTMLInputElement).value)}
                   onBlur={() => (this.renaming = null)}
-                  onKeyDown={(e) => (e.key === 'Enter' || e.key === 'Escape') && (this.renaming = null)}
+                  onKeyDown={(e) => {
+                    // Escape cancels: the typed name is put back before the input goes (and its change fires).
+                    if (e.key === 'Escape') (e.target as HTMLInputElement).value = tree.name;
+                    if (e.key === 'Enter' || e.key === 'Escape') this.renaming = null;
+                  }}
                 />
               ) : (
                 <span class="title" onClick={() => switchTree(tree.id)} onDblClick={() => (this.renaming = tree.id)} title="Click to open, double-click to rename">

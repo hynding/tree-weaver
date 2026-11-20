@@ -452,9 +452,10 @@ describe('pass 20 fixes', () => {
 describe('pass 21 fixes', () => {
   it('reports CSS that rules would drop or tidy', async () => {
     const { parseRulesCss } = await import('./index');
-    for (const css of ['.a { color: red; &:hover { color: blue } }', '.a { *zoom: 1 }', '.a { content: "{" }', '.x\\@md { color: red }']) {
+    for (const css of ['.a { color: red; &:hover { color: blue } }', '.a { *zoom: 1 }', '.a { content: "{" }']) {
       expect(parseRulesCss(css).changed.length).toBeGreaterThan(0);
     }
+    expect(parseRulesCss('.x\\@md { color: red }').changed).toEqual([]);
     expect(parseRulesCss('.a { color: red }\n.grid { grid-template-areas:\n  "a b"\n  "c d"; }\n@media (max-width: 767px) { .a { color: blue } }').changed).toEqual([]);
   });
 });
@@ -727,5 +728,21 @@ describe('pass 48 fixes', async () => {
     expect(core.findVersion(log, '2024')?.id).toBe('c');
     expect(core.findVersion(log, '2')?.id).toBe('b');
     expect(core.findVersion(log, '-1')?.id).toBe('c');
+  });
+});
+
+describe('pass 50 fixes', async () => {
+  const core = await import('./index');
+  it('keeps escaped @ and punctuation inside strings in selectors', () => {
+    expect(core.sanitizeSelector('.\\@container')).toBe('.\\@container');
+    expect(core.sanitizeSelector('.\\@md\\:flex')).toBe('.\\@md\\:flex');
+    expect(core.sanitizeSelector('[data-state="open;closed"]')).toBe('[data-state="open;closed"]');
+    expect(core.sanitizeSelector('.a{} b')).toBe('.a b');
+    expect(core.sanitizeSelector('.x/@*evil*/')).toBe('.x');
+    expect(core.sanitizeSelector('[a="x')).toBe('');
+  });
+  it('writes whitespace in a table row without a designer span', () => {
+    const row = core.createBranch({ tag: 'tr', children: [core.createBranch({ tag: 'td', children: [core.text('a')] }), core.text(' ')] });
+    expect(core.renderNodeHtml(row, { designer: true })).not.toMatch(/<\/td><span/);
   });
 });

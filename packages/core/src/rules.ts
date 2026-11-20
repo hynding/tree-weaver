@@ -18,16 +18,45 @@ export const isEditableKit = (kit: DesignKit): kit is DesignKit & { rules: Style
 
 /** Tidy a selector so it can't break out of its rule: no braces, semicolons, comments or tags. */
 export function sanitizeSelector(selector: string): string {
+  // Repeated until nothing changes: dropping a character can bring `/` and `*` together.
   const out = untilStable(selector, (s) =>
-    s
-      .replace(/\/\*[\s\S]*?(\*\/|$)/g, '')
-      .replace(/<\/?(style|script)/gi, '')
-      .replace(/[{};@]/g, ''),
+    selectorPunctuation(
+      s
+        .replace(/\/\*[\s\S]*?(\*\/|$)/g, '')
+        .replace(/<\/?(style|script)/gi, '')
+        .replace(/[\n\r\f]+/g, ' '),
+    ) ?? '',
   )
     .replace(/\s+/g, ' ')
     .trim();
   // An unclosed `(` or `[` would swallow every rule after it.
   return bracketsBalance(out) ? out : '';
+}
+
+/**
+ * Drop `{`, `}`, `;` and `@` that could end the rule or start another, keeping escaped ones
+ * (`.\@container`, Tailwind's `\@md\:flex`) and those inside strings (`[data-x="a;b"]`).
+ * Null when a string is left open.
+ */
+function selectorPunctuation(selector: string): string | null {
+  let out = '';
+  let quote = '';
+  for (let i = 0; i < selector.length; i++) {
+    const c = selector[i];
+    if (c === '\\') {
+      // A trailing backslash would escape whatever the rule adds next.
+      if (i + 1 < selector.length) out += c + selector[++i];
+      continue;
+    }
+    if (quote) {
+      if (c === quote) quote = '';
+      out += c;
+    } else if (c === '"' || c === "'") {
+      quote = c;
+      out += c;
+    } else if (!/[{};@]/.test(c)) out += c;
+  }
+  return quote ? null : out;
 }
 
 const CLASS_NAME = /^-?[_a-zA-Z][_a-zA-Z0-9-]*$/;

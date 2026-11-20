@@ -87,7 +87,7 @@ describe('exportComponent', () => {
 
   it('writes Tailwind classes with display variants instead of a CSS file', () => {
     const out = exportComponent(page(), { framework: 'react', styling: 'tailwind' });
-    expect(out.files.map((f) => f.path)).toEqual(['LandingPage.jsx']);
+    expect(out.files.map((f) => f.path)).toEqual(['LandingPage.jsx', 'kits.css', 'base.css']);
     const jsx = file(out, 'LandingPage.jsx');
     expect(jsx).toContain('Needs Tailwind CSS');
     expect(jsx).toContain('grid');
@@ -196,7 +196,7 @@ describe('design tokens in web exports', () => {
 
   it('writes no token files without tokens', () => {
     const out = exportComponent(themed(), { framework: 'react', styling: 'tailwind' });
-    expect(out.files.map((f) => f.path)).toEqual(['Themed.jsx']);
+    expect(out.files.map((f) => f.path)).toEqual(['Themed.jsx', 'kits.css', 'base.css']);
   });
 
   it('maps a token declaration to its theme class only for matching kinds', () => {

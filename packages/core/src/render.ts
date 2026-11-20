@@ -207,6 +207,8 @@ export interface HtmlOptions {
   inMath?: boolean;
   /** Classes the design kits make keep their whitespace (see `whitespaceClasses`); such branches aren't pretty printed. */
   keepClasses?: ReadonlySet<string>;
+  /** Set while rendering the direct children of a <table>, <thead>, <tbody>, <tfoot> or <tr>. */
+  inTablePart?: boolean;
 }
 
 const XHTML = ' xmlns="http://www.w3.org/1999/xhtml"';
@@ -256,7 +258,8 @@ function renderLeaf(leaf: Leaf, opts: HtmlOptions): string {
   const content = escapeHtml(leaf.value);
   // Inside an SVG a <span> would end the drawing, so selectable text uses <tspan>. In MathML it
   // would end the formula, so text there goes in bare (selected through its parent).
-  if (!opts.designer || (opts.inMath && !opts.inSvg)) return content;
+  // Directly in a table part a <span> would be moved out in front of the table; only whitespace may be there.
+  if (!opts.designer || (opts.inMath && !opts.inSvg) || (opts.inTablePart && !opts.inSvg)) return content;
   return opts.inSvg ? `<tspan ${LEAF_ATTR}="${escapeAttr(leaf.id)}">${content}</tspan>` : `<span${opts.inForeign ? XHTML : ''} ${LEAF_ATTR}="${escapeAttr(leaf.id)}">${content}</span>`;
 }
 
@@ -330,7 +333,7 @@ export function renderNodeHtml(node: TreeNode, opts: HtmlOptions = {}, depth = 0
   const rawText = !opts.inSvg && /^(textarea|title)$/i.test(tag);
   const lower = tag.toLowerCase();
   const inMath = lower === 'math' || (!!opts.inMath && !/^(mi|mo|mn|ms|mtext|annotation-xml)$/.test(lower));
-  const inner = { ...opts, inSvg, inMath, pretty: opts.pretty && !keep, designer: opts.designer && !rawText, inForeign: !!opts.xml && !!opts.inSvg && lower === 'foreignobject' };
+  const inner = { ...opts, inSvg, inMath, inTablePart: !inSvg && /^(table|thead|tbody|tfoot|tr)$/.test(lower), pretty: opts.pretty && !keep, designer: opts.designer && !rawText, inForeign: !!opts.xml && !!opts.inSvg && lower === 'foreignobject' };
   // Also beside an inline-block child: a line break there would show as a gap the canvas doesn't have.
   const inline = !opts.pretty || keep || node.children.some((c) => isInline(c) || (isBranch(c) && hasInlineDisplay(c)));
   if (inline) {
