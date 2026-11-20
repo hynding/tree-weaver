@@ -49,6 +49,7 @@ import {
   type GridTrack,
   type Leaf,
   type StyleMap,
+  isSafeAttr,
 } from '@tree-weaver/core';
 import { kitClasses } from '@tree-weaver/kits';
 import {
@@ -1349,7 +1350,13 @@ export class TwInspector {
     };
     const add = () => {
       const name = this.newAttr.name.trim();
-      if (/^[a-zA-Z_:][-a-zA-Z0-9_:.]*$/.test(name) && !/^on/i.test(name) && (name !== 'class' || !isBranch(node)) && name !== 'style') set(name, this.newAttr.value);
+      if (!name) return;
+      // The same rule the canvas and exports use: a name they would drop isn't stored either.
+      if (!isSafeAttr(name, this.newAttr.value) || (name.toLowerCase() === 'class' && isBranch(node))) {
+        toast(/^(class|style)$/i.test(name) ? `Set ${name.toLowerCase()} in the Classes or Styles section instead` : `“${name}” can't be added: it isn't kept when the layout renders or exports`);
+        return;
+      }
+      set(name, this.newAttr.value);
       this.newAttr = { name: '', value: '' };
     };
     return (

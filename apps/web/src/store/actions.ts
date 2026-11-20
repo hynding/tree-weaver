@@ -770,12 +770,16 @@ export function saveAsComponent(branchId: string, name: string): ComponentDef | 
     toast('This branch is part of a component instance. Edit the component, or detach the instance first.', 'error');
     return null;
   }
+  // Components don't nest: instances inside become plain branches of the new template.
+  const nested = (b: Branch): number => b.children.reduce((n, c) => n + (isBranch(c) ? (c.instance ? 1 : nested(c)) : 0), 0);
+  const inner = nested(node);
   // The branch itself becomes an instance, so it follows the component from now on.
   const saved = saveComponent(forest, tree.id, node.id, name);
   if (!saved) return null;
   const def = saved.component;
   commit(saved.forest, true, { label: `Saved “${def.name}” as a component` });
-  toast(`Saved “${def.name}” as a component. It is in the Branches tab.`, 'success');
+  const note = inner ? ` ${inner === 1 ? 'The component instance inside it is now plain branches' : `The ${inner} component instances inside it are now plain branches`}, so it won't follow those components.` : '';
+  toast(`Saved “${def.name}” as a component. It is in the Branches tab.${note}`, 'success');
   return def;
 }
 

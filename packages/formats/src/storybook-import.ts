@@ -349,7 +349,15 @@ export function storyKits(snapshots: StorySnapshot[], opts: StoryKitOptions): De
   // `@import` and `@charset` count only before every other rule, so they go first.
   const leading = (r: string) => /^@(import|charset)\b/i.test(r.trim());
   const ordered = [...rules.filter(leading), ...rules.filter((r) => !leading(r))];
-  if (rules.length) kits.push({ id: createId('k'), name: `${opts.name}: runtime styles`, css: ordered.join('\n'), enabled: true, source: opts.source });
+  // Runtime rules come through the CSSOM with `url()`s as written: relative to the story page.
+  let page: string | undefined;
+  try {
+    page = new URL('iframe.html', opts.source).href;
+  } catch {
+    page = undefined;
+  }
+  const css = ordered.join('\n');
+  if (rules.length) kits.push({ id: createId('k'), name: `${opts.name}: runtime styles`, css: page ? absolutizeCssUrls(css, page) : css, enabled: true, source: opts.source });
   return kits;
 }
 

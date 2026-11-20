@@ -1708,3 +1708,19 @@ describe('pass 53 fixes', () => {
     expect(jsx).toContain('[color:var(--lg)]');
   });
 });
+
+describe('pass 54 fixes', () => {
+  it('points relative url()s in runtime Storybook styles at the Storybook', async () => {
+    const { storyKits } = await import('./index');
+    const snap = { id: 's', title: 'T', name: 'N', html: '', sheets: [{ css: '.logo { background: url("./assets/logo.png"); }' }] };
+    const kits = storyKits([snap], { name: 'SB', styles: 'copy', source: 'https://sb.example.com/' });
+    expect(kits[0]?.css).toContain('url("https://sb.example.com/assets/logo.png")');
+  });
+
+  it('restores border widths and sub/sup placement under Preflight', () => {
+    const out = exportComponent(page([createBranch({ tag: 'p', children: [text('x')] })]), { framework: 'react', styling: 'tailwind' });
+    const base = out.files.find((f) => f.path.endsWith('base.css'))?.contents ?? '';
+    expect(base).toContain('border-width: revert');
+    expect(base).toMatch(/sub, sup \{ vertical-align: revert/);
+  });
+});

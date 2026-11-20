@@ -1030,9 +1030,9 @@ function kitFiles(kits: DesignKit[], layered = false): ComponentFile[] {
  * goes back to the browser's value; Tailwind's utilities and the kits, in later layers, still win.
  */
 const PREFLIGHT_UNDO = `/* The browser defaults Tailwind's Preflight resets, as the editor shows them. */
-*, ::before, ::after { border-style: revert; border-color: revert; }
+*, ::before, ::after { border-width: revert; border-style: revert; border-color: revert; }
 html, :host { line-height: revert; font-family: revert; tab-size: revert; -webkit-tap-highlight-color: revert; }
-h1, h2, h3, h4, h5, h6, p, blockquote, figure, dl, dd, ol, ul, menu, hr, pre, fieldset, legend { margin: revert; padding: revert; }
+h1, h2, h3, h4, h5, h6, p, blockquote, figure, dl, dd, ol, ul, menu, hr, pre, listing, xmp, fieldset, legend { margin: revert; padding: revert; }
 h1, h2, h3, h4, h5, h6 { font-size: revert; font-weight: revert; }
 ol, ul, menu { list-style: revert; }
 img, svg, video, canvas, audio, iframe, embed, object { display: revert; vertical-align: revert; }
@@ -1048,6 +1048,7 @@ abbr:where([title]) { text-decoration: revert; }
 b, strong { font-weight: revert; }
 code, kbd, samp, pre { font-family: revert; font-size: revert; font-feature-settings: revert; font-variation-settings: revert; }
 small, sub, sup { font-size: revert; line-height: revert; }
+sub, sup { vertical-align: revert; position: revert; top: revert; bottom: revert; }
 table { text-indent: revert; border-color: revert; border-collapse: revert; }
 button, input, select, optgroup, textarea, ::file-selector-button { font: revert; letter-spacing: revert; color: revert; background-color: revert; border: revert; border-radius: revert; opacity: revert; padding: revert; margin: revert; }
 button, input:where([type='button'], [type='reset'], [type='submit']), ::file-selector-button { appearance: revert; }
