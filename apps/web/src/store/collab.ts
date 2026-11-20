@@ -132,7 +132,7 @@ function readPeers(): void {
     const color = Math.trunc(Number(u.color));
     peers.push({
       id,
-      name: String(u.name ?? 'Someone').slice(0, 40),
+      name: (typeof u.name === 'string' ? u.name : 'Someone').slice(0, 40),
       color: Number.isFinite(color) ? ((color % COLORS) + COLORS) % COLORS : 0,
       selectedId: typeof u.selectedId === 'string' ? u.selectedId : null,
       treeId: typeof u.treeId === 'string' ? u.treeId : '',
@@ -151,8 +151,15 @@ function syncFlags(): void {
 function pull(origin: unknown): void {
   const s = session;
   if (!s) return;
-  pruneStrays(s.doc, PRUNE_ORIGIN);
-  const read = readForest(s.doc);
+  let read: Forest | null;
+  try {
+    pruneStrays(s.doc, PRUNE_ORIGIN);
+    read = readForest(s.doc);
+  } catch (err) {
+    // A peer's change this can't read: keep what is open rather than fail on every update.
+    console.warn('Could not read the shared forest', err);
+    return;
+  }
   if (!read) return;
   // Kit CSS generated from rules follows this browser's breakpoints; it is never shared (see `sharable`).
   const next = withCurrentBreakpoints(read);

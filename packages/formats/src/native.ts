@@ -479,7 +479,7 @@ function toView(node: TreeNode, ctx: Ctx): NView | null {
   }
   const text = TEXT_BLOCKS.has(b.tag) || !b.children.some(isBranch) ? inlineText(b) : null;
   if (text !== null && (b.children.length > 0 || b.tag === 'button' || b.tag === 'a')) {
-    const role: TextRole = HEADING[b.tag] ?? 'body';
+    const role: TextRole = (Object.hasOwn(HEADING, b.tag) && HEADING[b.tag]) || 'body';
     const label = tidy(text) || b.attrs['aria-label'] || '';
     if (!label && b.tag !== 'button' && b.tag !== 'a') return null;
     if (b.tag === 'a') return { kind: 'text', text: label, role, look, link: safeUrl(b.attrs.href) };
@@ -699,8 +699,8 @@ function swiftBody(v: NView, o: Out, d: number, fill: boolean): void {
 }
 
 /** Types the generated code uses, which the view's own name must not shadow. */
-const SWIFT_TAKEN = new Set(['DesignTokens', 'View', 'Text', 'Image', 'Link', 'Button', 'Grid', 'GridRow', 'GridItem', 'Divider', 'TextField', 'Color', 'Group', 'Spacer', 'ScrollView', 'VStack', 'HStack', 'LazyVGrid', 'AnyLayout', 'VStackLayout', 'HStackLayout', 'AsyncImage', 'RoundedRectangle', 'EdgeInsets', 'URL', 'Bool', 'String', 'Font', 'Array']);
-const DART_TAKEN = new Set(['DesignTokens', 'Widget', 'StatelessWidget', 'BuildContext', 'Text', 'Image', 'Table', 'TableRow', 'TableBorder', 'Container', 'Wrap', 'Flex', 'Flexible', 'Expanded', 'Row', 'Column', 'Center', 'Opacity', 'Padding', 'Visibility', 'SizedBox', 'Divider', 'TextField', 'TextButton', 'FilledButton', 'Theme', 'Color', 'Colors', 'BoxDecoration', 'BoxConstraints', 'BorderRadius', 'Border', 'EdgeInsets', 'MediaQuery', 'SingleChildScrollView', 'LayoutBuilder', 'InputDecoration', 'OutlineInputBorder', 'Axis', 'List', 'Map', 'String', 'Object']);
+const SWIFT_TAKEN = new Set(['DesignTokens', 'View', 'Text', 'Image', 'Link', 'Button', 'Grid', 'GridRow', 'GridItem', 'Divider', 'TextField', 'Color', 'Group', 'Spacer', 'ScrollView', 'VStack', 'HStack', 'LazyVGrid', 'AnyLayout', 'VStackLayout', 'HStackLayout', 'AsyncImage', 'RoundedRectangle', 'EdgeInsets', 'URL', 'Bool', 'String', 'Font', 'Array', 'Environment', 'EmptyView', 'ForEach', 'Alignment', 'HorizontalAlignment', 'VerticalAlignment']);
+const DART_TAKEN = new Set(['DesignTokens', 'Widget', 'StatelessWidget', 'BuildContext', 'Text', 'Image', 'Table', 'TableRow', 'TableBorder', 'Container', 'Wrap', 'Flex', 'Flexible', 'Expanded', 'Row', 'Column', 'Center', 'Opacity', 'Padding', 'Visibility', 'SizedBox', 'Divider', 'TextField', 'TextButton', 'FilledButton', 'Theme', 'Color', 'Colors', 'BoxDecoration', 'BoxConstraints', 'BorderRadius', 'Border', 'EdgeInsets', 'MediaQuery', 'SingleChildScrollView', 'LayoutBuilder', 'InputDecoration', 'OutlineInputBorder', 'Axis', 'List', 'Map', 'String', 'Object', 'MainAxisAlignment', 'MainAxisSize', 'CrossAxisAlignment', 'WrapCrossAlignment', 'WrapAlignment', 'TableCellVerticalAlignment', 'FontWeight', 'TextAlign', 'TextStyle', 'BoxFit', 'Alignment', 'Radius']);
 
 /** The type name to write: the given name, with a suffix when it would shadow a framework type. */
 export function nativeTypeName(name: string, framework: NativeFramework): string {

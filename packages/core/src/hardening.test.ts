@@ -328,3 +328,17 @@ describe('pass 12 fixes', () => {
     expect(componentAsTree(link).root.tag).toBe('svg');
   });
 });
+
+describe('pass 13 fixes', () => {
+  it('reports non-string kinds and leaf types instead of throwing', () => {
+    const bad = { toString: 1 };
+    expect(() => validateDocument({ kind: 'branch', tag: 'body', children: [{ kind: bad }, { kind: 'leaf', type: bad, value: 'x' }] })).not.toThrow();
+  });
+
+  it('has no geometry for shapes named like Object properties', async () => {
+    const { shapeGeometry } = await import('./index');
+    expect(shapeGeometry('constructor')).toEqual([]);
+    expect(shapeGeometry('__proto__')).toEqual([]);
+    expect(shapeGeometry('circle')).toContain('r');
+  });
+});

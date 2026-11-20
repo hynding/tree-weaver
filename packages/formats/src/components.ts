@@ -4,6 +4,7 @@ import {
   DISPLAYS,
   escapeAttr,
   escapeHtml,
+  INLINE_TAGS,
   isBranch,
   isSafeAttr,
   isSafeCssProp,
@@ -222,9 +223,9 @@ export function tailwindClass(prop: string, value: string, tokenKinds?: Readonly
   const v = value.trim();
   const themed = tokenKinds ? tailwindTokenClass(prop, v, tokenKinds) : undefined;
   if (themed) return themed;
-  const keyword = KEYWORD_UTILITIES[prop]?.[v];
+  const keyword = Object.hasOwn(KEYWORD_UTILITIES, prop) && Object.hasOwn(KEYWORD_UTILITIES[prop], v) ? KEYWORD_UTILITIES[prop][v] : undefined;
   if (keyword) return keyword;
-  const utility = VALUE_UTILITIES[prop];
+  const utility = Object.hasOwn(VALUE_UTILITIES, prop) ? VALUE_UTILITIES[prop] : undefined;
   // Single values only: `p-[1rem_2rem]` works too, but the arbitrary property reads plainer.
   if (utility && !/\s/.test(v) && !/[[\]]/.test(v)) return `${utility}-[${bracket(v)}]`;
   return `[${prop}:${bracket(v)}]`;
@@ -284,8 +285,10 @@ interface Build {
  */
 const PLAIN_ATTR = /^(?:(?:xlink|xml|xmlns):)?[a-zA-Z_][\w.-]*$/;
 // `is` too: Vue renders `<component is="script">` and `is="vue:script"` as the element it names.
+/** Attribute names the frameworks take for themselves: `is` (Vue), `ref` and `key` (React, Vue), `slot` (Svelte, Vue). */
+const FRAMEWORK_ATTRS = new Set(['is', 'ref', 'key', 'slot']);
 const isExportAttr = (name: string, value: string, defaults?: Record<string, string>) =>
-  PLAIN_ATTR.test(name) && !/^v-/i.test(name) && name.toLowerCase() !== 'is' && !isDomPropName(name) && landsAs(name).every((n) => isSafeFilled(n, value, defaults));
+  PLAIN_ATTR.test(name) && !/^v-/i.test(name) && !FRAMEWORK_ATTRS.has(name.toLowerCase()) && !isDomPropName(name) && landsAs(name).every((n) => isSafeFilled(n, value, defaults));
 /**
  * Vue sets an attribute whose name is a property of the element (`innerHTML`) as that property,
  * so a mixed-case name is kept only when it is an SVG attribute's own case (`viewBox`), and the
@@ -313,7 +316,8 @@ function isSafeFilled(name: string, value: string, defaults?: Record<string, str
   return isSafeAttr(name, fill({})) && (!defaults || isSafeAttr(name, fill(defaults)));
 }
 /** Vue's built-in components aren't HTML; exported as they are, `<component>` could render any element. */
-const FRAMEWORK_TAGS = new Set(['component', 'teleport', 'keep-alive', 'keepalive', 'suspense', 'transition', 'transition-group', 'transitiongroup']);
+// `slot` too: Vue renders it as a slot outlet and drops its content.
+const FRAMEWORK_TAGS = new Set(['component', 'teleport', 'keep-alive', 'keepalive', 'suspense', 'transition', 'transition-group', 'transitiongroup', 'slot']);
 
 function leafEl(leaf: Leaf, inSvg: boolean, defaults?: Record<string, string>): El {
   const attrs = Object.entries(leaf.attrs ?? {}).filter(([n, v]) => isExportAttr(n, v, defaults));
@@ -328,6 +332,43 @@ function leafEl(leaf: Leaf, inSvg: boolean, defaults?: Record<string, string>): 
     return { kind: 'el', tag: 'img', attrs: [['src', src], ['alt', leaf.attrs?.alt ?? ''], ...rest], children: [], svg: false };
   }
   return { kind: 'text', value: leaf.value };
+}
+
+/**
+ * Mend nesting a browser would repair while parsing, which Svelte refuses to compile (and React
+ * warns about): a link in a link becomes a span, a paragraph or heading holding blocks a div,
+ * rows straight under a table go in a tbody, and whitespace between table parts goes.
+ */
+export function repairNesting(node: Branch, ctx: { a?: boolean; form?: boolean; button?: boolean } = {}): Branch {
+  const lower = node.tag.toLowerCase();
+  if (lower === 'svg') return node;
+  let tag = node.tag;
+  if ((lower === 'a' && ctx.a) || (lower === 'button' && ctx.button)) tag = 'span';
+  if (lower === 'form' && ctx.form) tag = 'div';
+  const holdsBlock = node.children.some((c) => isBranch(c) && !INLINE_TAGS.has(c.tag.toLowerCase()) && c.tag.toLowerCase() !== 'svg');
+  if ((lower === 'p' || /^h[1-6]$/.test(lower)) && holdsBlock) tag = 'div';
+  const inner = { a: ctx.a || lower === 'a', form: ctx.form || lower === 'form', button: ctx.button || lower === 'button' };
+  let children: TreeNode[] = node.children.map((c) => (isBranch(c) ? repairNesting(c, inner) : c));
+  if (/^(table|thead|tbody|tfoot|tr)$/.test(lower)) children = children.filter((c) => isBranch(c) || c.type !== 'text' || c.value.trim() !== '');
+  if (lower === 'table' && children.some((c) => isBranch(c) && c.tag.toLowerCase() === 'tr')) {
+    const out: TreeNode[] = [];
+    let body: Branch | null = null;
+    for (const c of children) {
+      if (isBranch(c) && c.tag.toLowerCase() === 'tr') {
+        if (!body) {
+          body = { kind: 'branch', id: `${node.id}~tbody${out.length}`, tag: 'tbody', classes: [], attrs: {}, styles: {}, children: [] };
+          out.push(body);
+        }
+        body.children.push(c);
+      } else {
+        body = null;
+        out.push(c);
+      }
+    }
+    children = out;
+  }
+  const same = tag === node.tag && children.length === node.children.length && children.every((c, i) => c === node.children[i]);
+  return same ? node : { ...node, tag, children };
 }
 
 function branchEl(branch: Branch, b: Build, inSvg: boolean, asTag?: string): El {
@@ -456,6 +497,29 @@ const JSX_ATTRS: Record<string, string> = {
   formaction: 'formAction',
   hreflang: 'hrefLang',
   inputmode: 'inputMode',
+  itemscope: 'itemScope',
+  itemtype: 'itemType',
+  itemid: 'itemID',
+  itemprop: 'itemProp',
+  itemref: 'itemRef',
+  formnovalidate: 'formNoValidate',
+  formmethod: 'formMethod',
+  formtarget: 'formTarget',
+  formenctype: 'formEncType',
+  nomodule: 'noModule',
+  enterkeyhint: 'enterKeyHint',
+  popovertarget: 'popoverTarget',
+  popovertargetaction: 'popoverTargetAction',
+  fetchpriority: 'fetchPriority',
+  srclang: 'srcLang',
+  srcdoc: 'srcDoc',
+  cellpadding: 'cellPadding',
+  cellspacing: 'cellSpacing',
+  frameborder: 'frameBorder',
+  marginheight: 'marginHeight',
+  marginwidth: 'marginWidth',
+  'accept-charset': 'acceptCharset',
+  'http-equiv': 'httpEquiv',
   'xlink:href': 'xlinkHref',
   'xml:space': 'xmlSpace',
   'xml:lang': 'xmlLang',
@@ -467,12 +531,20 @@ const BOOLEAN_ATTRS = new Set([
   'ismap', 'itemscope', 'loop', 'multiple', 'muted', 'nomodule', 'novalidate', 'open', 'playsinline', 'readonly', 'required', 'reversed', 'selected',
 ]);
 
+/** SVG presentation attributes, which React takes in camel case (`strokeWidth`). */
+const SVG_DASHED = new Set(
+  'alignment-baseline baseline-shift clip-path clip-rule color-interpolation color-interpolation-filters color-profile color-rendering dominant-baseline enable-background fill-opacity fill-rule flood-color flood-opacity font-family font-size font-size-adjust font-stretch font-style font-variant font-weight glyph-name glyph-orientation-horizontal glyph-orientation-vertical horiz-adv-x image-rendering letter-spacing lighting-color marker-end marker-mid marker-start overline-position overline-thickness paint-order panose-1 pointer-events rendering-intent shape-rendering stop-color stop-opacity strikethrough-position strikethrough-thickness stroke-dasharray stroke-dashoffset stroke-linecap stroke-linejoin stroke-miterlimit stroke-opacity stroke-width text-anchor text-decoration text-rendering underline-position underline-thickness unicode-bidi unicode-range units-per-em v-alphabetic v-hanging v-ideographic v-mathematical vector-effect vert-adv-y vert-origin-x vert-origin-y word-spacing writing-mode x-height'.split(' '),
+);
+
 /** An attribute name as React expects it. */
 export function jsxAttrName(name: string): string {
   const lower = name.toLowerCase();
-  if (JSX_ATTRS[lower]) return JSX_ATTRS[lower];
+  if (Object.hasOwn(JSX_ATTRS, lower)) return JSX_ATTRS[lower];
   if (lower.startsWith('data-') || lower.startsWith('aria-')) return lower;
-  return name.replace(/[-:]([a-z])/g, (_m, c: string) => c.toUpperCase());
+  // Only names React knows in camel case are converted (SVG presentation attributes, `xlink:*`);
+  // React passes any other name through as written (`hx-post`, a custom element's `some-attr`).
+  if (SVG_DASHED.has(lower) || /^(xlink|xml):/.test(lower)) return lower.replace(/[-:]([a-z])/g, (_m, c: string) => c.toUpperCase());
+  return name;
 }
 
 /** An element of a Vue or Svelte component template, with prop bindings. */
@@ -569,7 +641,7 @@ export function exportComponent(tree: Tree, opts: ComponentOptions): ComponentEx
 
   // A page root is a <body>; in a component it becomes a wrapper <div>.
   const rootTag = svgTree ? undefined : framework === 'html' ? 'body' : 'div';
-  const root = branchEl(tree.root, build, false, rootTag);
+  const root = branchEl(repairNesting(tree.root), build, false, rootTag);
   if (root.kind === 'el' && !svgTree && framework !== 'html' && !root.attrs.some(([n]) => n === 'class')) {
     // Name the wrapper so it can be styled from outside.
     root.attrs.unshift(['class', cssIdent(slugify(tree.name, 'layout'))]);
@@ -738,7 +810,7 @@ function variantRules(def: ComponentDef, variants: ComponentVariant[], slugs: Ma
 
 /** Words a prop can't be named in a JS, Vue or Svelte component (a variable of that name is a syntax error). */
 const RESERVED_WORDS = new Set(
-  'variantClasses VARIANT_DISPLAYS arguments await break case catch class const continue debugger default delete do else enum eval export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield'.split(' '),
+  'key ref variantClasses VARIANT_DISPLAYS arguments await break case catch class const continue debugger default delete do else enum eval export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield'.split(' '),
 );
 
 /** A prop's default as a JS literal. */
@@ -785,7 +857,7 @@ export function exportComponentDef(def: ComponentDef, opts: ComponentOptions): C
     forceClass: new Set([def.root.id, ...variants.flatMap((v) => Object.keys(v.styles))]),
     classes: new Map(),
   };
-  const root = branchEl(def.root, build, false);
+  const root = branchEl(repairNesting(def.root), build, false);
   // The editor ignores `data-show-if` on a component's root (see expandComponent), and so does the export.
   if (root.kind === 'el') delete root.cond;
   const rootCls = build.classes!.get(def.root.id)!;

@@ -31,7 +31,6 @@ import {
   removeTableColumn,
   removeTableRow,
   parseRulesCss,
-  placementProblem,
   renderDocument,
   renderForestIndex,
   setRuleStyle as setRuleDeclaration,
@@ -67,7 +66,10 @@ import {
   findComponent,
   findTree,
   instancesOf,
+  idsOutside,
+  insertionProblem,
   instanceRoleIn,
+  VOID_TAGS,
   instantiateComponent,
   isComponentTreeId,
   updateComponent,
@@ -429,9 +431,19 @@ export function instanceOwner(root: Branch, id: string): Branch | null {
   return [...ancestorsOf(root, id)].reverse().find((a) => a.instance) ?? null;
 }
 
+/** Why a branch can't take another tag where it is, or null (the same rules as a patch's `update`). */
+function tagChangeProblem(root: Branch, node: Branch, tag: string): string | null {
+  if (node.children.length && VOID_TAGS.has(tag.toLowerCase())) return `<${tag}> can't hold children, and this branch has ${node.children.length}`;
+  const parent = findParent(root, node.id)?.parent;
+  if (!parent) return null;
+  const next: Branch = { ...node, tag };
+  return insertionProblem(removeNode(root, node.id), parent.id, next);
+}
+
 function allowed(root: Branch, parentId: string, node: TreeNode): boolean {
   const owner = instanceOwner(root, parentId);
-  const problem = owner ? `“${owner.name ?? 'This branch'}” is a component instance: edit the component to change what is inside it` : placementProblem(root, parentId, node);
+  // The node and everything it holds must suit where it lands (an <a> works in HTML and SVG, what it holds may not).
+  const problem = owner ? `“${owner.name ?? 'This branch'}” is a component instance: edit the component to change what is inside it` : insertionProblem(root, parentId, node);
   if (problem) toast(problem, 'error');
   return !problem;
 }
@@ -495,7 +507,9 @@ export function moveTo(id: string, targetId: string, position: DropPosition): vo
   const node = tree && findNode(tree.root, id);
   if (id === targetId || !tree || !node) return;
   const { parentId, index } = placement(tree.root, targetId, position);
-  if (!allowed(tree.root, parentId, node)) return;
+  // Checked against the tree without the node, as it will be once moved.
+  const without = removeNode(tree.root, id);
+  if (!allowed(findNode(without, parentId) ? without : tree.root, parentId, node)) return;
   editTree((root) => moveNode(root, id, parentId, index));
 }
 
@@ -550,6 +564,15 @@ export function selectParent(): void {
 }
 
 export function updateBranch(id: string, patch: Partial<Omit<Branch, 'kind' | 'id' | 'children'>>): void {
+  const tree = currentTree();
+  const node = tree && findNode(tree.root, id);
+  if (tree && node && isBranch(node) && patch.tag !== undefined && patch.tag !== node.tag) {
+    const problem = tagChangeProblem(tree.root, node, patch.tag);
+    if (problem) {
+      toast(problem, 'error');
+      return;
+    }
+  }
   editTree((root) =>
     updateNode(root, id, (node) => {
       if (!isBranch(node)) return node;
@@ -1070,7 +1093,14 @@ export async function openDocument(doc: TreeDocument, meta: ChangeMeta = {}): Pr
   }
   if (open && doc.kind === 'tree' && open.trees.some((t) => t.id === doc.tree.id)) {
     const added = newKits(doc.kits);
-    commit({ ...replaceTree(open, doc.tree), kits: addKitsBeforeTokens(open.kits, added) }, true, meta);
+    // Node ids are unique across the forest: one the forest's other trees use gets a fresh id.
+    const taken = idsOutside(open.trees, doc.tree.id);
+    const reId = (n: TreeNode): TreeNode => {
+      const id = taken.has(n.id) ? createId(isBranch(n) ? 'b' : 'l') : n.id;
+      return isBranch(n) ? { ...n, id, children: n.children.map(reId) } : { ...n, id };
+    };
+    const incoming = taken.size ? { ...doc.tree, root: { ...(reId(doc.tree.root) as Branch), id: doc.tree.root.id } } : doc.tree;
+    commit({ ...replaceTree(open, incoming), kits: addKitsBeforeTokens(open.kits, added) }, true, meta);
     switchTree(doc.tree.id);
     await saveNow();
     return { kind: 'tree', trees: 1 };

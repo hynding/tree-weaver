@@ -104,7 +104,7 @@ function inline(node: TreeNode, first: boolean): string {
   }
   const tag = node.tag;
   const content = () => node.children.map((c) => inline(c, false)).join('');
-  if (MARK_INLINE[tag] && !needsMeta(node) && node.children.length) return wrapTrimmed(content(), MARK_INLINE[tag]);
+  if (Object.hasOwn(MARK_INLINE, tag) && !needsMeta(node) && node.children.length) return wrapTrimmed(content(), MARK_INLINE[tag]);
   if (tag === 'code' && !needsMeta(node) && node.children.every((c) => !isBranch(c) && c.type === 'text')) {
     // Markdown turns line breaks in a code span into spaces anyway; a blank line would end the paragraph.
     let code = oneLine(node.children.map((c) => (c as Leaf).value).join(''));

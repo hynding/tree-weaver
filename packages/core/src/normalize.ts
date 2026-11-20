@@ -22,8 +22,8 @@ export class TreeDataError extends Error {
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
-/** C0 control characters other than tab and line breaks: no format (XML, SVG) can carry them. */
-export const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g;
+/** C0 control characters other than tab and line breaks, and U+FFFE/U+FFFF: XML (and SVG) can't carry them. */
+export const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g;
 const str = (v: unknown, fallback = ''): string =>
   (typeof v === 'string' ? v : typeof v === 'number' || typeof v === 'boolean' ? String(v) : fallback).replace(CONTROL_CHARS, '');
 

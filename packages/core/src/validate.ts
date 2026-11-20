@@ -224,7 +224,7 @@ class Checker {
     const kind = value.kind ?? (value.tag !== undefined || value.children !== undefined ? 'branch' : 'leaf');
     if (kind === 'branch') return this.branch(value, path, isRoot, inSvg);
     if (kind === 'leaf') return this.leaf(value, path, inSvg);
-    this.error(`${path}.kind`, `Unknown node kind "${String(kind)}"`, 'Use "branch" for elements or "leaf" for text and images');
+    this.error(`${path}.kind`, `Unknown node kind ${typeof kind === 'string' ? `"${kind}"` : typeName(kind)}`, 'Use "branch" for elements or "leaf" for text and images');
   }
 
   branch(value: Obj, path: string, isRoot: boolean, inSvg = false) {
@@ -303,7 +303,7 @@ class Checker {
     this.unknownKeys(value, LEAF_KEYS, path, 'leaf', { text: 'value', src: 'value' });
     this.id(value, path);
     if (value.type !== undefined && value.type !== 'text' && value.type !== 'image' && value.type !== 'shape') {
-      this.error(`${path}.type`, `Unknown leaf type "${String(value.type)}"; it will be read as text`, 'Use "text", "image" or "shape"');
+      this.error(`${path}.type`, `Unknown leaf type ${typeof value.type === 'string' ? `"${value.type}"` : typeName(value.type)}; it will be read as text`, 'Use "text", "image" or "shape"');
     }
     if (value.type === 'shape' && typeof value.value === 'string') {
       if (!isShapeTag(value.value)) {

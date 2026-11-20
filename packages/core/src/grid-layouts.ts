@@ -330,7 +330,7 @@ export function applyGridLayout(root: Branch, branchId: string, display: Display
   const extra: Branch[] = [];
   for (let i = children.length; i < want; i++) {
     const name = names[i];
-    const box = createBranch({ tag: name ? (AREA_TAGS[name] ?? 'div') : 'div', type: 'box', name: name ? titleCase(name) : `Box ${i + 1}` });
+    const box = createBranch({ tag: name ? ((Object.hasOwn(AREA_TAGS, name) && AREA_TAGS[name]) || 'div') : 'div', type: 'box', name: name ? titleCase(name) : `Box ${i + 1}` });
     extra.push(box);
     created.push(box.id);
   }

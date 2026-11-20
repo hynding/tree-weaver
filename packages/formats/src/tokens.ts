@@ -68,7 +68,7 @@ export const tailwindTokens = (tokens: ThemeToken[]): ThemeToken[] => tokens.fil
  */
 export function tailwindTokenClass(prop: string, value: string, kinds: ReadonlyMap<string, TokenKind>): string | undefined {
   const m = /^var\(\s*(--[\w-]+)\s*\)$/.exec(value.trim());
-  const use = TOKEN_UTILITIES[prop];
+  const use = Object.hasOwn(TOKEN_UTILITIES, prop) ? TOKEN_UTILITIES[prop] : undefined;
   if (!m || !use) return undefined;
   return kinds.get(m[1]) === use.kind && TAILWIND_NAMESPACE[use.kind] ? `${use.prefix}-${tailwindTokenKey(m[1])}` : undefined;
 }

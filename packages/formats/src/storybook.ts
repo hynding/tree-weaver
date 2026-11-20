@@ -174,7 +174,7 @@ function treeWeaverParams(s: StoryDef): string {
   return `{\n  html: ${JSON.stringify(s.html)},\n  leaves: {${leaves.length ? `\n${leaves.join('\n')}\n  ` : ''}},\n}`;
 }
 
-function storiesFile(forest: Forest, tree: Tree, cssFile: string): string {
+function storiesFile(forest: Forest, tree: Tree, cssFile: string, title = titlePart(tree.name)): string {
   const [whole, ...rest] = treeStories(tree);
   const shared = (s: StoryDef) => s.html === whole.html;
   const body = [whole, ...rest]
@@ -197,7 +197,7 @@ import './${cssFile}';
 import { renderBranch } from '../.storybook/tree-weaver.js';
 
 export default {
-  title: ${JSON.stringify(`${titlePart(forest.name)}/${titlePart(tree.name)}`)},
+  title: ${JSON.stringify(`${titlePart(forest.name)}/${title}`)},
   render: (args, { parameters }) => renderBranch(parameters.treeWeaver, args),
 };
 
@@ -309,10 +309,17 @@ export function exportStorybook(forest: Forest, opts: StorybookOptions = {}): St
       content: `/* ${kit.name.replace(/\*\//g, '* /')} */\n${kit.href ? `@import url("${kit.href.replace(/"/g, '%22')}");` : kit.css}\n`,
     })),
   ];
+  // Story ids come from titles as Storybook sanitises them; two trees with the same one ("Home",
+  // "Home!") would stop Storybook building its index, so later ones get a number.
+  const storyKey = (title: string) => title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  const usedTitles = new Set<string>();
   for (const tree of trees) {
     const slug = treeName(slugify(tree.name, 'tree'));
+    let title = titlePart(tree.name);
+    for (let n = 2; usedTitles.has(storyKey(title)); n++) title = `${titlePart(tree.name)} ${n}`;
+    usedTitles.add(storyKey(title));
     files.push({ path: `stories/${slug}.css`, content: `${renderTreeCss(tree.root)}\n` });
-    files.push({ path: `stories/${slug}.stories.js`, content: storiesFile(forest, tree, `${slug}.css`) });
+    files.push({ path: `stories/${slug}.stories.js`, content: storiesFile(forest, tree, `${slug}.css`, title) });
   }
   return { name, files };
 }

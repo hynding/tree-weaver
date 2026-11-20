@@ -29,6 +29,12 @@ export const LOCAL_ORIGIN = 'tree-weaver-local';
 
 type YNode = Y.Map<unknown>;
 
+/** A peer can put anything in the shared maps: only Y.Map entries are read (or written into). */
+const asMap = (v: unknown): YNode | undefined => (v instanceof Y.Map ? (v as YNode) : undefined);
+function* yMaps(map: Y.Map<any>): Generator<[string, YNode]> { // eslint-disable-line @typescript-eslint/no-explicit-any
+  for (const [id, v] of map.entries()) if (v instanceof Y.Map) yield [id, v as YNode];
+}
+
 const maps = (doc: Y.Doc) => ({
   forest: doc.getMap<unknown>('forest'),
   trees: doc.getMap<YNode>('trees'),
@@ -148,7 +154,7 @@ function indexForest(forest: Forest | null): Map<string, Placed> {
 }
 
 function writeNode(nodes: Y.Map<YNode>, p: Placed, order: string | undefined): void {
-  let m = nodes.get(p.node.id);
+  let m = asMap(nodes.get(p.node.id));
   if (!m) {
     m = new Y.Map<unknown>();
     nodes.set(p.node.id, m);
@@ -198,10 +204,10 @@ export function writeForest(doc: Y.Doc, prev: Forest | null, next: Forest, origi
     // Trees.
     const treeKeys = orderKeys(
       next.trees.map((t) => t.id),
-      (id) => m.trees.get(id)?.get('order') as string | undefined,
+      (id) => asMap(m.trees.get(id))?.get('order') as string | undefined,
     );
     for (const tree of next.trees) {
-      let t = m.trees.get(tree.id);
+      let t = asMap(m.trees.get(tree.id));
       if (!t) {
         t = new Y.Map<unknown>();
         m.trees.set(tree.id, t);
@@ -218,10 +224,10 @@ export function writeForest(doc: Y.Doc, prev: Forest | null, next: Forest, origi
     // Kits.
     const kitKeys = orderKeys(
       next.kits.map((k) => k.id),
-      (id) => m.kits.get(id)?.get('order') as string | undefined,
+      (id) => asMap(m.kits.get(id))?.get('order') as string | undefined,
     );
     for (const kit of next.kits) {
-      let k = m.kits.get(kit.id);
+      let k = asMap(m.kits.get(kit.id));
       if (!k) {
         k = new Y.Map<unknown>();
         m.kits.set(kit.id, k);
@@ -236,10 +242,10 @@ export function writeForest(doc: Y.Doc, prev: Forest | null, next: Forest, origi
     const components = next.components ?? [];
     const componentKeys = orderKeys(
       components.map((c) => c.id),
-      (id) => m.components.get(id)?.get('order') as string | undefined,
+      (id) => asMap(m.components.get(id))?.get('order') as string | undefined,
     );
     for (const def of components) {
-      let c = m.components.get(def.id);
+      let c = asMap(m.components.get(def.id));
       if (!c) {
         c = new Y.Map<unknown>();
         m.components.set(def.id, c);
@@ -257,12 +263,12 @@ export function writeForest(doc: Y.Doc, prev: Forest | null, next: Forest, origi
       if (!isBranch(p.node)) continue;
       const ids = childIds(p.node);
       const old = before.get(id);
-      if (prev && old && sameList(ids, childIds(old.node)) && ids.every((c) => m.nodes.get(c)?.get('order') !== undefined)) continue;
-      const keys = orderKeys(ids, (c) => (m.nodes.get(c)?.get('parent') === id ? (m.nodes.get(c)?.get('order') as string | undefined) : undefined));
+      if (prev && old && sameList(ids, childIds(old.node)) && ids.every((c) => asMap(m.nodes.get(c))?.get('order') !== undefined)) continue;
+      const keys = orderKeys(ids, (c) => (asMap(m.nodes.get(c))?.get('parent') === id ? (asMap(m.nodes.get(c))?.get('order') as string | undefined) : undefined));
       for (const [c, k] of keys) orders.set(c, k);
     }
     // Roots sort first.
-    for (const tree of next.trees) if (!orders.has(tree.root.id)) orders.set(tree.root.id, (m.nodes.get(tree.root.id)?.get('order') as string | undefined) ?? 'i');
+    for (const tree of next.trees) if (!orders.has(tree.root.id)) orders.set(tree.root.id, (asMap(m.nodes.get(tree.root.id))?.get('order') as string | undefined) ?? 'i');
 
     for (const [id, p] of after) {
       const old = before.get(id);
@@ -275,7 +281,7 @@ export function writeForest(doc: Y.Doc, prev: Forest | null, next: Forest, origi
     if (prev) {
       for (const t of prev.trees) {
         if (treeIds.has(t.id)) continue;
-        for (const [id, n] of m.nodes) if (n.get('tree') === t.id) m.nodes.delete(id);
+        for (const [id, n] of yMaps(m.nodes)) if (n.get('tree') === t.id) m.nodes.delete(id);
       }
     }
   }, origin);
@@ -287,7 +293,7 @@ export function writeForest(doc: Y.Doc, prev: Forest | null, next: Forest, origi
  */
 export function pruneStrays(doc: Y.Doc, origin: unknown = 'tree-weaver-prune'): number {
   const m = maps(doc);
-  const stray = [...m.nodes.entries()].filter(([, n]) => !m.trees.has(n.get('tree') as string)).map(([id]) => id);
+  const stray = [...m.nodes.entries()].filter(([, n]) => !(n instanceof Y.Map) || !m.trees.has(n.get('tree') as string)).map(([id]) => id);
   if (stray.length) doc.transact(() => stray.forEach((id) => m.nodes.delete(id)), origin);
   return stray.length;
 }
@@ -360,18 +366,20 @@ export function hasForest(doc: Y.Doc): boolean {
 /** A peer's value as a string, or the fallback when it isn't one. */
 const strOr = (value: unknown, fallback: string): string => (typeof value === 'string' ? value : fallback);
 
+const MAX_DEPTH = 200;
+
 export function readForest(doc: Y.Doc): Forest | null {
   if (!hasForest(doc)) return null;
   const m = maps(doc);
   // Group nodes by tree, and children by parent.
   const byTree = new Map<string, Map<string, YNode>>();
-  for (const [id, n] of m.nodes) {
+  for (const [id, n] of yMaps(m.nodes)) {
     const tree = n.get('tree') as string;
     if (!byTree.has(tree)) byTree.set(tree, new Map());
     byTree.get(tree)!.set(id, n);
   }
   const trees: (Tree & { order: string })[] = [];
-  for (const [treeId, t] of m.trees) {
+  for (const [treeId, t] of yMaps(m.trees)) {
     const nodes = byTree.get(treeId) ?? new Map<string, YNode>();
     const rootId = t.get('root') as string;
     const rootMap = nodes.get(rootId);
@@ -385,11 +393,13 @@ export function readForest(doc: Y.Doc): Forest | null {
     }
     for (const list of children.values()) list.sort(byOrder);
     const visited = new Set<string>();
-    const build = (id: string): TreeNode => {
+    // Nesting deeper than any real layout (a peer's long parent chain) is cut: what lies below
+    // is attached to the root as strays, so reading and rendering can't run out of stack.
+    const build = (id: string, depth = 0): TreeNode => {
       visited.add(id);
       const node = readNode(id, nodes.get(id)!);
-      if (isBranch(node)) {
-        for (const c of children.get(id) ?? []) if (!visited.has(c.id)) node.children.push(build(c.id));
+      if (isBranch(node) && depth < MAX_DEPTH) {
+        for (const c of children.get(id) ?? []) if (!visited.has(c.id)) node.children.push(build(c.id, depth + 1));
       }
       return node;
     };
@@ -419,7 +429,7 @@ export function readForest(doc: Y.Doc): Forest | null {
     });
   }
   trees.sort(byOrder);
-  const kits = [...m.kits.entries()]
+  const kits = [...yMaps(m.kits)]
     .map(([id, k]) => ({ id, order: (k.get('order') as string) ?? '', kit: parse<DesignKit | null>(k.get('data'), null) }))
     .filter((k): k is { id: string; order: string; kit: DesignKit } => !!k.kit)
     .sort(byOrder)
@@ -434,7 +444,7 @@ export function readForest(doc: Y.Doc): Forest | null {
       }
     });
   const components: ComponentDef[] = [];
-  const componentEntries = [...m.components.entries()].map(([id, c]) => ({ id, order: (c.get('order') as string) ?? '', data: parse<unknown>(c.get('data'), null) })).sort(byOrder);
+  const componentEntries = [...yMaps(m.components)].map(([id, c]) => ({ id, order: (c.get('order') as string) ?? '', data: parse<unknown>(c.get('data'), null) })).sort(byOrder);
   for (const c of componentEntries) {
     try {
       components.push({ ...normalizeComponent(c.data, `components.${c.id}`), id: c.id });

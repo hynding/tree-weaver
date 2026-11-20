@@ -391,7 +391,8 @@ describe('pass 11 fixes', () => {
     const doc = importDocument('<a h-ref="javascript:alert(1)">click</a><button form-action="javascript:alert(2)">go</button><svg><a xlink-href="javascript:alert(3)"><circle r="1"/></a></svg>', 'html');
     if (doc.kind !== 'tree') throw new Error('expected a tree');
     const out = exportComponent(doc.tree, { framework: 'react' }).files.map((f) => f.contents).join('\n');
-    expect(out).not.toMatch(/javascript/);
+    // Names React doesn't know stay as written (`h-ref`), which no browser reads as a link.
+    expect(out).not.toMatch(/\s(href|hRef|formAction|xlinkHref|src|sRc)=\{?"javascript/i);
   });
 
   it('keeps link-like link text and titles from breaking out of Markdown', () => {
@@ -440,5 +441,48 @@ describe('pass 12 fixes', () => {
     const table = doc.tree.root.children.find((c) => c.kind === 'branch') as Branch;
     expect(table.children.map((c) => (c as Branch).tag)).toEqual(['tbody']);
     expect((table.children[0] as Branch).children).toHaveLength(2);
+  });
+});
+
+describe('pass 13 fixes', () => {
+  const react = (html: string) => {
+    const doc = importDocument(html, 'html');
+    if (doc.kind !== 'tree') throw new Error('expected a tree');
+    return exportComponent(doc.tree, { framework: 'react' }).files[0].contents;
+  };
+
+  it('writes JSX attribute names React knows, and leaves the rest as written', () => {
+    const out = react('<div itemscope itemtype="https://schema.org/Product"></div><form><button formnovalidate>Save</button></form><button hx-post="/x">x</button><svg><rect stroke-width="2"/></svg>');
+    expect(out).toContain('itemScope');
+    expect(out).toContain('formNoValidate');
+    expect(out).toContain('hx-post="/x"');
+    expect(out).toContain('strokeWidth');
+  });
+
+  it('drops attributes the frameworks reserve, and refuses key/ref props', () => {
+    const out = react('<div ref="r" key="k" slot="s">x</div>');
+    expect(out).not.toMatch(/\bref=|\bkey=|\bslot=/);
+  });
+
+  it('mends nesting Svelte refuses to compile', () => {
+    const doc = importDocument(JSON.stringify({ tree: { name: 'T', root: { tag: 'body', children: [{ tag: 'p', children: [{ tag: 'div', children: ['x'] }] }, { tag: 'a', attrs: { href: '/a' }, children: [{ tag: 'div', children: [{ tag: 'a', attrs: { href: '/b' }, children: ['b'] }] }] }, { tag: 'table', children: [{ tag: 'tr', children: [{ tag: 'td', children: ['c'] }] }] }] } } }), 'json');
+    if (doc.kind !== 'tree') throw new Error('expected a tree');
+    const svelte = exportComponent(doc.tree, { framework: 'svelte' }).files[0].contents;
+    expect(svelte).not.toMatch(/<p[ >]/);
+    expect(svelte).toMatch(/<table[^>]*>\s*<tbody/);
+    expect((svelte.match(/<a[ >]/g) ?? []).length).toBe(1);
+  });
+
+  it('gives Storybook stories unique titles', async () => {
+    const { exportStorybook } = await import('./index');
+    const forest = createForest('Site', [page([text('a')]), createTree('Home!', createBranch({ tag: 'body', type: 'root' }))]);
+    const titles = exportStorybook(forest).files.filter((f) => f.path.endsWith('.stories.js')).map((f) => /title: "([^"]+)"/.exec(f.content)![1]);
+    expect(titles).toEqual(['Site/Home', 'Site/Home! 2']);
+  });
+
+  it('suffixes native type names the generated code uses', async () => {
+    const { nativeTypeName } = await import('./index');
+    expect(nativeTypeName('Environment', 'swiftui')).toBe('EnvironmentView');
+    expect(nativeTypeName('MainAxisSize', 'flutter')).toBe('MainAxisSizeWidget');
   });
 });

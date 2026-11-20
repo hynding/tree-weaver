@@ -275,3 +275,43 @@ describe('malformed order keys from peers', () => {
     expect(new Set(list).size).toBe(3);
   });
 });
+
+describe('entries from peers that are not maps', () => {
+  it('reads, prunes and writes around them, and cuts very deep nesting', () => {
+    const doc = new Y.Doc();
+    const f = sample();
+    writeForest(doc, null, f);
+    doc.getMap('nodes').set('junk', 'boom');
+    doc.getMap('trees').set('junk', 'boom');
+    doc.getMap('kits').set('junk', 7);
+    doc.getMap('components').set('junk', null);
+    expect(() => pruneStrays(doc)).not.toThrow();
+    const read = readForest(doc)!;
+    expect(read.trees).toHaveLength(f.trees.length);
+    const tree = read.trees[0];
+    doc.getMap('nodes').set(tree.root.children[0]?.id ?? 'x', 'boom');
+    expect(() => writeForest(doc, read, withRoot(read, (r) => r))).not.toThrow();
+  });
+
+  it('cuts a peer chain deeper than any layout', () => {
+    const doc = new Y.Doc();
+    const f = sample();
+    writeForest(doc, null, f);
+    const nodes = doc.getMap<Y.Map<unknown>>('nodes');
+    const treeId = f.trees[0].id;
+    let parent = f.trees[0].root.id;
+    doc.transact(() => {
+      for (let i = 0; i < 5000; i++) {
+        const n = new Y.Map<unknown>();
+        n.set('kind', 'branch');
+        n.set('tree', treeId);
+        n.set('parent', parent);
+        n.set('order', 'i');
+        n.set('tag', 'div');
+        nodes.set(`deep${i}`, n);
+        parent = `deep${i}`;
+      }
+    });
+    expect(() => readForest(doc)).not.toThrow();
+  });
+});
