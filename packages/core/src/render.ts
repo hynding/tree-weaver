@@ -65,9 +65,13 @@ export function bracketsBalance(value: string): boolean {
   let quote = '';
   for (let i = 0; i < value.length; i++) {
     const c = value[i];
-    if (quote) {
-      if (c === '\\') i++;
-      else if (c === quote) quote = '';
+    // An escaped character is part of a name or string (`\)` doesn't close anything); a trailing
+    // backslash would escape the `;` written after the value.
+    if (c === '\\') {
+      if (i === value.length - 1) return false;
+      i++;
+    } else if (quote) {
+      if (c === quote) quote = '';
     } else if (c === '"' || c === "'") quote = c;
     else if (c === '(' || c === '[') stack.push(c === '(' ? ')' : ']');
     else if (c === ')' || c === ']') {

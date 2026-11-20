@@ -1229,7 +1229,8 @@ async function cmdVersions(cli: Cli, args: string[]): Promise<number> {
   // `-1`, `-2`… name versions from the newest; keep them from being read as options.
   const NEG = '\u0000';
   const { values, positionals: raw } = parse(
-    args.map((a) => (/^-\d+$/.test(a) ? `${NEG}${a}` : a)),
+    // Not when it is an option's value (`-n -1` names a version "-1").
+    args.map((a, i) => (/^-\d+$/.test(a) && !['-n', '--name', '-F', '--from'].includes(args[i - 1]) ? `${NEG}${a}` : a)),
     {
       name: { type: 'string', short: 'n' },
       from: { type: 'string', short: 'F' },

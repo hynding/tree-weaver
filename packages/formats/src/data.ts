@@ -49,6 +49,9 @@ export function fromData(data: unknown, format: FormatId): TreeDocument {
   }
 }
 
+/** Editors on Windows often save a byte-order mark, which JSON.parse rejects. */
+const stripBom = (text: string): string => text.replace(/^\uFEFF/, '');
+
 export function exportJson(doc: TreeDocument): string {
   return `${JSON.stringify(toEnvelope(doc), null, 2)}\n`;
 }
@@ -56,7 +59,7 @@ export function exportJson(doc: TreeDocument): string {
 export function importJson(text: string): TreeDocument {
   let data: unknown;
   try {
-    data = JSON.parse(text);
+    data = JSON.parse(stripBom(text));
   } catch (err) {
     throw new FormatError(`Invalid JSON: ${(err as Error).message}`, 'json');
   }
@@ -70,7 +73,7 @@ export function exportYaml(doc: TreeDocument): string {
 export function importYaml(text: string): TreeDocument {
   let data: unknown;
   try {
-    data = parseYaml(text);
+    data = parseYaml(stripBom(text));
   } catch (err) {
     throw new FormatError(`Invalid YAML: ${(err as Error).message}`, 'yaml');
   }
@@ -85,7 +88,7 @@ export function validateText(text: string, format?: 'json' | 'yaml'): Validation
   const fmt = format ?? (/^\s*[{[]/.test(text.replace(/^\uFEFF/, '')) ? 'json' : 'yaml');
   let data: unknown;
   try {
-    data = fmt === 'json' ? JSON.parse(text) : parseYaml(text);
+    data = fmt === 'json' ? JSON.parse(stripBom(text)) : parseYaml(stripBom(text));
   } catch (err) {
     const message = `Invalid ${fmt.toUpperCase()}: ${(err as Error).message}`;
     return { valid: false, kind: null, errors: [{ severity: 'error', path: '$', message }], warnings: [], counts: { trees: 0, branches: 0, leaves: 0 } };
@@ -100,7 +103,7 @@ export function validateText(text: string, format?: 'json' | 'yaml'): Validation
 export function parseData(text: string, format?: 'json' | 'yaml'): unknown {
   const fmt = format ?? (/^\s*[{["]/.test(text.replace(/^﻿/, '')) ? 'json' : 'yaml');
   try {
-    return fmt === 'json' ? JSON.parse(text) : parseYaml(text);
+    return fmt === 'json' ? JSON.parse(stripBom(text)) : parseYaml(stripBom(text));
   } catch (err) {
     throw new FormatError(`Invalid ${fmt.toUpperCase()}: ${(err as Error).message}`, fmt);
   }

@@ -632,4 +632,14 @@ describe('versions counted from the newest', () => {
     expect(r.err).not.toContain('Unknown option');
     expect(r.code).toBe(0);
   });
+
+  it('keeps -1 as a name when it is the value of --name', async () => {
+    const made = await cli(['new', 'home.tree.json', '--template', 'landing']);
+    // `-n -1` is ambiguous to the argument parser (a usage error, never a garbled name); `--name=-1` works.
+    expect((await cli(['versions', 'home.tree.json', 'save', '-n', '-1'], made.files)).code).toBe(2);
+    const r = await cli(['versions', 'home.tree.json', 'save', '--name=-1', '--json'], made.files);
+    expect(r.code).toBe(0);
+    const log = Object.entries(r.files).find(([f]) => f.includes('versions'))![1];
+    expect(JSON.parse(log).versions[0].name).toBe('-1');
+  });
 });

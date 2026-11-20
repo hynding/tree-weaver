@@ -135,3 +135,49 @@ describe('pass 4 fixes', () => {
     expect(back.tree.name).toBe('Header /* draft */');
   });
 });
+
+describe('pass 5 fixes', () => {
+  it('checks URL attributes with placeholders filled, in component exports', () => {
+    const link = createBranch({ tag: 'a', attrs: { href: 'java{{x}}script:alert(1)' }, children: [text('a')] });
+    const link2 = createBranch({ tag: 'a', attrs: { href: '{{url}}' }, children: [text('b')] });
+    const ok = createBranch({ tag: 'a', attrs: { href: '/p/{{slug}}' }, children: [text('c')] });
+    const def = createComponent('L', createBranch({ tag: 'div', children: [link, link2, ok] }), { props: [{ name: 'url', type: 'text', default: 'javascript:alert(2)' }] });
+    for (const framework of ['react', 'vue', 'svelte'] as const) {
+      const out = exportComponentDef(def, { framework }).files[0].contents;
+      expect(out).not.toMatch(/java\$?\{?x\}?script/);
+      expect(out).not.toMatch(/href=\{?url\}?|:href="url"/);
+      expect(out).toContain('slug');
+    }
+  });
+
+  it('keeps token kinds, descriptions and rule ids through XML', () => {
+    const f = createForest('F', [createTree('T')]);
+    f.kits = [
+      { id: 'kt', name: 'Tokens', css: ':root { --brand: #f00; }', enabled: true, source: 'tokens', tokens: [{ name: '--brand', value: '#f00', kind: 'color', description: 'Brand colour' }] },
+      { id: 'kr', name: 'Rules', css: '.a { color: red; }', enabled: true, rules: [{ id: 'r_keep', selector: '.a', styles: { lg: { color: 'red' } } }] },
+    ];
+    const back = importDocument(exportForest(f, 'xml'), 'xml');
+    if (back.kind !== 'forest') throw new Error('expected a forest');
+    expect(back.forest.kits[0].tokens?.[0]).toMatchObject({ kind: 'color', description: 'Brand colour' });
+    expect(back.forest.kits[1].rules?.[0].id).toBe('r_keep');
+    expect(back.forest.kits[1].css).toContain('.a');
+  });
+
+  it('keeps native type names apart from DesignTokens', () => {
+    const f = createForest('F', [createTree('Design Tokens')]);
+    f.kits = [{ id: 'kt', name: 'Tokens', css: '', enabled: true, source: 'tokens', tokens: [{ name: '--brand', value: '#f00', kind: 'color' }] }];
+    for (const framework of ['swiftui', 'flutter'] as const) {
+      const paths = exportComponent(f.trees[0], { framework, kits: f.kits }).files.map((x) => x.path);
+      expect(new Set(paths).size).toBe(paths.length);
+    }
+  });
+
+  it('round-trips Markdown links with parentheses and reads JSON with a BOM', () => {
+    const tree = page([createBranch({ tag: 'p', children: [createBranch({ tag: 'a', attrs: { href: '/a(b' }, children: [text('L')] })] })]);
+    const back = importDocument(exportTree(tree, 'markdown'), 'markdown');
+    if (back.kind !== 'tree') throw new Error('expected a tree');
+    const a = (back.tree.root.children[0] as Branch).children[0] as Branch;
+    expect(decodeURI(a.attrs.href)).toBe('/a(b');
+    expect(importDocument(`﻿${exportTree(tree, 'json')}`, 'json').kind).toBe('tree');
+  });
+});

@@ -152,3 +152,18 @@ describe('pass 4 fixes', () => {
     expect(() => applyPatch(root, [{ op: 'update', target: svg.id, tag: 'div' }])).toThrow(/needs an SVG/);
   });
 });
+
+describe('pass 5 fixes', () => {
+  it('handles escapes and unclosed brackets in selectors and values', async () => {
+    const { sanitizeSelector, renderRulesCss } = await import('./index');
+    expect(sanitizeCssValue('calc(1px\\)')).toBe('');
+    expect(sanitizeCssValue('url(a\\)')).toBe('');
+    expect(sanitizeCssValue('red\\')).toBe('');
+    expect(sanitizeCssValue('"a\\"b"')).toBe('"a\\"b"');
+    expect(sanitizeSelector('.a:not(.x')).toBe('');
+    expect(sanitizeSelector('.a:not(.x)')).toBe('.a:not(.x)');
+    const css = renderRulesCss([{ id: 'r1', selector: '.a:not(.x', styles: { lg: { color: 'blue' } } }, { id: 'r2', selector: '.b', styles: { lg: { color: 'red' } } }]);
+    expect(css).not.toContain('.a');
+    expect(css).toContain('.b');
+  });
+});

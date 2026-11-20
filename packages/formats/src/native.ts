@@ -697,8 +697,8 @@ function swiftBody(v: NView, o: Out, d: number, fill: boolean): void {
 }
 
 /** Types the generated code uses, which the view's own name must not shadow. */
-const SWIFT_TAKEN = new Set(['View', 'Text', 'Image', 'Link', 'Button', 'Grid', 'GridRow', 'GridItem', 'Divider', 'TextField', 'Color', 'Group', 'Spacer', 'ScrollView', 'VStack', 'HStack', 'LazyVGrid', 'AnyLayout', 'VStackLayout', 'HStackLayout', 'AsyncImage', 'RoundedRectangle', 'EdgeInsets', 'URL', 'Bool', 'String', 'Font', 'Array']);
-const DART_TAKEN = new Set(['Widget', 'StatelessWidget', 'BuildContext', 'Text', 'Image', 'Table', 'TableRow', 'TableBorder', 'Container', 'Wrap', 'Flex', 'Flexible', 'Expanded', 'Row', 'Column', 'Center', 'Opacity', 'Padding', 'Visibility', 'SizedBox', 'Divider', 'TextField', 'TextButton', 'FilledButton', 'Theme', 'Color', 'Colors', 'BoxDecoration', 'BoxConstraints', 'BorderRadius', 'Border', 'EdgeInsets', 'MediaQuery', 'SingleChildScrollView', 'LayoutBuilder', 'InputDecoration', 'OutlineInputBorder', 'Axis', 'List', 'Map', 'String', 'Object']);
+const SWIFT_TAKEN = new Set(['DesignTokens', 'View', 'Text', 'Image', 'Link', 'Button', 'Grid', 'GridRow', 'GridItem', 'Divider', 'TextField', 'Color', 'Group', 'Spacer', 'ScrollView', 'VStack', 'HStack', 'LazyVGrid', 'AnyLayout', 'VStackLayout', 'HStackLayout', 'AsyncImage', 'RoundedRectangle', 'EdgeInsets', 'URL', 'Bool', 'String', 'Font', 'Array']);
+const DART_TAKEN = new Set(['DesignTokens', 'Widget', 'StatelessWidget', 'BuildContext', 'Text', 'Image', 'Table', 'TableRow', 'TableBorder', 'Container', 'Wrap', 'Flex', 'Flexible', 'Expanded', 'Row', 'Column', 'Center', 'Opacity', 'Padding', 'Visibility', 'SizedBox', 'Divider', 'TextField', 'TextButton', 'FilledButton', 'Theme', 'Color', 'Colors', 'BoxDecoration', 'BoxConstraints', 'BorderRadius', 'Border', 'EdgeInsets', 'MediaQuery', 'SingleChildScrollView', 'LayoutBuilder', 'InputDecoration', 'OutlineInputBorder', 'Axis', 'List', 'Map', 'String', 'Object']);
 
 /** The type name to write: the given name, with a suffix when it would shadow a framework type. */
 export function nativeTypeName(name: string, framework: NativeFramework): string {

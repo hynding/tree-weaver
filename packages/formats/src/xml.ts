@@ -80,7 +80,11 @@ function kitsXml(kits: DesignKit[], pad: string): string[] {
   if (!kits.length) return [];
   return [
     `${pad}<kits>`,
-    ...kits.map((k) => `${pad}  <kit${attrs({ id: k.id, name: k.name, enabled: String(k.enabled), source: k.source, href: k.href, editable: k.rules ? 'true' : undefined })}>${escText(k.css)}</kit>`),
+    // Rules and tokens go as JSON, so ids, kinds and descriptions survive (CSS alone would rebuild them without).
+    ...kits.map(
+      (k) =>
+        `${pad}  <kit${attrs({ id: k.id, name: k.name, enabled: String(k.enabled), source: k.source, href: k.href, editable: k.rules ? 'true' : undefined })}>${k.rules ? `<rules>${escText(JSON.stringify(k.rules))}</rules>` : ''}${k.tokens ? `<tokens>${escText(JSON.stringify(k.tokens))}</tokens>` : ''}${escText(k.css)}</kit>`,
+    ),
     `${pad}</kits>`,
   ];
 }
@@ -154,7 +158,13 @@ function readTree(el: Element): Record<string, unknown> {
 
 function readKits(el: Element | undefined): Record<string, unknown>[] {
   if (!el) return [];
-  return elements(el, 'kit').map((k) => ({ ...k.attribs, css: textOf(k) }));
+  return elements(el, 'kit').map((k) => {
+    const rules = elements(k, 'rules')[0];
+    const tokens = elements(k, 'tokens')[0];
+    // The CSS is the kit's own text, not its <rules>/<tokens> children.
+    const css = k.children.map((c) => (c.type === 'text' || c.type === 'cdata' ? ('data' in c ? (c.data as string) : textOf(c as unknown as Element)) : '')).join('');
+    return { ...k.attribs, css, ...(rules ? { rules: json(textOf(rules), 'rules') } : {}), ...(tokens ? { tokens: json(textOf(tokens), 'tokens') } : {}) };
+  });
 }
 
 export function importXml(text: string): TreeDocument {

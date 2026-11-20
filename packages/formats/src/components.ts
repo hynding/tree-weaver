@@ -262,6 +262,8 @@ type El =
   | { kind: 'text'; value: string };
 
 interface Build {
+  /** Prop defaults (component exports), to check URLs as they will be filled. */
+  defaults?: Record<string, string>;
   styling: ComponentStyling;
   classOf: (b: Branch) => string;
   rules: DisplayRule[];
@@ -281,18 +283,30 @@ interface Build {
  */
 const PLAIN_ATTR = /^(?:(?:xlink|xml|xmlns):)?[a-zA-Z_][\w.-]*$/;
 // `is` too: Vue renders `<component is="script">` and `is="vue:script"` as the element it names.
-const isExportAttr = (name: string, value: string) => PLAIN_ATTR.test(name) && !/^v-/i.test(name) && name.toLowerCase() !== 'is' && isSafeAttr(name, value);
+const isExportAttr = (name: string, value: string, defaults?: Record<string, string>) =>
+  PLAIN_ATTR.test(name) && !/^v-/i.test(name) && name.toLowerCase() !== 'is' && isSafeFilled(name, value, defaults);
+/**
+ * `isSafeAttr` for a value as it will be at run time: with its `{{prop}}` placeholders empty and
+ * filled with the props' defaults too (`java{{x}}script:` or a `javascript:` default would
+ * otherwise only become a URL in the exported component).
+ */
+function isSafeFilled(name: string, value: string, defaults?: Record<string, string>): boolean {
+  if (!isSafeAttr(name, value)) return false;
+  if (!/\{\{/.test(value)) return true;
+  const fill = (values: Record<string, string>) => value.replace(/\{\{\s*([A-Za-z][A-Za-z0-9_]*)\s*\}\}/g, (_m, p: string) => (Object.hasOwn(values, p) ? values[p] : ''));
+  return isSafeAttr(name, fill({})) && (!defaults || isSafeAttr(name, fill(defaults)));
+}
 /** Vue's built-in components aren't HTML; exported as they are, `<component>` could render any element. */
 const FRAMEWORK_TAGS = new Set(['component', 'teleport', 'keep-alive', 'keepalive', 'suspense', 'transition', 'transition-group', 'transitiongroup']);
 
-function leafEl(leaf: Leaf, inSvg: boolean): El {
-  const attrs = Object.entries(leaf.attrs ?? {}).filter(([n, v]) => isExportAttr(n, v));
+function leafEl(leaf: Leaf, inSvg: boolean, defaults?: Record<string, string>): El {
+  const attrs = Object.entries(leaf.attrs ?? {}).filter(([n, v]) => isExportAttr(n, v, defaults));
   if (leaf.type === 'shape') {
     const tag = canonicalTag(leaf.value);
     return { kind: 'el', tag: SVG_SHAPES.has(tag) ? tag : 'g', attrs, children: [], svg: true };
   }
   if (leaf.type === 'image') {
-    const src = isSafeAttr('src', leaf.value) ? leaf.value : '';
+    const src = isSafeFilled('src', leaf.value, defaults) ? leaf.value : '';
     if (inSvg) return { kind: 'el', tag: 'image', attrs: [['href', src], ...attrs.filter(([n]) => n !== 'href' && n !== 'alt')], children: [], svg: true };
     const rest = attrs.filter(([n]) => n !== 'src' && n !== 'alt');
     return { kind: 'el', tag: 'img', attrs: [['src', src], ['alt', leaf.attrs?.alt ?? ''], ...rest], children: [], svg: false };
@@ -325,11 +339,11 @@ function branchEl(branch: Branch, b: Build, inSvg: boolean, asTag?: string): El 
       if (isPropName(prop)) cond = { prop, negate: value.trim().startsWith('!') };
       continue;
     }
-    if (name === 'class' || name === 'style' || !isExportAttr(name, value)) continue;
+    if (name === 'class' || name === 'style' || !isExportAttr(name, value, b.defaults)) continue;
     attrs.push([name, value]);
   }
   if (tag === 'svg' && !inSvg && !branch.attrs.xmlns) attrs.push(['xmlns', 'http://www.w3.org/2000/svg']);
-  const children = branch.children.map((c: TreeNode) => (isBranch(c) ? branchEl(c, b, childSvg) : leafEl(c, childSvg)));
+  const children = branch.children.map((c: TreeNode) => (isBranch(c) ? branchEl(c, b, childSvg) : leafEl(c, childSvg, b.defaults)));
   return cond ? { kind: 'el', tag, attrs, children, svg, cond } : { kind: 'el', tag, attrs, children, svg };
 }
 
@@ -751,6 +765,7 @@ export function exportComponentDef(def: ComponentDef, opts: ComponentOptions): C
     rules: [],
     tokenKinds: new Map(tokens.map((t) => [t.name, t.kind])),
     props: true,
+    defaults: Object.fromEntries(props.map((p) => [p.name, p.default ?? ''])),
     forceClass: new Set([def.root.id, ...variants.flatMap((v) => Object.keys(v.styles))]),
     classes: new Map(),
   };

@@ -64,7 +64,8 @@ export function escapeMarkdown(text: string, atLineStart = false): string {
   return out;
 }
 
-const escapeUrl = (url: string): string => url.replace(/[ ()<>]/g, (c) => encodeURIComponent(c));
+// encodeURIComponent leaves ( and ) as they are, so every character here is percent-encoded by hand.
+const escapeUrl = (url: string): string => url.replace(/[ ()<>]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`);
 
 function inline(node: TreeNode, first: boolean): string {
   if (!isBranch(node)) {
