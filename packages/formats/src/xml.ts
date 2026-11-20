@@ -31,8 +31,9 @@ import { DOCUMENT_VERSION, FormatError, type TreeDocument } from './types';
 export const XML_NAMESPACE = 'https://github.com/hynding/tree-weaver/schema/1';
 
 const esc = (v: string): string =>
-  v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/\r?\n/g, '&#10;');
-const escText = (v: string): string => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/\n/g, '&#10;').replace(/\r/g, '&#13;').replace(/\t/g, '&#9;');
+// XML parsers turn a raw \r (or \r\n) into \n, so carriage returns are written as references.
+const escText = (v: string): string => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\r/g, '&#13;');
 
 function attrs(pairs: Record<string, string | undefined | boolean>): string {
   return Object.entries(pairs)

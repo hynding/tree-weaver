@@ -134,7 +134,9 @@ function readMarkup(root: Element): string {
       );
     }
     // Form state set by scripts isn't in the attributes; keep what the story shows.
-    if (original instanceof HTMLInputElement && original.value && !el.hasAttribute('value') && original.type !== 'password') el.setAttribute('value', original.value);
+    // `original` lives in the story iframe's realm, so `instanceof HTMLInputElement` would always be false.
+    const input = original as unknown as HTMLInputElement;
+    if (original.tagName === 'INPUT' && input.value && !el.hasAttribute('value') && input.type !== 'password') el.setAttribute('value', input.value);
   });
   return copy.innerHTML;
 }

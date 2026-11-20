@@ -280,7 +280,10 @@ interface Build {
  * attribute values as code, so only plain names and the XML namespaces are kept.
  */
 const PLAIN_ATTR = /^(?:(?:xlink|xml|xmlns):)?[a-zA-Z_][\w.-]*$/;
-const isExportAttr = (name: string, value: string) => PLAIN_ATTR.test(name) && !/^v-/i.test(name) && isSafeAttr(name, value);
+// `is` too: Vue renders `<component is="script">` and `is="vue:script"` as the element it names.
+const isExportAttr = (name: string, value: string) => PLAIN_ATTR.test(name) && !/^v-/i.test(name) && name.toLowerCase() !== 'is' && isSafeAttr(name, value);
+/** Vue's built-in components aren't HTML; exported as they are, `<component>` could render any element. */
+const FRAMEWORK_TAGS = new Set(['component', 'teleport', 'keep-alive', 'keepalive', 'suspense', 'transition', 'transition-group', 'transitiongroup']);
 
 function leafEl(leaf: Leaf, inSvg: boolean): El {
   const attrs = Object.entries(leaf.attrs ?? {}).filter(([n, v]) => isExportAttr(n, v));
@@ -298,7 +301,8 @@ function leafEl(leaf: Leaf, inSvg: boolean): El {
 }
 
 function branchEl(branch: Branch, b: Build, inSvg: boolean, asTag?: string): El {
-  const tag = asTag ?? safeTag(branch.tag);
+  const safe = safeTag(branch.tag);
+  const tag = asTag ?? (FRAMEWORK_TAGS.has(safe.toLowerCase()) ? 'div' : safe);
   const svg = inSvg || tag === 'svg';
   const childSvg = childrenInSvg(branch, inSvg);
   const classes = branch.classes.filter(Boolean);
@@ -692,7 +696,7 @@ function variantRules(def: ComponentDef, variants: ComponentVariant[], slugs: Ma
 
 /** Words a prop can't be named in a JS, Vue or Svelte component (a variable of that name is a syntax error). */
 const RESERVED_WORDS = new Set(
-  'arguments await break case catch class const continue debugger default delete do else enum eval export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield'.split(' '),
+  'variantClasses VARIANT_DISPLAYS arguments await break case catch class const continue debugger default delete do else enum eval export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield'.split(' '),
 );
 
 /** A prop's default as a JS literal. */
@@ -725,7 +729,7 @@ export function exportComponentDef(def: ComponentDef, opts: ComponentOptions): C
   }
   const props = componentProps(def);
   const reserved = props.filter((p) => RESERVED_WORDS.has(p.name));
-  if (reserved.length) throw new Error(`Rename the prop${reserved.length > 1 ? 's' : ''} ${reserved.map((p) => `"${p.name}"`).join(', ')} before exporting "${def.name}": ${reserved.length > 1 ? 'they are' : 'it is a'} reserved word${reserved.length > 1 ? 's' : ''} in JavaScript`);
+  if (reserved.length) throw new Error(`Rename the prop${reserved.length > 1 ? 's' : ''} ${reserved.map((p) => `"${p.name}"`).join(', ')} before exporting "${def.name}": ${reserved.length > 1 ? 'those names are' : 'that name is'} reserved in JavaScript or by the generated code`);
   const variants = styling === 'css' ? def.variants : [];
   const tokens = themeTokens((opts.kits ?? []).filter((k) => k.enabled));
   const prefix = `${cssIdent(slugify(def.name, 'component'))}__`;

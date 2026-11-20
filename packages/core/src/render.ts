@@ -58,7 +58,8 @@ export function untilStable(value: string, fn: (v: string) => string): string {
 
 /** Strip characters that could break out of a declaration or the style element. */
 export function sanitizeCssValue(value: string): string {
-  return untilStable(value.replace(/[{}]/g, '').replace(/;/g, ','), (v) => v.replace(/<\/?(style|script)/gi, '')).trim();
+  // Comment markers too: an unclosed `/*` would swallow every rule after it.
+  return untilStable(value.replace(/[{}]/g, '').replace(/;/g, ','), (v) => v.replace(/<\/?(style|script)/gi, '').replace(/\/\*|\*\//g, '')).trim();
 }
 
 export const isSafeCssProp = (prop: string): boolean => SAFE_PROP.test(prop);

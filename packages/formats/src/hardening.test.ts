@@ -45,7 +45,7 @@ describe('component exports', () => {
 
   it('refuses props named after reserved words', () => {
     const def = createComponent('Bad', createBranch({ tag: 'div', children: [text('{{class}}')] }));
-    expect(() => exportComponentDef(def, { framework: 'svelte' })).toThrow(/reserved word/);
+    expect(() => exportComponentDef(def, { framework: 'svelte' })).toThrow(/reserved in JavaScript/);
   });
 });
 
@@ -76,5 +76,33 @@ describe('comments and markdown', () => {
     expect((kids[2].children[0] as { value: string }).value).toBe('C #');
     expect(kids[3].children).toHaveLength(1);
     expect((kids[3].children[0] as { value: string }).value).toBe('see https://example.com or www.example.com');
+  });
+});
+
+describe('pass 3 fixes', () => {
+  it('keeps Vue from rendering elements named by `is` or <component>', () => {
+    const tree = importDocument('<body><component is="script" src="https://evil.example/x.js"></component><div is="vue:script">window.x=1</div></body>', 'html');
+    if (tree.kind !== 'tree') throw new Error('expected a tree');
+    const vue = exportComponent(tree.tree, { framework: 'vue' }).files[0].contents;
+    expect(vue).not.toMatch(/<component|\bis=/);
+  });
+
+  it('keeps carriage returns and tabs through XML', () => {
+    const tree = page([createBranch({ tag: 'p', name: 'a\r\nb\tc', attrs: { title: 'x\ry' }, children: [text('l1\r\nl2')] })]);
+    const back = importDocument(exportTree(tree, 'xml'), 'xml');
+    if (back.kind !== 'tree') throw new Error('expected a tree');
+    const p = back.tree.root.children[0] as Branch;
+    expect(p.name).toBe('a\r\nb\tc');
+    expect(p.attrs.title).toBe('x\ry');
+    expect((p.children[0] as { value: string }).value).toBe('l1\r\nl2');
+  });
+
+  it('keeps email addresses as text through Markdown', () => {
+    const md = exportTree(page([createBranch({ tag: 'p', children: [text('mail me at foo@bar.com today')] })]), 'markdown');
+    const back = importDocument(md, 'markdown');
+    if (back.kind !== 'tree') throw new Error('expected a tree');
+    const p = back.tree.root.children[0] as Branch;
+    expect(p.children).toHaveLength(1);
+    expect((p.children[0] as { value: string }).value).toBe('mail me at foo@bar.com today');
   });
 });

@@ -9,6 +9,7 @@ import {
   ancestorsOf,
   canHaveChildren,
   cloneTree,
+  walk,
   createBranch,
   createCustomKit,
   createForest,
@@ -1022,7 +1023,16 @@ export async function importText(text: string, format?: FormatId, fileName?: str
   const forest = state.forest;
   if (!forest) throw new Error('No forest is open');
   let tree = doc.tree;
-  if (forest.trees.some((t) => t.id === tree.id)) tree = { ...tree, id: createId('t') };
+  // Node ids are unique across a forest (collab and history match nodes by id): importing a
+  // tree the forest already holds, or one with clashing ids, gives it fresh ids.
+  const taken = new Set<string>();
+  for (const t of forest.trees) walk(t.root, (n) => void taken.add(n.id));
+  let clash = false;
+  walk(tree.root, (n) => {
+    if (taken.has(n.id)) clash = true;
+  });
+  if (clash) tree = cloneTree(tree, true);
+  else if (forest.trees.some((t) => t.id === tree.id)) tree = { ...tree, id: createId('t') };
   tree = { ...tree, name: uniqueName(tree.name, forest.trees.map((t) => t.name)) };
   // Skip kits the forest already has, and the deployment's own stylesheets.
   const added = newKits(doc.kits);

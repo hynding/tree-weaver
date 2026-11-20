@@ -60,7 +60,7 @@ export function escapeMarkdown(text: string, atLineStart = false): string {
   // A closing `#` run would be read as the end of a heading.
   out = out.replace(/(^|\s)(#+)(\s*)$/, '$1\\$2$3');
   // Bare URLs would become links (GFM autolinks).
-  out = out.replace(/\b(https?|ftp|mailto):/gi, '$1\\:').replace(/\bwww\./gi, 'www\\.');
+  out = out.replace(/\b(https?|ftp|mailto):/gi, '$1\\:').replace(/\bwww\./gi, 'www\\.').replace(/([\w.+-])@(?=[\w-]+\.)/g, '$1\\@');
   return out;
 }
 

@@ -444,7 +444,7 @@ function capturePropDefaults(before: ComponentDef, after: ComponentDef): Compone
     if (old === undefined || placeholdersIn(old).length) return;
     const names = placeholdersIn(value);
     // Only a whole-value placeholder can take the old value as its default.
-    if (names.length !== 1 || value.trim() !== `{{${names[0]}}}` || known.has(names[0]) || props.some((p) => p.name === names[0])) return;
+    if (names.length !== 1 || !new RegExp(`^\\{\\{\\s*${names[0]}\\s*\\}\\}$`).test(value.trim()) || known.has(names[0]) || props.some((p) => p.name === names[0])) return;
     const inferred = templateProps(after.root).find((p) => p.name === names[0]);
     props.push({ name: names[0], type: inferred?.type ?? 'text', default: old });
   };

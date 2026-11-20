@@ -110,3 +110,25 @@ describe('forest-wide ids', () => {
     expect(sanitizeTokenValue('</sty</stylele>')).not.toMatch(/<\/style/i);
   });
 });
+
+describe('pass 3 fixes', () => {
+  it('refuses a tag change that strands SVG children', async () => {
+    const { createShape } = await import('./index');
+    const svg = createBranch({ tag: 'svg', children: [createShape('rect')] });
+    const root = createBranch({ tag: 'body', children: [svg] });
+    expect(() => applyPatch(root, [{ op: 'update', target: svg.id, tag: 'div' }])).toThrow(/needs an SVG/);
+  });
+
+  it('drops comment markers from CSS values', () => {
+    expect(sanitizeCssValue('url(a.png) /*')).toBe('url(a.png)');
+  });
+
+  it('keeps the old text as the default for a spaced placeholder', async () => {
+    const { createComponent, instantiateComponent, updateTreeRoot, componentTreeId, updateNode } = await import('./index');
+    const def = createComponent('Note', createBranch({ tag: 'div', children: [createBranch({ tag: 'p', children: [text('Hello')] })] }));
+    const leafId = (def.root.children[0] as { children: { id: string }[] }).children[0].id;
+    let forest = { ...createForest('F', [createTree('Home', createBranch({ tag: 'body', children: [instantiateComponent(def)] }))]), components: [def] };
+    forest = updateTreeRoot(forest, componentTreeId(def.id), (root) => updateNode(root, leafId, (n) => ({ ...n, value: '{{ message }}' }) as never));
+    expect(forest.components![0].props).toEqual([{ name: 'message', type: 'text', default: 'Hello' }]);
+  });
+});

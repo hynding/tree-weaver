@@ -352,7 +352,15 @@ export function applyPatch(root: Branch, ops: unknown, options: PatchOptions = {
           if (isBranch(next) && isBranch(node) && node.children.length && VOID_TAGS.has(next.tag.toLowerCase()))
             throw new Error(`<${next.tag}> can't hold children, and this branch has ${node.children.length}`);
           check(isBranch(next) ? { ...next, children: [] } : next, `ops[${i}]`, findParent(current, node.id)?.parent.id ?? null);
-          current = updateNode(current, node.id, () => next);
+          const updated = updateNode(current, node.id, () => next);
+          // A new tag must still suit the children it holds (SVG shapes need an SVG around them, HTML can't go in one).
+          if (isBranch(next) && isBranch(node) && next.tag !== node.tag) {
+            for (const child of node.children) {
+              const problem = placementProblem(updated, node.id, child);
+              if (problem) throw new Error(`Can't change the tag to <${next.tag}>: ${problem}`);
+            }
+          }
+          current = updated;
           changed.push({ op: i, kind, id: node.id });
           break;
         }

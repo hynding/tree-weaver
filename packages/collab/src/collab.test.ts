@@ -221,3 +221,19 @@ describe('components over collab', () => {
     expect(readForest(doc)!.kits[0].href).toBeUndefined();
   });
 });
+
+describe('concurrent component saves', () => {
+  it('keeps both components', () => {
+    const { a, c, sync } = offline();
+    const f = sample();
+    writeForest(a, null, f);
+    sync();
+    const base = readForest(c)!;
+    const def = (id: string) => ({ id, name: id, root: b(`${id}r`, { tag: 'div' }), props: [], variants: [] });
+    writeForest(a, base, { ...base, components: [def('A')] });
+    writeForest(c, base, { ...base, components: [def('B')] });
+    sync();
+    expect(readForest(a)!.components!.map((x) => x.id).sort()).toEqual(['A', 'B']);
+    expect(strip(readForest(a))).toEqual(strip(readForest(c)));
+  });
+});

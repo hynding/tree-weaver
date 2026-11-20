@@ -20,6 +20,8 @@ import { isBranch, isStylesheetUrl, normalizeComponent, type Branch, type Compon
  *   `classes`, `attrs` (branches) or `leaf`, `value`, `attrs` (leaves), and one `s:<display>`
  *   entry per display that has styles. Lists and maps are stored as JSON text.
  * - `kits`: kit id → map of `order` and `data` (the kit as JSON text)
+ * - `components`: component id → map of `order` and `data` (the definition as JSON text), so
+ *   two people saving different components at once both keep theirs
  */
 
 /** Transaction origin for changes made by this editor, so an undo manager can track only them. */
@@ -32,12 +34,13 @@ const maps = (doc: Y.Doc) => ({
   trees: doc.getMap<YNode>('trees'),
   nodes: doc.getMap<YNode>('nodes'),
   kits: doc.getMap<YNode>('kits'),
+  components: doc.getMap<YNode>('components'),
 });
 
 /** The shared types an undo manager should watch. */
 export function sharedTypes(doc: Y.Doc): Y.AbstractType<unknown>[] {
   const m = maps(doc);
-  return [m.forest, m.trees, m.nodes, m.kits] as Y.AbstractType<unknown>[];
+  return [m.forest, m.trees, m.nodes, m.kits, m.components] as Y.AbstractType<unknown>[];
 }
 
 /* ------------------------------------------------------------------ order keys */
@@ -184,7 +187,6 @@ export function writeForest(doc: Y.Doc, prev: Forest | null, next: Forest, origi
     setIfChanged(m.forest as YNode, 'name', next.name);
     setIfChanged(m.forest as YNode, 'createdAt', next.createdAt);
     setIfChanged(m.forest as YNode, 'version', next.version);
-    setIfChanged(m.forest as YNode, 'components', next.components?.length ? json(next.components) : undefined);
 
     // Trees.
     const treeKeys = orderKeys(
@@ -222,6 +224,24 @@ export function writeForest(doc: Y.Doc, prev: Forest | null, next: Forest, origi
     }
     const kitIds = new Set(next.kits.map((k) => k.id));
     for (const k of prev?.kits ?? []) if (!kitIds.has(k.id)) m.kits.delete(k.id);
+
+    // Components, one entry each.
+    const components = next.components ?? [];
+    const componentKeys = orderKeys(
+      components.map((c) => c.id),
+      (id) => m.components.get(id)?.get('order') as string | undefined,
+    );
+    for (const def of components) {
+      let c = m.components.get(def.id);
+      if (!c) {
+        c = new Y.Map<unknown>();
+        m.components.set(def.id, c);
+      }
+      setIfChanged(c, 'order', componentKeys.get(def.id));
+      setIfChanged(c, 'data', json(def));
+    }
+    const componentIds = new Set(components.map((c) => c.id));
+    for (const c of prev?.components ?? []) if (!componentIds.has(c.id)) m.components.delete(c.id);
 
     // Order keys for children lists that changed. A child keeps its key only if it was
     // already under the same parent.
@@ -400,11 +420,11 @@ export function readForest(doc: Y.Doc): Forest | null {
       if (kit.href !== undefined && (typeof kit.href !== 'string' || !isStylesheetUrl(kit.href))) delete kit.href;
       return kit;
     });
-  const rawComponents = parse<unknown>(m.forest.get('components'), undefined);
   const components: ComponentDef[] = [];
-  for (const [i, c] of (Array.isArray(rawComponents) ? rawComponents : []).entries()) {
+  const componentEntries = [...m.components.entries()].map(([id, c]) => ({ id, order: (c.get('order') as string) ?? '', data: parse<unknown>(c.get('data'), null) })).sort(byOrder);
+  for (const c of componentEntries) {
     try {
-      components.push(normalizeComponent(c, `components[${i}]`));
+      components.push({ ...normalizeComponent(c.data, `components.${c.id}`), id: c.id });
     } catch {
       // A malformed definition is skipped; its instances keep their last expansion.
     }
