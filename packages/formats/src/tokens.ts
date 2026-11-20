@@ -77,7 +77,11 @@ export function tailwindTokenClass(prop: string, value: string, kinds: ReadonlyM
 
 /** Tailwind v4: `@theme inline { --color-brand: var(--brand); }`. Empty when no token fits. */
 export function tailwindThemeCss(tokens: ThemeToken[]): string {
-  const lines = tailwindTokens(tokens).map((t) => `  --${TAILWIND_NAMESPACE[t.kind]!.v4}-${tailwindTokenKey(t.name)}: var(${t.name});`);
+  const lines = tailwindTokens(tokens).flatMap((t) => {
+    const name = `--${TAILWIND_NAMESPACE[t.kind]!.v4}-${tailwindTokenKey(t.name)}`;
+    // Tailwind's default sizes (`text-lg`) carry a line height too; a token's size doesn't.
+    return name.startsWith('--text-') ? [`  ${name}: var(${t.name});`, `  ${name}--line-height: initial;`] : [`  ${name}: var(${t.name});`];
+  });
   if (!lines.length) return '';
   return `/* Design tokens from Tree Weaver as Tailwind v4 theme values. Import after tailwindcss:\n   @import "tailwindcss"; @import "./tailwind.theme.css";\n   The values come from kits.css, so edit them there (or in the editor's Tokens tab). */\n@theme inline {\n${lines.join('\n')}\n}\n`;
 }

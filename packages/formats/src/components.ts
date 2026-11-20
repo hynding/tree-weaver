@@ -721,6 +721,9 @@ function writeHtml(el: El, depth: number, mode: 'html' | 'vue' | 'svelte', props
   return `<${el.tag}${attrs}>\n${childLines(el.children, pad, (c) => writeHtml(c, depth + 1, mode))}\n${'  '.repeat(depth)}</${el.tag}>`;
 }
 
+/** Boolean attributes React passes through only as strings, with the string that turns each on. */
+const REACT_STRING_BOOLEANS: Record<string, string> = { ismap: '', inert: 'true' };
+
 const JSX_ATTRS: Record<string, string> = {
   class: 'className',
   for: 'htmlFor',
@@ -931,11 +934,13 @@ function writeJsx(el: El, depth: number, props: false | ReadonlySet<string> = fa
       const numeric = !el.svg && NUMERIC_ATTRS.has(n.toLowerCase());
       // `hidden="until-found"` too: React takes `hidden` as a boolean only and renders a string as `hidden=""`.
       const boolAttr = !el.svg && BOOLEAN_ATTRS.has(n.toLowerCase());
-      // React has no prop for `ismap` and refuses `true` for it, so it is written as a string ('' is on).
-      if (boolAttr && n.toLowerCase() === 'ismap') {
-        if (!(props && hasProps(v))) return ` ${name}=""`;
+      // React has no prop for `ismap`, nor React 18 for `inert`, and drops `true` for them, so they
+      // are written as strings: '' for ismap; "true" for inert, which React 19 would read '' as off.
+      const asString = boolAttr ? REACT_STRING_BOOLEANS[n.toLowerCase()] : undefined;
+      if (asString !== undefined) {
+        if (!(props && hasProps(v))) return ` ${name}="${asString}"`;
         const expr = propExpr(v);
-        return ` ${name}={${props.has(expr) ? expr : `globalThis.String(${expr}) !== 'false'`} ? '' : undefined}`;
+        return ` ${name}={${props.has(expr) ? expr : `globalThis.String(${expr}) !== 'false'`} ? '${asString}' : undefined}`;
       }
       if (props && hasProps(v)) {
         const expr = propExpr(v);
@@ -1207,7 +1212,10 @@ function variantRules(def: ComponentDef, variants: ComponentVariant[], slugs: Ma
           const from = full(parent, inherited);
           const to = full(d.id, shown);
           const own: StyleMap = {};
-          for (const [k, v] of Object.entries(to)) if (from[k] !== v) own[k] = v;
+          // Also where the template's own rule for this display sets it otherwise: that rule applies too,
+          // so a variant putting back the wider display's value has to say so.
+          const template = base.get(id)?.[d.id] ?? {};
+          for (const [k, v] of Object.entries(to)) if (from[k] !== v || (template[k] !== undefined && template[k] !== v)) own[k] = v;
           for (const k of Object.keys(from)) if (!(k in to)) own[k] = 'unset';
           if (Object.keys(own).length) rules.push({ selector: target(`.${mod(parent, inherited)}.${mod(d.id, shown)}`), styles: { [d.id]: beatImportant(own, full(d.id, undefined)) } });
         }

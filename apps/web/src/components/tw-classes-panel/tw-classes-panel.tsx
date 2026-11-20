@@ -97,7 +97,7 @@ export class TwClassesPanel {
       input.value = rule.selector;
       return;
     }
-    renameRule(kit.id, rule.id, selector);
+    if (!renameRule(kit.id, rule.id, selector)) input.value = rule.selector;
   }
 
   private toggle(id: string) {

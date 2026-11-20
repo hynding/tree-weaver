@@ -15,6 +15,8 @@ import {
   type DisplayStyles,
   type Tree,
 } from '@tree-weaver/core';
+
+const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 import type { ChildNode, Element } from 'domhandler';
 import { parseDocument } from 'htmlparser2';
 import { fromData } from './data';
@@ -148,6 +150,18 @@ export function importSvg(text: string): TreeDocument {
   root.type ??= 'root';
   const rootAttrs = root.attrs as Record<string, string> | undefined;
   if (addedXmlns && rootAttrs?.xmlns === SVG_NAMESPACE) delete rootAttrs.xmlns;
+  // A Tree Weaver export gives the HTML in a <foreignObject> the XHTML namespace; the tree didn't have it.
+  if (authored) {
+    const drop = (n: Record<string, unknown>) => {
+      for (const c of (n.children as Record<string, unknown>[] | undefined) ?? []) {
+        if (c.kind !== 'branch') continue;
+        const attrs = c.attrs as Record<string, string> | undefined;
+        if (String(n.tag).toLowerCase() === 'foreignobject' && attrs?.xmlns === XHTML_NAMESPACE) delete attrs.xmlns;
+        drop(c);
+      }
+    };
+    drop(root);
+  }
   if (!authored) root.name ??= 'Drawing';
   return fromData({ tree: { name: name || 'Imported drawing', root }, kits }, 'svg');
 }

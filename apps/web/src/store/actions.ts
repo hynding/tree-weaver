@@ -1099,9 +1099,19 @@ export function addRule(selector: string): string | null {
   return rule.id;
 }
 
-export function renameRule(kitId: string, ruleId: string, selector: string): void {
+/** Change a rule's selector; false (with a toast) when another rule already has it. */
+export function renameRule(kitId: string, ruleId: string, selector: string): boolean {
   const forest = state.forest;
-  if (forest) commit(editRules(forest, kitId, (rules) => rules.map((r) => (r.id === ruleId ? { ...r, selector: createRule(selector).selector || r.selector } : r))));
+  if (!forest) return false;
+  const next = createRule(selector).selector;
+  // Two rules for one selector: lookups by selector would only ever reach the first.
+  const other = next ? findRule({ selector: next }) : null;
+  if (other && other.rule.id !== ruleId) {
+    toast(`“${next}” already has a rule; edit that one instead`, 'error');
+    return false;
+  }
+  commit(editRules(forest, kitId, (rules) => rules.map((r) => (r.id === ruleId ? { ...r, selector: next || r.selector } : r))));
+  return true;
 }
 
 export function setRuleStyle(kitId: string, ruleId: string, prop: string, value: string | null, display: DisplayId = state.display): void {
@@ -1330,7 +1340,8 @@ export function exportCurrent(format: FormatId, scope: 'tree' | 'forest'): Expor
 /** A Storybook project (zipped) for the current tree or the whole forest. */
 export function exportStorybookCurrent(scope: 'tree' | 'forest'): ExportOutput {
   const forest = state.forest!;
-  const tree = currentTree()!;
+  // While a component is open, the page it was opened from (a component isn't one of the forest's trees).
+  const tree = pageTree() ?? currentTree()!;
   // The deployment's stylesheets load first in the Storybook preview too.
   const project = exportStorybook({ ...forest, kits: allKits() }, scope === 'tree' ? { treeIds: [tree.id] } : {});
   const stories = project.files.find((f) => f.path.endsWith('.stories.js'));

@@ -713,3 +713,19 @@ describe('pass 46 fixes', async () => {
     expect(core.nestingProblem([ruby, p], core.createBranch({ tag: 'rt' }))).toMatch(/end the <p>/);
   });
 });
+
+describe('pass 48 fixes', async () => {
+  const core = await import('./index');
+  it('reads { src, alt } as an image leaf', () => {
+    const leaf = core.normalizeNode({ src: 'https://x.test/a.jpg', alt: 'A dog' });
+    expect(leaf).toMatchObject({ type: 'image', value: 'https://x.test/a.jpg', attrs: { alt: 'A dog' } });
+  });
+  it('finds a version by a number-only name before its position', () => {
+    const v = (id: string, name: string) => ({ id, name, createdAt: '', document: '', format: 'json' }) as unknown as import('./versions').DocumentVersion;
+    const log = { version: 1 as const, versions: [v('a', 'draft'), v('b', '1'), v('c', '2024')] };
+    expect(core.findVersion(log, '1')?.id).toBe('b');
+    expect(core.findVersion(log, '2024')?.id).toBe('c');
+    expect(core.findVersion(log, '2')?.id).toBe('b');
+    expect(core.findVersion(log, '-1')?.id).toBe('c');
+  });
+});

@@ -1,6 +1,6 @@
 import { Component, Prop, State, h } from '@stencil/core';
 import { COMPONENT_FRAMEWORKS, isNativeFramework, detectFormat, FORMATS, hasDrawing, type ComponentFramework, type ComponentStyling, type FormatId } from '@tree-weaver/formats';
-import { currentTree, download, exportComponentCurrent, exportCurrent, exportStorybookCurrent, importText, toast, type ExportOutput } from '../../store/actions';
+import { currentTree, pageTree, download, exportComponentCurrent, exportCurrent, exportStorybookCurrent, importText, toast, type ExportOutput } from '../../store/actions';
 import { state } from '../../store/editor';
 import { STORYBOOK_IMPORT_ENABLED } from '../../config';
 import { Icon } from '../../utils/icons';
@@ -88,7 +88,7 @@ export class TwIoDialog {
           </span>
           <div class="segmented" role="group" aria-label="What to export">
             <button aria-pressed={String(this.scope === 'tree')} onClick={() => (this.scope = 'tree')}>
-              This tree ({tree?.name})
+              This tree ({(storybook ? (pageTree() ?? tree) : tree)?.name})
             </button>
             <button aria-pressed={String(this.scope === 'forest')} onClick={() => (this.scope = 'forest')}>
               Whole forest

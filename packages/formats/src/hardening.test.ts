@@ -1567,3 +1567,31 @@ describe('pass 47 fixes', () => {
     expect(exportComponent(tree, { framework: 'react' }).files[0].contents).toContain('autoCapitalize="off"');
   });
 });
+
+describe('pass 48 fixes', () => {
+  it('writes a variant rule that puts back a value the template changes on a narrower display', () => {
+    const root = { ...createBranch({ tag: 'div', styles: { lg: { display: 'flex' }, 'mobile-portrait': { display: 'block' } }, children: [text('x')] }), id: 'r' };
+    const def = { ...createComponent('Card', root), variants: [{ name: 'Row', styles: { r: { 'mobile-portrait': { display: 'flex' } } } }] };
+    const css = exportComponentDef(def, { framework: 'react' }).files.map((f) => f.contents).join('\n');
+    expect(css).toMatch(/--tablet-row\.[\w-]*--mobile-portrait-row[^{]*\{[^}]*display: flex/);
+  });
+
+  it('writes inert as a string in React', () => {
+    const tree = page([createBranch({ tag: 'div', attrs: { inert: '' }, children: [text('x')] })]);
+    expect(exportComponent(tree, { framework: 'react' }).files[0].contents).toContain('inert="true"');
+  });
+
+  it('drops the XHTML namespace its SVG export added inside a foreignObject', () => {
+    const svg = createBranch({ tag: 'svg', type: 'root', attrs: { viewBox: '0 0 10 10' }, children: [createBranch({ tag: 'foreignObject', children: [createBranch({ tag: 'p', children: [text('hi')] })] })] });
+    const tree = createTree('Draw', svg);
+    const back = importDocument(exportTree(tree, 'svg'), 'svg');
+    expect(JSON.stringify(back)).not.toContain('1999/xhtml');
+  });
+
+  it('keeps Tailwind v4 default line heights off font-size tokens', () => {
+    const kits = [withTokens(createKit('T', ''), [{ name: '--lg', value: '30px', kind: 'font-size' }])];
+    const tree = page([createBranch({ tag: 'p', styles: { lg: { 'font-size': 'var(--lg)' } }, children: [text('x')] })]);
+    const theme = exportComponent(tree, { framework: 'react', styling: 'tailwind', kits }).files.find((f) => f.path === 'tailwind.theme.css')?.contents ?? '';
+    expect(theme).toMatch(/--text-lg--line-height: initial;/);
+  });
+});

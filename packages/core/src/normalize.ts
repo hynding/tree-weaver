@@ -58,11 +58,14 @@ export function normalizeNode(value: unknown, path = 'node', seen = new Set<stri
   if (!isObj(value)) throw new TreeDataError('Expected a branch or leaf object', path);
   const kind = value.kind ?? (value.tag !== undefined || value.children !== undefined ? 'branch' : 'leaf');
   if (kind === 'leaf') {
-    const type = value.type === 'image' || value.type === 'shape' ? value.type : 'text';
+    // `{ "src": "…", "alt": "…" }` with no type is an image, as `src` says.
+    const srcOnly = value.type === undefined && value.src !== undefined && value.value === undefined && value.text === undefined;
+    const type = value.type === 'image' || value.type === 'shape' ? value.type : srcOnly ? 'image' : 'text';
     let content = str(value.value ?? value.text ?? value.src);
     if (type === 'shape') content = canonicalTag(content);
     const leaf: Leaf = { kind: 'leaf', id: str(value.id), type, value: content };
     const attrs = stringMap(value.attrs);
+    if (type === 'image' && typeof value.alt === 'string' && attrs.alt === undefined) attrs.alt = value.alt;
     if (Object.keys(attrs).length) leaf.attrs = attrs;
     return uniq(leaf, seen);
   }
