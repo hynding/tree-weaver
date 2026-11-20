@@ -69,7 +69,10 @@ export function exportSvg(tree: Tree, opts: SvgExportOptions = {}): string {
   // Designer markup keeps text leaves' ids on <tspan>s, which a standalone SVG draws the same.
   // The tree's name, and whether the namespace was added here, ride on the root so import can restore them.
   const marks = ` data-tw-tree-name="${xmlAttr(tree.name)}"${svg.attrs.xmlns === undefined ? ' data-tw-added-xmlns=""' : ''}`;
-  const markup = renderNodeHtml(svg, { pretty: true, xml: true, designer: true }).replace(/^<svg\b/, `$&${marks}`);
+  let markup = renderNodeHtml(svg, { pretty: true, xml: true, designer: true });
+  // `xlink:href` (common on <use>) needs its namespace declared, or the file isn't well-formed XML.
+  const xlink = svg.attrs['xmlns:xlink'] === undefined && /\sxlink:[\w-]+=/.test(markup) ? ' xmlns:xlink="http://www.w3.org/1999/xlink"' : '';
+  markup = markup.replace(/^<svg\b/, `$&${marks}${xlink}`);
   const body = styles.length ? markup.replace(/^(<svg\b[^>]*>)/, `$1\n  ${styles.join('\n  ')}`) : markup;
   const out = `<?xml version="1.0" encoding="UTF-8"?>\n<!-- ${tree.name.replace(/-(?=-)/g, '- ')} · made with Tree Weaver -->\n${body}\n`;
   // XML 1.0 can't hold these even as references.

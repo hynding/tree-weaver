@@ -155,7 +155,10 @@ const STORYBOOK_CHROME = /\.sb-show-main|\.sb-nopreview|#storybook-root|\.sb-err
 
 /** Whether a stylesheet is Storybook's own preview styling rather than the component library's. */
 export const isStorybookChrome = (sheet: StorySheet): boolean =>
-  STORYBOOK_CHROME.test(sheet.css) || /\/sb-(preview|addons|common-assets|manager)\//.test(sheet.href ?? '');
+  /\/sb-(preview|addons|common-assets|manager)\//.test(sheet.href ?? '') || (!!sheet.css.trim() && splitRules(sheet.css).every((r) => STORYBOOK_CHROME.test(r)));
+
+/** A rule styling Storybook's preview chrome (`#storybook-root`), left out of kits; the sheet's other rules stay. */
+const isChromeRule = (rule: string): boolean => STORYBOOK_CHROME.test(rule);
 
 /** Rewrite relative `url(...)` references in CSS against the stylesheet's own URL, so copied CSS still finds fonts and images. */
 export function absolutizeCssUrls(css: string, baseHref: string): string {
@@ -321,7 +324,7 @@ export function storyKits(snapshots: StorySnapshot[], opts: StoryKitOptions): De
     for (const sheet of snap.sheets) {
       if (isStorybookChrome(sheet)) continue;
       const all = splitRules(sheet.css ?? '');
-      const kept = all.filter((r) => !isTreeRule(r));
+      const kept = all.filter((r) => !isTreeRule(r) && !isChromeRule(r));
       // A sheet of branch styles only (a Tree Weaver export's stories CSS) is read into the branches.
       if (all.length && !kept.length) continue;
       if (sheet.href) {

@@ -2,6 +2,7 @@ import { createStore } from '@stencil/store';
 import type { ChangeSource, DesignKit, DisplayId, DisplaySettings, Forest, ForestSummary } from '@tree-weaver/core';
 import type { LibraryBranch } from '@tree-weaver/formats';
 
+export const SIDEBAR_TABS: readonly SidebarTab[] = ['branches', 'outline', 'classes', 'tokens', 'kits', 'forest', 'history'];
 export type SidebarTab = 'branches' | 'outline' | 'classes' | 'tokens' | 'kits' | 'forest' | 'history';
 export type SaveState = 'saved' | 'saving' | 'unsaved' | 'error';
 export type DialogKind = null | 'export' | 'import' | 'displays' | 'storybook' | 'share' | 'templates';

@@ -246,7 +246,7 @@ class Checker {
           this.error(
             `${path}.tag`,
             `<${tag}> is not allowed; it will render as <div>`,
-            tag === 'style' || tag === 'link' ? 'Put CSS in a design kit (forest.kits) instead' : /^(animate|set)/i.test(tag) ? 'SVG animation is not supported; animate with CSS in a design kit' : 'Scripts and embedded documents are not supported',
+            tag === 'style' || tag === 'link' ? 'Put CSS in a design kit (forest.kits) instead' : tag.toLowerCase() === 'plaintext' ? 'It never ends: everything after it shows as text. Use a <pre>' : /^(animate|set)/i.test(tag) ? 'SVG animation is not supported; animate with CSS in a design kit' : 'Scripts and embedded documents are not supported',
           );
         } else if (tag !== value.tag) {
           this.warn(`${path}.tag`, `"${value.tag}" will be read as "${tag}"`, isSvgBranchTag(tag) ? 'SVG tags keep their own case' : 'HTML tags are lowercase');

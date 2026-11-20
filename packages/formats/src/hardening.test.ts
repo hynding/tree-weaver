@@ -1412,3 +1412,23 @@ describe('pass 42 fixes', () => {
     expect(exportComponent(tree, { framework: 'vue' }).files[0].contents).toContain(`isCustomElement: (tag) => ['my-badge'].includes(tag)`);
   });
 });
+
+describe('pass 43 fixes', () => {
+  it('declares the XLink namespace in a standalone SVG that uses it', () => {
+    const svg = createBranch({ tag: 'svg', type: 'root', attrs: { viewBox: '0 0 10 10' }, children: [createLeaf('use', 'shape', { 'xlink:href': '#dot' })] });
+    expect(exportTree(createTree('Icons', svg), 'svg')).toMatch(/<svg[^>]*xmlns:xlink="http:\/\/www\.w3\.org\/1999\/xlink"/);
+  });
+
+  it('exports an SVG-only component inside an <svg> for HTML', () => {
+    const def = createComponent('Badge', createBranch({ tag: 'g', children: [createLeaf('circle', 'shape', { r: '8' })] }));
+    expect(exportComponentDef(def, { framework: 'html' }).files[0].contents).toMatch(/<svg[^>]*>\s*<g/);
+  });
+
+  it('keeps a stylesheet’s library rules when one rule styles Storybook’s preview', async () => {
+    const { storyKits } = await import('./index');
+    const snap = { id: 's', title: 'T', name: 'N', html: '', sheets: [{ href: 'https://sb.example/assets/preview.css', css: '.ds-button{color:red}\n#storybook-root{padding:1rem}' }] };
+    const kits = storyKits([snap], { name: 'DS', styles: 'copy', source: 'x' });
+    expect(kits[0]?.css).toContain('.ds-button');
+    expect(kits[0]?.css).not.toContain('storybook-root');
+  });
+});

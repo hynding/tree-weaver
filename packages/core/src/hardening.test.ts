@@ -661,3 +661,19 @@ describe('pass 42 fixes', async () => {
     expect(core.diffForests(a, b).empty).toBe(false);
   });
 });
+
+describe('pass 43 fixes', async () => {
+  const core = await import('./index');
+
+  it('renders <plaintext> as a div and the validator refuses it', () => {
+    const root = core.createBranch({ tag: 'body', children: [core.createBranch({ tag: 'plaintext' }), core.createBranch({ tag: 'h1', children: [core.text('T')] })] });
+    expect(core.renderTreeBody(root)).not.toContain('<plaintext');
+    expect(core.validateDocument({ format: 'tree-weaver', version: 1, tree: { name: 'T', root } }).errors.length).toBeGreaterThan(0);
+  });
+
+  it('writes text in MathML without a span on the canvas', () => {
+    const root = core.createBranch({ tag: 'body', children: [core.createBranch({ tag: 'math', children: [core.text('x = 2'), core.createBranch({ tag: 'mi', children: [core.text('y')] })] })] });
+    const html = core.renderTreeBody(root, { designer: true });
+    expect(html).toMatch(/<math[^>]*>x = 2<mi[^>]*><span[^>]*>y<\/span><\/mi><\/math>/);
+  });
+});

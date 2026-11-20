@@ -372,7 +372,7 @@ function withVariant(def: ComponentDef, variantName: string | null | undefined):
 }
 
 /** A template that only works inside an SVG: SVG-only itself, or (an `<a>`, a `<title>`) holding SVG-only content. */
-function drawsInSvg(root: Branch): boolean {
+export function drawsInSvg(root: Branch): boolean {
   let svg = false;
   const visit = (n: TreeNode): void => {
     if (svg) return;

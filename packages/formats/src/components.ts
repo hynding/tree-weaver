@@ -44,6 +44,7 @@ import {
   type DisplayStyles,
   resolveStyles,
   walk,
+  drawsInSvg,
 } from '@tree-weaver/core';
 import { isInlineTag, PRE_TAGS } from './inline';
 import { commentText, slugify } from './slug';
@@ -1159,7 +1160,8 @@ export function exportComponentDef(def: ComponentDef, opts: ComponentOptions): C
   const name = pascalName(opts.name ?? def.name);
   if (framework === 'html' || framework === 'swiftui' || framework === 'flutter') {
     // No props in these targets: export the component as it looks by default.
-    const tree = createTree(def.name, { kind: 'branch', id: 'b_body', tag: 'body', type: 'root', classes: [], attrs: {}, styles: {}, children: [expandComponent(def, { component: def.id }, 'b_c')] });
+    // A template that only draws inside an SVG (a <g> of shapes) gets an <svg> around it, as in the editor.
+    const tree = createTree(def.name, { kind: 'branch', id: 'b_body', tag: drawsInSvg(def.root) ? 'svg' : 'body', type: 'root', classes: [], attrs: {}, styles: {}, children: [expandComponent(def, { component: def.id }, 'b_c')] });
     return exportComponent(tree, { ...opts, name });
   }
   const props = componentProps(def);

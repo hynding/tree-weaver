@@ -20,6 +20,8 @@ export const BLOCKED_TAGS: readonly string[] = [
   'script', 'style', 'iframe', 'object', 'embed', 'frame', 'frameset', 'base', 'meta', 'link',
   // SVG animation can rewrite attributes (an href to a script URL) after rendering.
   'animate', 'set', 'animatemotion', 'animatetransform', 'handler', 'listener',
+  // The parser never closes it: everything after it would show as text.
+  'plaintext',
 ];
 
 

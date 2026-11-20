@@ -3,6 +3,7 @@ import {
   addTableColumn,
   BASE_DISPLAY,
   cssOverlaps,
+  isDisplayId,
   applyDisplaySettings,
   changedDisplaySettings,
   cleanDisplaySettings,
@@ -101,7 +102,7 @@ import { createEnvKits, createStarterKit, fetchKitCss, isEnvKit, kitClasses } fr
 import { DISPLAYS_LOCKED, ENV_CSS_URLS, ENV_DISPLAYS } from '../config';
 import { createForestStore, MemoryForestStore, Preferences, type ForestStore } from '@tree-weaver/storage';
 import { isEmbedded } from './embed-flags';
-import { state, type SidebarTab, type Toast } from './editor';
+import { SIDEBAR_TABS, state, type SidebarTab, type Toast } from './editor';
 
 /* ------------------------------------------------------------- selectors */
 
@@ -292,8 +293,9 @@ export async function init(): Promise<void> {
   state.displaySettings = cleanDisplaySettings(saved.displays);
   applyDisplays();
   if (ENV_DISPLAYS.errors.length) console.warn(`TW_DISPLAYS: ${ENV_DISPLAYS.errors.join(' ')}`);
-  state.display = saved.display;
-  state.tab = saved.tab;
+  // Stored preferences can be damaged or written by something else: keep only known values.
+  if (isDisplayId(saved.display)) state.display = saved.display;
+  if (SIDEBAR_TABS.includes(saved.tab)) state.tab = saved.tab;
   state.forests = await store.list();
   const id = saved.forestId && state.forests.some((f) => f.id === saved.forestId) ? saved.forestId : state.forests[0]?.id;
   const forest = id ? await store.load(id) : null;
