@@ -518,6 +518,13 @@ describe('tree-weaver tokens', () => {
     expect(JSON.parse(reset.out).tokens[0]).toMatchObject({ name: '--brand', value: '#2f6f4f', edited: false });
   });
 
+  it('writes edited tokens in the -o file\'s format', async () => {
+    const r = await cli(['tokens', 'page.json', '--set', 'brand=#ff0000', '-o', 'page.xml'], doc());
+    expect(r.code).toBe(0);
+    expect(r.files['page.xml']).toMatch(/^<\?xml/);
+    expect(r.files['page.json']).not.toContain('#ff0000');
+  });
+
   it('writes tokens for each platform', async () => {
     expect((await cli(['tokens', 'page.json', '-f', 'swift'], doc())).out).toContain('static let brand = Color(');
     expect((await cli(['tokens', 'page.json', '-f', 'dart'], doc())).out).toContain('static const double gap = 16;');

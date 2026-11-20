@@ -119,7 +119,9 @@ export function fillPlaceholders(value: string, values: Record<string, string>):
   return value.replace(PLACEHOLDER, (_m, name: string) => (Object.hasOwn(values, name) ? values[name] : '') ?? '');
 }
 
-const truthy = (v: string | undefined) => !!v && v !== 'false' && v !== '0';
+/** Whether a boolean prop's value is on: anything but empty, "false" or "0". */
+export const isPropOn = (v: string | undefined): boolean => !!v && v !== 'false' && v !== '0';
+const truthy = isPropOn;
 
 /** HTML attributes that are on when present, whatever their value. */
 export const BOOLEAN_ATTRS: ReadonlySet<string> = new Set([

@@ -590,15 +590,22 @@ function segments(value: string): { lit: string; prop?: string }[] {
 const hasProps = (value: string) => /\{\{\s*[A-Za-z][A-Za-z0-9_]*\s*\}\}/.test(value);
 /** A prop as the editor writes it into text: a boolean prop (in `bools`) is 'true', or nothing when off. */
 const propText = (prop: string, bools?: ReadonlySet<string>): string => (bools?.has(prop) ? `(${prop} ? 'true' : '')` : prop);
-/** A JS template literal for a value with placeholders: `card-${tone}`. */
-const templateLiteral = (value: string, extra = '', bools?: ReadonlySet<string>): string =>
-  `\`${segments(value)
-    .map((s) => s.lit.replace(/[`\\]/g, '\\$&').replace(/\$\{/g, '\\${') + (s.prop ? `\${${propText(s.prop, bools)}}` : ''))
-    .join('')}${extra}\``;
-/** A JS expression for a value: the bare prop when the value is just `{{prop}}`. */
-const propExpr = (value: string, bools?: ReadonlySet<string>): string => {
+/**
+ * A JS template literal for a value with `{{prop}}` placeholders. A backslash in it (Tailwind's
+ * `\\_`) is written as is through `String.raw`, so the source text, which Tailwind reads, matches
+ * the class the page gets. (`rawTag` is `String.raw` in Vue templates, which don't see `globalThis`.)
+ */
+const templateLiteral = (value: string, extra = '', bools?: ReadonlySet<string>, rawTag = 'globalThis.String.raw'): string => {
   const segs = segments(value);
-  return segs.length === 2 && !segs[0].lit && !segs[1].lit ? propText(segs[0].prop!, bools) : templateLiteral(value, '', bools);
+  // Raw works unless a literal holds a backtick or `${`, or ends in a backslash (which would escape what follows).
+  const raw = segs.some((s) => s.lit.includes('\\')) && segs.every((s) => !/`|\$\{|\\$/.test(s.lit));
+  const lit = (t: string) => (raw ? t : t.replace(/[`\\]/g, '\\$&').replace(/\$\{/g, '\\${'));
+  return `${raw ? rawTag : ''}\`${segs.map((s) => lit(s.lit) + (s.prop ? `\${${propText(s.prop, bools)}}` : '')).join('')}${extra}\``;
+};
+/** A JS expression for a value: the bare prop when the value is just `{{prop}}`. */
+const propExpr = (value: string, bools?: ReadonlySet<string>, rawTag?: string): string => {
+  const segs = segments(value);
+  return segs.length === 2 && !segs[0].lit && !segs[1].lit ? propText(segs[0].prop!, bools) : templateLiteral(value, '', bools, rawTag);
 };
 /** The `variant` prop's modifier classes, added to the root's class list. */
 const VARIANT_CALL = 'variantClasses(variant)';
@@ -717,6 +724,17 @@ function writeHtml(el: El, depth: number, mode: 'html' | 'vue' | 'svelte', props
 const JSX_ATTRS: Record<string, string> = {
   class: 'className',
   for: 'htmlFor',
+  autocapitalize: 'autoCapitalize',
+  autocorrect: 'autoCorrect',
+  autosave: 'autoSave',
+  controlslist: 'controlsList',
+  disablepictureinpicture: 'disablePictureInPicture',
+  disableremoteplayback: 'disableRemotePlayback',
+  imagesizes: 'imageSizes',
+  imagesrcset: 'imageSrcSet',
+  classid: 'classID',
+  contextmenu: 'contextMenu',
+  radiogroup: 'radioGroup',
   tabindex: 'tabIndex',
   colspan: 'colSpan',
   rowspan: 'rowSpan',
@@ -808,7 +826,7 @@ function writePropsEl(el: El & { kind: 'el' }, depth: number, mode: 'vue' | 'sve
         const on = props.has(expr) ? expr : `${expr} !== 'false'`;
         return mode === 'vue' ? ` :${n}="${escapeAttr(on)}"` : ` ${n}={${on}}`;
       }
-      if (mode === 'vue') return ` :${n}="${(n === 'class' ? escapeClassAttr : escapeAttr)(variant ? templateLiteral(v, variantSuffix, props) : propExpr(v, props))}"`;
+      if (mode === 'vue') return ` :${n}="${(n === 'class' ? escapeClassAttr : escapeAttr)(variant ? templateLiteral(v, variantSuffix, props, 'String.raw') : propExpr(v, props, 'String.raw'))}"`;
       // Svelte: attribute values can hold {expressions} between literal text.
       const body = segments(v)
         .map((s) => esc(s.lit, n) + (s.prop ? `{${props.has(s.prop) ? `${s.prop} ? 'true' : ''` : s.prop}}` : ''))
@@ -856,18 +874,26 @@ function beatImportant(own: StyleMap, template: StyleMap): StyleMap {
 
 /** The options a <select> starts on (`selected`), as a JSX expression for its defaultValue, or ''. */
 function selectedOptions(select: El & { kind: 'el' }, props: false | ReadonlySet<string>): string {
-  const values: string[] = [];
+  const picks: { value: string; cond?: string }[] = [];
   const visit = (el: El) => {
     if (el.kind !== 'el') return;
-    if (el.tag === 'option' && el.attrs.some(([n]) => n.toLowerCase() === 'selected')) {
-      const value = el.attrs.find(([n]) => n.toLowerCase() === 'value')?.[1] ?? el.children.map((c) => (c.kind === 'text' ? c.value : '')).join('').replace(/\s+/g, ' ').trim();
-      values.push(props && hasProps(value) ? templateLiteral(value, '', props) : jsxString(value));
+    const selected = el.tag === 'option' ? el.attrs.find(([n]) => n.toLowerCase() === 'selected') : undefined;
+    if (selected) {
+      const raw = el.attrs.find(([n]) => n.toLowerCase() === 'value')?.[1] ?? el.children.map((c) => (c.kind === 'text' ? c.value : '')).join('').replace(/\s+/g, ' ').trim();
+      const value = props && hasProps(raw) ? templateLiteral(raw, '', props) : jsxString(raw);
+      // `selected="{{yearly}}"`: picked while the prop is on (a boolean prop as is, any other unless "false").
+      const bound = props && hasProps(selected[1]) ? propExpr(selected[1]) : '';
+      picks.push(bound ? { value, cond: props && props.has(bound) ? bound : `globalThis.String(${bound}) !== 'false'` } : { value });
     } else if (el.tag === 'optgroup') el.children.forEach(visit);
   };
   select.children.forEach(visit);
-  if (!values.length) return '';
+  if (!picks.length) return '';
+  if (select.attrs.some(([n]) => n.toLowerCase() === 'multiple')) {
+    if (picks.every((p) => !p.cond)) return `[${picks.map((p) => p.value).join(', ')}]`;
+    return `[${picks.map((p) => (p.cond ? `...(${p.cond} ? [${p.value}] : [])` : p.value)).join(', ')}]`;
+  }
   // One pick: the last selected option wins, as in the browser.
-  return select.attrs.some(([n]) => n.toLowerCase() === 'multiple') ? `[${values.join(', ')}]` : values[values.length - 1];
+  return picks.reduce((acc, p) => (p.cond ? `(${p.cond} ? ${p.value} : ${acc})` : p.value), 'undefined');
 }
 
 /** `props` is false outside a component; in one, the names of its boolean props. */

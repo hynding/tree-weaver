@@ -307,6 +307,8 @@ function expandObject(value: Obj, path: string): TreeNode {
         return fail(`"${key}" is not an element, layout (grid, row, column, section, table, img, use) or field`, path);
       }
       if (value.children !== undefined && body !== null) fail(`Give the children either as "${key}" or as "children", not both`, path);
+      // Outside an SVG, an SVG-only element (`title`, `text`, `g`) would be hidden or dropped.
+      if (place === 'html' && sel.tag !== 'svg' && isSvgBranchTag(sel.tag) && !HTML_TAG_SET.has(sel.tag)) fail(`<${sel.tag}> only works inside an SVG; use an HTML element here${sel.tag.toLowerCase() === 'title' ? ' (a heading such as "h1")' : ''}`, `${path}.${key}`);
       // A string value is the element's text, taken as written (not read as shorthand).
       const inner = sel.tag === 'svg' ? 'svg' : sel.tag === 'foreignObject' ? 'html' : place;
       const content = within(inner, () => (value.children !== undefined ? kids(listOf(value.children, path)) : typeof body === 'string' ? [text(body)] : kids(listOf(body, path))));

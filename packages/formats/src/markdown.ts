@@ -15,6 +15,7 @@ import {
   type TreeNode,
 } from '@tree-weaver/core';
 import { parseDocument } from 'htmlparser2';
+import type { ChildNode, Element } from 'domhandler';
 import { marked } from 'marked';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { fromData } from './data';
@@ -122,7 +123,11 @@ function inline(node: TreeNode, first: boolean): string {
     const core = inner.replace(/^[ \t\n\r\f]+|[ \t\n\r\f]+$/g, '');
     // So can one with other whitespace at its edge (a non-breaking space): Markdown wouldn't open or close the mark there.
     if (core.startsWith(mark[0]) || (core.endsWith(mark[0]) && !core.endsWith(`\\${mark[0]}`)) || /^\s|\s$/.test(core)) return inlineHtml(renderNodeHtml(node));
-    return wrapTrimmed(inner, mark);
+    const md = wrapTrimmed(inner, mark);
+    // Marks inside marks meet the outer delimiters in ways the flanking rules can't always read
+    // (`*Read **(Dune)**, now*`): checked by reading the Markdown back, else written as HTML.
+    if (hasMark(node) && !readsBack(md, node)) return inlineHtml(renderNodeHtml(node));
+    return md;
   }
   if (tag === 'code' && !needsMeta(node) && node.children.every((c) => !isBranch(c) && c.type === 'text')) {
     // Markdown turns line breaks in a code span into spaces anyway; a blank line would end the paragraph.
@@ -149,6 +154,38 @@ function inline(node: TreeNode, first: boolean): string {
   }
   if (tag === 'br' && !needsMeta(node)) return '<br>';
   return inlineHtml(renderNodeHtml(node));
+}
+
+const hasMark = (n: Branch): boolean => n.children.some((c) => isBranch(c) && (Object.hasOwn(MARK_INLINE, c.tag) || hasMark(c)));
+
+const SAME_MARK: Record<string, string> = { b: 'strong', i: 'em', s: 'del' };
+
+/** Elements and text, without attributes or whitespace differences: what a reader sees. */
+function shape(html: string): string {
+  const out: string[] = [];
+  const walk = (nodes: ChildNode[]) => {
+    for (const n of nodes) {
+      if (n.type === 'text') out.push(n.data);
+      else if (n.type === 'tag' || n.type === 'script' || n.type === 'style') {
+        const el = n as Element;
+        const name = SAME_MARK[el.name] ?? el.name;
+        out.push(`<${name}>`);
+        walk(el.children);
+        out.push(`</${name}>`);
+      }
+    }
+  };
+  walk(parseDocument(html, { decodeEntities: true }).children);
+  return out.join('').replace(/\s+/g, ' ').trim();
+}
+
+/** Whether inline Markdown reads back as the node renders. */
+function readsBack(md: string, node: Branch): boolean {
+  try {
+    return shape(marked.parseInline(md.trim(), { gfm: true, async: false }) as string) === shape(renderNodeHtml(node));
+  } catch {
+    return false;
+  }
 }
 
 function wrapTrimmed(text: string, mark: string): string {

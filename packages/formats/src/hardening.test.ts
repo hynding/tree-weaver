@@ -1534,3 +1534,36 @@ describe('pass 46 fixes', () => {
     }
   });
 });
+
+describe('pass 47 fixes', () => {
+  it('keeps marks nested in marks in Markdown, else writes HTML', () => {
+    const em = createBranch({ tag: 'em', children: [text('Read '), createBranch({ tag: 'strong', children: [text('(Dune)')] }), text(', now')] });
+    const doc = importDocument(exportTree(page([createBranch({ tag: 'p', children: [em] })]), 'markdown'), 'markdown');
+    const out = JSON.stringify(doc.kind === 'tree' ? doc.tree.root : null);
+    expect(out).toContain('"tag":"em"');
+    expect(out).not.toContain('*');
+  });
+
+  it('binds an option’s selected prop in React', () => {
+    const select = createBranch({ tag: 'select', children: [createBranch({ tag: 'option', attrs: { value: 'm' }, children: [text('M')] }), createBranch({ tag: 'option', attrs: { value: 'y', selected: '{{yearly}}' }, children: [text('Y')] })] });
+    const def = { ...createComponent('Plan', select), props: [{ name: 'yearly', type: 'boolean' as const }] };
+    const jsx = exportComponentDef(def, { framework: 'react' }).files[0].contents;
+    expect(jsx).toContain('defaultValue={(yearly ? "y" : undefined)}');
+  });
+
+  it('writes Tailwind classes holding a backslash with String.raw', () => {
+    const root = createBranch({ tag: 'div', classes: ['tone-{{tone}}'], styles: { lg: { display: 'grid', 'grid-template-areas': '"main_area"' } }, children: [text('x')] });
+    const def = { ...createComponent('Box', root), props: [{ name: 'tone', default: 'a' }] };
+    const jsx = exportComponentDef(def, { framework: 'react', styling: 'tailwind' }).files[0].contents;
+    expect(jsx).toContain("[grid-template-areas:'main\\_area']");
+    expect(jsx).toContain('globalThis.String.raw`tone-');
+    expect(exportComponentDef(def, { framework: 'vue', styling: 'tailwind' }).files[0].contents).toContain('String.raw`tone-');
+  });
+
+  it('refuses an SVG-only element as a shorthand key outside an SVG, and spells autoCapitalize', async () => {
+    const { expandShorthandDocument } = await import('@tree-weaver/branches');
+    expect(() => expandShorthandDocument({ tree: { name: 'Home', root: [{ title: 'Welcome back' }] } })).toThrow(/only works inside an SVG/);
+    const tree = page([createBranch({ tag: 'input', attrs: { autocapitalize: 'off' } })]);
+    expect(exportComponent(tree, { framework: 'react' }).files[0].contents).toContain('autoCapitalize="off"');
+  });
+});

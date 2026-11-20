@@ -76,6 +76,8 @@ import {
   insertionProblem,
   instanceRoleIn,
   VOID_TAGS,
+  BLOCKED_TAGS,
+  isShapeTag,
   instantiateComponent,
   isComponentTreeId,
   updateComponent,
@@ -494,6 +496,9 @@ export function instanceOwner(root: Branch, id: string): Branch | null {
 
 /** Why a branch can't take another tag where it is, or null (the same rules as a patch's `update`). */
 function tagChangeProblem(root: Branch, node: Branch, tag: string): string | null {
+  // What the validator refuses: the page would show a <div> instead (or a branch where a shape leaf belongs).
+  if (BLOCKED_TAGS.some((t) => t.toLowerCase() === tag.toLowerCase())) return `<${tag}> isn't supported; it would render as a <div>`;
+  if (isShapeTag(tag)) return `<${tag}> is an SVG shape, which is a leaf: add it as a shape inside an <svg> instead`;
   if (node.children.length && VOID_TAGS.has(tag.toLowerCase())) return `<${tag}> can't hold children, and this branch has ${node.children.length}`;
   const parent = findParent(root, node.id)?.parent;
   if (!parent) return null;
@@ -787,6 +792,14 @@ export function insertComponent(componentId: string, targetId?: string, position
 export function editComponent(componentId: string, variant: string | null = null): void {
   switchTree(componentTreeId(componentId));
   state.componentVariant = variant;
+}
+
+/** The page tree in view: the open tree, or while a component is open the tree it was opened from. */
+export function pageTree(): Tree | undefined {
+  const forest = state.forest;
+  if (!forest) return undefined;
+  const id = isComponentTreeId(state.treeId) ? lastTreeId : state.treeId;
+  return forest.trees.find((t) => t.id === id) ?? (isComponentTreeId(state.treeId) ? forest.trees[0] : undefined);
 }
 
 export function leaveComponent(): void {

@@ -555,13 +555,23 @@ function editTarget(output: string | undefined, file: string): string | undefine
 const sameFile = (a: string, b: string) => b !== '-' && resolvePath(a) === resolvePath(b);
 
 /**
+ * The format an edit is written in: the format `-o`'s extension names when it writes to another
+ * file, else the document's own. A forest can't go to a format that holds one tree.
+ */
+function editFormat(loaded: Loaded, file: string, target: string | undefined, forest: boolean): FormatId {
+  const format = (target && !sameFile(target, file) ? formatFromFileName(target) : null) ?? loaded.format;
+  if (forest && !getFormat(format).forest) throw new Error(`${getFormat(format).label} holds one tree; write a forest as JSON, YAML or XML. Nothing was written.`);
+  return format;
+}
+
+/**
  * Put an updated tree back into its document and write it: in the document's own format, or
  * the format `-o`'s extension names when it writes somewhere else.
  */
 async function writeTree(cli: Cli, loaded: Loaded, file: string, tree: Tree, output: string | undefined, versionAs?: string): Promise<string | undefined> {
   const { doc } = loaded;
   const target = editTarget(output, file);
-  const format = (target && !sameFile(target, file) ? formatFromFileName(target) : null) ?? loaded.format;
+  const format = editFormat(loaded, file, target, doc.kind === 'forest');
   let next: TreeDocument;
   if (doc.kind === 'forest') next = { kind: 'forest', forest: { ...replaceTree(doc.forest, tree), updatedAt: now() } };
   else next = { ...doc, tree: { ...tree, updatedAt: now() } };
@@ -1062,8 +1072,8 @@ async function cmdComponents(cli: Cli, args: string[]): Promise<number> {
   const json = !!values.json;
   const components = doc.kind === 'forest' ? (doc.forest.components ?? []) : [];
   const write = async (forest: Forest, label: string) => {
-    const data = exportForest(forest, loaded.format);
     const target = editTarget(values.output, file);
+    const data = exportForest(forest, editFormat(loaded, file, target, true));
     if (!values['no-version'] && target && sameFile(target, file) && loaded.text !== data) await keepVersion(cli, file, loaded.text, loaded.format, { name: label, source: 'agent', auto: true });
     await cli.emit(target, data);
     return target;
@@ -1183,8 +1193,9 @@ async function cmdTokens(cli: Cli, args: string[]): Promise<number> {
       kits = setToken(kits, { name, value: current.value, kind: kind as TokenKind });
     }
     const next: TreeDocument = doc.kind === 'forest' ? { kind: 'forest', forest: { ...doc.forest, kits, updatedAt: now() } } : { ...doc, kits };
-    const data = next.kind === 'forest' ? exportForest(next.forest, loaded.format) : exportTree(next.tree, loaded.format, next.kits);
     const target = editTarget(values.output, file);
+    const format = editFormat(loaded, file, target, next.kind === 'forest');
+    const data = next.kind === 'forest' ? exportForest(next.forest, format) : exportTree(next.tree, format, next.kits);
     if (!values['no-version'] && target && sameFile(target, file) && loaded.text !== data) await keepVersion(cli, file, loaded.text, loaded.format, { name: 'Before tokens', source: 'agent', auto: true });
     await cli.emit(target, data);
     if (target) cli.note(`Wrote ${target}`);

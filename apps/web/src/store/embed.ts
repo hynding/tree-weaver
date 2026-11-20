@@ -2,7 +2,7 @@ import { applyPatch, idsOutside, formatDiff, diffLines, isDisplayId, replaceTree
 import { expandShorthand } from '@tree-weaver/branches';
 import { exportForest, exportTree, FORMATS, importDocument, type FormatId } from '@tree-weaver/formats';
 import type { EditorMessage, HostMessage } from '@tree-weaver/embed';
-import { allKits, commit, currentTree, importText, openDocument, redo, setDisplay, switchTree, toast, undo } from './actions';
+import { allKits, commit, currentTree, importText, openDocument, pageTree, redo, setDisplay, switchTree, toast, undo } from './actions';
 import { compareWithCurrent, restoreVersion, saveVersion, versionBefore } from './versions';
 import { onChange, state, type ForestVersion } from './editor';
 import { allowedOrigins, isEmbedded, sourceUrl } from './embed-flags';
@@ -175,7 +175,8 @@ async function handle(msg: HostMessage): Promise<unknown> {
       if (!forest) throw new Error('Nothing is open');
       const info = FORMATS.find((f) => f.id === format)!;
       if (msg.scope === 'tree' || !info.forest) {
-        const tree = currentTree();
+        // While a component is open, the page it was opened from (the component isn't a tree of the forest).
+        const tree = pageTree();
         if (!tree) throw new Error('No tree is open');
         return exportTree(tree, format, allKits().filter((k) => k.source !== 'env'));
       }
@@ -234,7 +235,7 @@ function listen(): void {
     timer = setTimeout(() => {
       const origin = hostOrigin ?? (allowed.length === 1 ? allowed[0] : null);
       if (!origin || !state.forest) return;
-      post({ source: 'tree-weaver-editor', type: 'change', forest: forestJson(), treeId: state.treeId }, origin);
+      post({ source: 'tree-weaver-editor', type: 'change', forest: forestJson(), treeId: pageTree()?.id ?? state.treeId }, origin);
     }, 300);
   };
   onChange('forest', changed);
