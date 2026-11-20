@@ -417,3 +417,35 @@ describe('pass 33 fixes', () => {
     expect(read.attrs).toEqual({ type: 'checkbox', checked: '', disabled: '' });
   });
 });
+
+describe('pass 41 fixes', () => {
+  it('reads style properties in the same order on every peer', () => {
+    const f = withRoot(sample(), (r) => ({ ...r, children: [...r.children, b('box', { tag: 'div' })] }));
+    const a = new Y.Doc();
+    const c = new Y.Doc();
+    writeForest(a, null, f);
+    Y.applyUpdate(c, Y.encodeStateAsUpdate(a));
+    const fa = readForest(a)!;
+    const fc = readForest(c)!;
+    writeForest(a, fa, withRoot(fa, (r) => setStyle(r, 'box', 'lg', 'padding-left', '40px')));
+    writeForest(c, fc, withRoot(fc, (r) => setStyle(r, 'box', 'lg', 'padding', '0')));
+    const ua = Y.encodeStateAsUpdate(a);
+    const uc = Y.encodeStateAsUpdate(c);
+    Y.applyUpdate(a, uc);
+    Y.applyUpdate(c, ua);
+    const fresh = new Y.Doc();
+    Y.applyUpdate(fresh, Y.encodeStateAsUpdate(c));
+    const order = (doc: InstanceType<typeof Y.Doc>) => Object.keys((readForest(doc)!.trees[0].root.children.find((n) => n.id === 'box') as Branch).styles.lg ?? {});
+    expect(order(a)).toEqual(order(c));
+    expect(order(fresh)).toEqual(order(a));
+  });
+
+  it('keeps the order properties were set in', () => {
+    const f = withRoot(sample(), (r) => ({ ...r, children: [...r.children, b('box', { tag: 'div', styles: { lg: { padding: '0', 'padding-left': '40px', margin: '0' } } })] }));
+    const a = new Y.Doc();
+    writeForest(a, null, f);
+    const fresh = new Y.Doc();
+    Y.applyUpdate(fresh, Y.encodeStateAsUpdate(a));
+    expect(Object.keys((readForest(fresh)!.trees[0].root.children.find((n) => n.id === 'box') as Branch).styles.lg!)).toEqual(['padding', 'padding-left', 'margin']);
+  });
+});

@@ -39,6 +39,13 @@ const PART_PARENTS: Record<string, string[]> = {
 const MATH_BREAKOUT = new Set(
   'b big blockquote body br center code dd div dl dt em embed h1 h2 h3 h4 h5 h6 head hr i img li listing menu meta nobr ol p pre ruby s small span strong strike sub sup table tt u ul var'.split(' '),
 );
+/**
+ * Where the parser stops looking for an open <li>, <dd> or <dt> to close: any "special" element
+ * but <address>, <div> and <p> (so an item inside a <section> in an item stays put).
+ */
+const LIST_ITEM_STOP = new Set(
+  'applet area article aside base basefont bgsound blockquote body br button caption center col colgroup dd details dir dl dt embed fieldset figcaption figure footer form frame frameset h1 h2 h3 h4 h5 h6 head header hgroup hr html iframe img input keygen li link listing main marquee menu meta nav noembed noframes noscript object ol param plaintext pre script search section select source style summary table tbody td template textarea tfoot th thead title tr track ul wbr xmp mi mo mn ms mtext annotation-xml foreignobject desc'.split(' '),
+);
 /** Elements whose content is read as text, not markup. */
 const RAW_TEXT = new Set(['textarea', 'title', 'noscript', 'template']);
 /** Obsolete raw-text elements, which also show entities as written: nothing the editor writes in them reads back. */
@@ -86,8 +93,8 @@ export function nestingProblem(ancestors: readonly Branch[], node: TreeNode): st
   if (tag === 'a' && inScope((t) => t === 'a', new Set(['caption', 'td', 'th', 'marquee', 'object', 'template', 'applet']))) return `A link can't go inside another link; the browser would end the outer one`;
   if (tag === 'button' && inScope((t) => t === 'button')) return `A button can't go inside another button; the browser would end the outer one`;
   if (tag === 'form' && ancestors.some((a) => a.tag.toLowerCase() === 'form')) return `A form can't go inside another form; the browser drops the inner <form>`;
-  if (tag === 'li' && inScope((t) => t === 'li', new Set([...SCOPE, 'ul', 'ol']))) return `An <li> can't go inside another <li> without a list around it; the browser would end the outer item`;
-  if ((tag === 'dd' || tag === 'dt') && inScope((t) => t === 'dd' || t === 'dt', new Set([...SCOPE, 'dl']))) return `A <${tag}> can't go inside a <dd> or <dt> without a <dl> around it; the browser would end the outer one`;
+  if (tag === 'li' && inScope((t) => t === 'li', LIST_ITEM_STOP)) return `An <li> can't go inside another <li> without a list around it; the browser would end the outer item`;
+  if ((tag === 'dd' || tag === 'dt') && inScope((t) => t === 'dd' || t === 'dt', LIST_ITEM_STOP)) return `A <${tag}> can't go inside a <dd> or <dt> without a <dl> around it; the browser would end the outer one`;
   if (tag === 'option' && parentTag === 'option') return `An <option> can't go inside another <option>`;
   if (tag === 'optgroup' && (parentTag === 'option' || parentTag === 'optgroup')) return `An <optgroup> can't go inside an <${parentTag}>; the browser would end the <${parentTag}> there`;
   if (/^(input|select|textarea|keygen)$/.test(tag) && inScope((t) => t === 'select', new Set(['template']))) return `A <${tag}> can't go inside a <select>; the browser would end the select there`;

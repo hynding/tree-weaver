@@ -1375,3 +1375,19 @@ describe('pass 40 fixes', () => {
     expect(((svg as Branch).children[0] as Branch).tag).toBe('text');
   });
 });
+
+describe('pass 41 fixes', () => {
+  it('keeps spaces around a prop at an inline element’s edge in Vue', () => {
+    const root = createBranch({ tag: 'p', children: [text('Hello'), createBranch({ tag: 'strong', children: [text(' {{name}} ')] }), text('!')] });
+    const def = { ...createComponent('Greet', root), props: [{ name: 'name', type: 'text' as const, default: 'Ann' }] };
+    expect(exportComponentDef(def, { framework: 'vue' }).files[0].contents).toContain(`<strong>{{ ' ' }}{{ name }}{{ ' ' }}</strong>`);
+  });
+
+  it('reads a lone text key inside an SVG as the <text> element in shorthand', async () => {
+    const { expandShorthandDocument } = await import('@tree-weaver/branches');
+    const doc = expandShorthandDocument([{ svg: [{ text: 'Hello', attrs: { x: '10' } }] }, { text: 'plain' }]) as { tree: { root: Branch } };
+    const [svg, plain] = doc.tree.root.children as TreeNode[];
+    expect(((svg as Branch).children[0] as Branch).tag).toBe('text');
+    expect(plain.kind).toBe('leaf');
+  });
+});

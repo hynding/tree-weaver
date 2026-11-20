@@ -230,7 +230,9 @@ function table(rows: unknown, header: boolean, path: string): Branch {
 
 function expandObject(value: Obj, path: string): TreeNode {
   // Canonical branches and leaves: keep them, expanding shorthand in their children and flat styles.
-  if (value.kind !== undefined || value.tag !== undefined || value.value !== undefined || value.text !== undefined || value.src !== undefined) {
+  // Inside an SVG, a lone `text` key is the <text> element (`{ "text": "Hi", "attrs": { "x": "4" } }`), not a text leaf.
+  const textLeaf = value.text !== undefined && (place !== 'svg' || value.type !== undefined);
+  if (value.kind !== undefined || value.tag !== undefined || value.value !== undefined || textLeaf || value.src !== undefined) {
     const children = value.children;
     const copy: Obj = { ...value };
     if (Array.isArray(children)) copy.children = [];

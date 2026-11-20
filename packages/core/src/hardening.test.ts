@@ -639,3 +639,14 @@ describe('pass 39 fixes', async () => {
     expect(problem(['ruby', 'rtc'], 'rt')).toBeNull();
   });
 });
+
+describe('pass 41 fixes', async () => {
+  const core = await import('./index');
+  const at = (tags: string[]) => tags.map((tag) => core.createBranch({ tag }));
+
+  it('lets a list item sit in a section inside another item, and still catches a div', () => {
+    expect(core.nestingProblem(at(['ul', 'li', 'section']), core.createBranch({ tag: 'li' }))).toBeNull();
+    expect(core.nestingProblem(at(['dl', 'dd', 'nav']), core.createBranch({ tag: 'dt' }))).toBeNull();
+    expect(core.nestingProblem(at(['ul', 'li', 'div']), core.createBranch({ tag: 'li' }))).toMatch(/li/);
+  });
+});

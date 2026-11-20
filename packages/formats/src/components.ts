@@ -655,11 +655,16 @@ const leadNewline = (tag: string, content: string): string => (/^(pre|textarea|l
 function writeHtml(el: El, depth: number, mode: 'html' | 'vue' | 'svelte', props: false | ReadonlySet<string> = false): string {
   if (el.kind === 'text' && props && mode !== 'html' && hasProps(el.value)) {
     // Vue: {{ title }}; Svelte: {title}. Literal parts are escaped as usual.
-    return segments(el.value)
-      .map((s) => {
+    const segs = segments(el.value);
+    return segs
+      .map((s, i) => {
         // A boolean prop reads as the editor stores it: 'true', or nothing when off.
         const expr = s.prop && props.has(s.prop) ? `${s.prop} ? 'true' : ''` : s.prop;
-        return writeHtml({ kind: 'text', value: s.lit, pre: el.pre }, depth, mode) + (expr ? (mode === 'vue' ? `{{ ${expr} }}` : `{${expr}}`) : '');
+        // Vue splits the text at each prop and drops a whitespace-only first or last piece, which
+        // shows at an inline element's edge (`<strong> {{ name }} </strong>`): write it as a space.
+        const edge = (i === 0 || i === segs.length - 1) && segs.length > 1;
+        const lit = mode === 'vue' && !el.pre && edge && /^[ \t\n\f\r]+$/.test(s.lit) ? `{{ ' ' }}` : writeHtml({ kind: 'text', value: s.lit, pre: el.pre }, depth, mode);
+        return lit + (expr ? (mode === 'vue' ? `{{ ${expr} }}` : `{${expr}}`) : '');
       })
       .join('');
   }

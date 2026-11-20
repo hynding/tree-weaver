@@ -233,7 +233,15 @@ function writeNode(nodes: Y.Map<YNode>, p: Placed, order: string | undefined, ol
     const displays = new Set([...Object.keys(n.styles), ...Object.keys(prior?.styles ?? {}), ...[...m.keys()].flatMap((k) => STYLE_KEY.exec(k)?.[1] ?? (k.startsWith('s:') ? k.slice(2) : []))]);
     for (const d of displays) {
       setIfChanged(m, `s:${d}`, undefined);
-      writeEntries(m, `sp:${d}:`, n.styles[d as keyof DisplayStyles], legacy || !prior ? null : prior.styles[d as keyof DisplayStyles] ?? {});
+      const next = n.styles[d as keyof DisplayStyles];
+      writeEntries(m, `sp:${d}:`, next, legacy || !prior ? null : prior.styles[d as keyof DisplayStyles] ?? {});
+      // Declaration order matters (`padding` then `padding-left`), so each property has an order
+      // key (`so:<display>:<prop>`) too; every peer, and a fresh load, reads the same order.
+      const props = Object.keys(next ?? {});
+      const orders = orderKeys(props, (p) => m.get(`so:${d}:${p}`) as string | undefined);
+      for (const p of props) setIfChanged(m, `so:${d}:${p}`, orders.get(p));
+      // An order key goes with its property (a peer's property this write didn't touch keeps its own).
+      for (const k of [...m.keys()]) if (k.startsWith(`so:${d}:`) && !m.has(`sp:${d}:${k.slice(`so:${d}:`.length)}`)) m.delete(k);
     }
   } else {
     setIfChanged(m, 'leaf', n.type);
@@ -403,12 +411,19 @@ function readNode(id: string, m: YNode): TreeNode {
   const styles: DisplayStyles = {};
   const attrs: Record<string, string> = stringMap(parse<unknown>(m.get('attrs'), {})) ?? {};
   for (const [k, v] of m) if (k.startsWith('s:')) styles[k.slice(2) as keyof DisplayStyles] = stringMap(parse<unknown>(v, {})) ?? {};
+  const declared: { display: string; prop: string; value: string; order: string; at: number }[] = [];
   for (const [k, v] of m) {
     if (typeof v !== 'string') continue;
     const style = STYLE_KEY.exec(k);
-    if (style) put(Object.hasOwn(styles, style[1]) ? styles[style[1] as keyof DisplayStyles]! : put(styles, style[1], {}), style[2], v);
-    else if (k.startsWith('a:')) put(attrs, k.slice(2), v);
+    if (style) {
+      const order = m.get(`so:${style[1]}:${style[2]}`);
+      declared.push({ display: style[1], prop: style[2], value: v, order: typeof order === 'string' ? order : '', at: declared.length });
+    } else if (k.startsWith('a:')) put(attrs, k.slice(2), v);
   }
+  // By order key, ties (two peers adding at once) by name, so every peer agrees; entries from
+  // before order keys keep the order they are stored in.
+  declared.sort((a, b) => (a.order && b.order ? (a.order < b.order ? -1 : a.order > b.order ? 1 : a.prop < b.prop ? -1 : a.prop > b.prop ? 1 : 0) : !a.order && !b.order ? a.at - b.at : a.order ? 1 : -1));
+  for (const { display, prop, value } of declared) put(Object.hasOwn(styles, display) ? styles[display as keyof DisplayStyles]! : put(styles, display, {}), prop, value);
   const branch: Branch = {
     kind: 'branch',
     id,
