@@ -240,8 +240,9 @@ export function tailwindClass(prop: string, value: string, tokenKinds?: Readonly
   const keyword = Object.hasOwn(KEYWORD_UTILITIES, prop) && Object.hasOwn(KEYWORD_UTILITIES[prop], v) ? KEYWORD_UTILITIES[prop][v] : undefined;
   if (keyword) return keyword;
   const utility = Object.hasOwn(VALUE_UTILITIES, prop) ? VALUE_UTILITIES[prop] : undefined;
-  // Single values only: `p-[1rem_2rem]` works too, but the arbitrary property reads plainer.
-  if (utility && !/\s/.test(v) && !/[[\]]/.test(v)) return `${utility}-[${bracket(v)}]`;
+  // The utility even for `0 auto` (`m-[0_auto]`): Tailwind v3 writes arbitrary properties after
+  // every utility, so `[margin:0_auto]` would beat an `mt-[2rem]` meant to override it.
+  if (utility && !/[[\]]/.test(v)) return `${utility}-[${bracket(v)}]`;
   return `[${prop}:${bracket(v)}]`;
 }
 
@@ -386,7 +387,45 @@ function blockBelow(node: Branch, inSvg = false): boolean {
   });
 }
 
-export function repairNesting(node: Branch, ctx: { a?: boolean; form?: boolean; button?: boolean } = {}): Branch {
+/** Elements whose start tag closes an open one of the same group, so one can't sit directly in another. */
+const AUTO_CLOSE_GROUP: Record<string, string> = { li: 'li', dd: 'dl', dt: 'dl', td: 'cell', th: 'cell', rt: 'ruby', rp: 'ruby' };
+
+/** Table parts and the parents the parser keeps them in (cells and rows outside a row or body are wrapped below). */
+const TABLE_PARENTS: Record<string, RegExp> = {
+  caption: /^table$/,
+  colgroup: /^table$/,
+  thead: /^table$/,
+  tbody: /^table$/,
+  tfoot: /^table$/,
+  col: /^(table|colgroup)$/,
+  tr: /^(table|thead|tbody|tfoot)$/,
+  td: /^(tr|table|thead|tbody|tfoot)$/,
+  th: /^(tr|table|thead|tbody|tfoot)$/,
+};
+
+/** Runs of children matching `test` gathered into new `tag` wrappers (ids derived from the parent's). */
+function wrapRuns(parent: Branch, children: TreeNode[], tag: string, test: (c: TreeNode) => boolean): TreeNode[] {
+  if (!children.some(test)) return children;
+  const out: TreeNode[] = [];
+  let run: Branch | null = null;
+  for (const c of children) {
+    if (test(c)) {
+      if (!run) {
+        run = { kind: 'branch', id: `${parent.id}~${tag}${out.length}`, tag, classes: [], attrs: {}, styles: {}, children: [] };
+        out.push(run);
+      }
+      run.children.push(c);
+    } else {
+      run = null;
+      out.push(c);
+    }
+  }
+  return out;
+}
+
+const tagIs = (c: TreeNode, re: RegExp) => isBranch(c) && re.test(c.tag.toLowerCase());
+
+export function repairNesting(node: Branch, ctx: { a?: boolean; form?: boolean; button?: boolean; parent?: string } = {}): Branch {
   const lower = node.tag.toLowerCase();
   if (lower === 'svg') return node;
   let tag = node.tag;
@@ -394,25 +433,29 @@ export function repairNesting(node: Branch, ctx: { a?: boolean; form?: boolean; 
   if (lower === 'form' && ctx.form) tag = 'div';
   const holdsBlock = blockBelow(node);
   if ((lower === 'p' || /^h[1-6]$/.test(lower)) && holdsBlock) tag = 'div';
-  const inner = { a: ctx.a || lower === 'a', form: ctx.form || lower === 'form', button: ctx.button || lower === 'button' };
-  let children: TreeNode[] = node.children.map((c) => (isBranch(c) ? repairNesting(c, inner) : c));
-  if (/^(table|thead|tbody|tfoot|tr)$/.test(lower)) children = children.filter((c) => isBranch(c) || c.type !== 'text' || c.value.trim() !== '');
-  if (lower === 'table' && children.some((c) => isBranch(c) && c.tag.toLowerCase() === 'tr')) {
-    const out: TreeNode[] = [];
-    let body: Branch | null = null;
-    for (const c of children) {
-      if (isBranch(c) && c.tag.toLowerCase() === 'tr') {
-        if (!body) {
-          body = { kind: 'branch', id: `${node.id}~tbody${out.length}`, tag: 'tbody', classes: [], attrs: {}, styles: {}, children: [] };
-          out.push(body);
-        }
-        body.children.push(c);
-      } else {
-        body = null;
-        out.push(c);
-      }
-    }
-    children = out;
+  // An <li> right inside an <li> (a <td> in a <td>, …) would close its parent when parsed.
+  const group = Object.hasOwn(AUTO_CLOSE_GROUP, lower) ? AUTO_CLOSE_GROUP[lower] : undefined;
+  if (group && ctx.parent && Object.hasOwn(AUTO_CLOSE_GROUP, ctx.parent) && AUTO_CLOSE_GROUP[ctx.parent] === group) tag = group === 'ruby' ? 'span' : 'div';
+  // A table part outside a table is dropped by the parser. At a component's root (no parent) it
+  // may be meant for a table the component is used in, so it is kept there.
+  if (ctx.parent !== undefined && Object.hasOwn(TABLE_PARENTS, lower) && !TABLE_PARENTS[lower].test(ctx.parent)) tag = 'div';
+  const inner = { a: ctx.a || lower === 'a', form: ctx.form || lower === 'form', button: ctx.button || lower === 'button', parent: tag.toLowerCase() };
+  // An <option> in an <option> (an <optgroup> in an <optgroup>) can't be written: its content joins the parent.
+  let own: TreeNode[] = node.children;
+  if (lower === 'option' || lower === 'optgroup') {
+    while (own.some((c) => isBranch(c) && c.tag.toLowerCase() === lower)) own = own.flatMap((c) => (isBranch(c) && c.tag.toLowerCase() === lower ? c.children : [c]));
+  }
+  let children: TreeNode[] = own.map((c) => (isBranch(c) ? repairNesting(c, inner) : c));
+  const now = tag.toLowerCase();
+  if (/^(table|thead|tbody|tfoot|tr)$/.test(now)) {
+    children = children.filter((c) => isBranch(c) || c.type !== 'text' || c.value.trim() !== '');
+    // Text or a stray cell where the parser expects rows: put it in a cell, and cells in a row.
+    children = wrapRuns(node, children, 'td', (c) => !isBranch(c) && c.type === 'text');
+    if (now !== 'tr') children = wrapRuns(node, children, 'tr', (c) => tagIs(c, /^t[dh]$/));
+  }
+  if (lower === 'table') {
+    children = wrapRuns(node, children, 'colgroup', (c) => tagIs(c, /^col$/));
+    children = wrapRuns(node, children, 'tbody', (c) => tagIs(c, /^tr$/));
   }
   const same = tag === node.tag && children.length === node.children.length && children.every((c, i) => c === node.children[i]);
   return same ? node : { ...node, tag, children };
@@ -528,6 +571,9 @@ function inlineChildren(children: El[], mode: 'html' | 'vue' | 'svelte', write: 
 
 /** HTML (also Vue and Svelte templates). */
 /** `props` is false outside a component; in one, the names of its boolean props. */
+/** HTML (and Vue and Svelte templates) drop one newline right after these tags, so a leading one is doubled. */
+const leadNewline = (tag: string, content: string): string => (/^(pre|textarea|listing)$/i.test(tag) && /^[\r\n]/.test(content) ? `\n${content}` : content);
+
 function writeHtml(el: El, depth: number, mode: 'html' | 'vue' | 'svelte', props: false | ReadonlySet<string> = false): string {
   if (el.kind === 'text' && props && mode !== 'html' && hasProps(el.value)) {
     // Vue: {{ title }}; Svelte: {title}. Literal parts are escaped as usual.
@@ -558,7 +604,7 @@ function writeHtml(el: El, depth: number, mode: 'html' | 'vue' | 'svelte', props
   const attrs = el.attrs.map(([n, v]) => (v === '' && !el.svg ? ` ${n}` : ` ${n}="${esc(v)}"`)).join('');
   if (!el.svg && VOID_TAGS.has(el.tag)) return `<${el.tag}${attrs}>`;
   if (!el.children.length) return el.svg ? `<${el.tag}${attrs} />` : `<${el.tag}${attrs}></${el.tag}>`;
-  if (el.pre || oneLine(el.children)) return `<${el.tag}${attrs}>${inlineChildren(el.children, mode, (c) => writeHtml(c, depth + 1, mode), el.pre)}</${el.tag}>`;
+  if (el.pre || oneLine(el.children)) return `<${el.tag}${attrs}>${leadNewline(el.tag, inlineChildren(el.children, mode, (c) => writeHtml(c, depth + 1, mode), el.pre))}</${el.tag}>`;
   const pad = '  '.repeat(depth + 1);
   return `<${el.tag}${attrs}>\n${childLines(el.children, pad, (c) => writeHtml(c, depth + 1, mode))}\n${'  '.repeat(depth)}</${el.tag}>`;
 }
@@ -665,7 +711,7 @@ function writePropsEl(el: El & { kind: 'el' }, depth: number, mode: 'vue' | 'sve
   const cond = mode === 'vue' && el.cond ? ` v-if="${escapeAttr(condExpr(el.cond, props, true))}"` : '';
   if (!el.svg && VOID_TAGS.has(el.tag)) return `<${el.tag}${cond}${attrs}>`;
   if (!el.children.length) return el.svg ? `<${el.tag}${cond}${attrs} />` : `<${el.tag}${cond}${attrs}></${el.tag}>`;
-  if (el.pre || oneLine(el.children)) return `<${el.tag}${cond}${attrs}>${inlineChildren(el.children, mode, (c) => writeHtml(c, depth + 1, mode, props), el.pre)}</${el.tag}>`;
+  if (el.pre || oneLine(el.children)) return `<${el.tag}${cond}${attrs}>${leadNewline(el.tag, inlineChildren(el.children, mode, (c) => writeHtml(c, depth + 1, mode, props), el.pre))}</${el.tag}>`;
   const pad = '  '.repeat(depth + 1);
   return `<${el.tag}${cond}${attrs}>\n${childLines(el.children, pad, (c) => writeHtml(c, depth + 1, mode, props))}\n${'  '.repeat(depth)}</${el.tag}>`;
 }
@@ -697,7 +743,8 @@ function writeJsx(el: El, depth: number, props: false | ReadonlySet<string> = fa
       const name = formField ? (n === 'value' ? 'defaultValue' : 'defaultChecked') : jsxAttrName(n);
       if (props && n === 'class' && el.variantClass) return ` ${name}={${templateLiteral(v, variantSuffix)}}`;
       const numeric = !el.svg && NUMERIC_ATTRS.has(n.toLowerCase());
-      const boolAttr = !el.svg && BOOLEAN_ATTRS.has(n.toLowerCase()) && !(n.toLowerCase() === 'hidden' && v.toLowerCase() === 'until-found');
+      // `hidden="until-found"` too: React takes `hidden` as a boolean only and renders a string as `hidden=""`.
+      const boolAttr = !el.svg && BOOLEAN_ATTRS.has(n.toLowerCase());
       if (props && hasProps(v)) {
         const expr = propExpr(v);
         // `globalThis.Number`: a component or prop may itself be called Number.
@@ -705,7 +752,8 @@ function writeJsx(el: El, depth: number, props: false | ReadonlySet<string> = fa
         // A text prop turns a boolean attribute on as HTML does (any value), unless it is "false".
         if (boolAttr) return ` ${name}={globalThis.String(${expr}) !== 'false'}`;
         // An empty prop leaves the attribute off, as the string form does, rather than giving 0.
-        return numeric ? ` ${name}={${expr} === '' ? undefined : globalThis.Number(${expr})}` : ` ${name}={${expr}}`;
+        // A prop with no default is undefined, which would give NaN.
+        return numeric ? ` ${name}={${expr} == null || ${expr} === '' ? undefined : globalThis.Number(${expr})}` : ` ${name}={${expr}}`;
       }
       // HTML turns a boolean attribute on whatever its value, and React (and its types) take `true`.
       if (boolAttr) return ` ${name}`;
@@ -714,6 +762,13 @@ function writeJsx(el: El, depth: number, props: false | ReadonlySet<string> = fa
       return /["\\{}<>\n]/.test(v) ? ` ${name}={${jsxString(v)}}` : ` ${name}="${v.replace(/&/g, '&amp;')}"`;
     })
     .join('');
+  // React takes one child at most in a <textarea> (props split the text into several), and
+  // wants its text as defaultValue anyway.
+  if (el.tag === 'textarea' && el.children.length) {
+    const value = el.children.map((c) => (c.kind === 'text' ? c.value : '')).join('');
+    const expr = props && hasProps(value) ? templateLiteral(value) : jsxString(value);
+    return / defaultValue=/.test(attrs) ? `<${el.tag}${attrs} />` : `<${el.tag}${attrs} defaultValue={${expr}} />`;
+  }
   if (!el.children.length) return `<${el.tag}${attrs} />`;
   if (oneLine(el.children)) return `<${el.tag}${attrs}>${el.children.map((c) => writeJsx(c, depth + 1, props)).join('')}</${el.tag}>`;
   const pad = '  '.repeat(depth + 1);

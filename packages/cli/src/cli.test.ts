@@ -653,4 +653,12 @@ describe('versions counted from the newest', () => {
     const log = Object.entries(r.files).find(([f]) => f.includes('versions'))![1];
     expect(JSON.parse(log).versions[0].name).toBe('-1');
   });
+
+  it('writes an edit in the format of the -o file it names', async () => {
+    const made = await cli(['new', 'page.tree.json', '--bare']);
+    const r = await cli(['patch', 'page.tree.json', '--ops', '[{"op":"insert","node":"h1: Hi"}]', '-o', 'page.html'], made.files);
+    expect(r.code).toBe(0);
+    expect(r.files['page.html']).toMatch(/^<!doctype html>/i);
+    expect(r.files['page.html']).toContain('>Hi</h1>');
+  });
 });

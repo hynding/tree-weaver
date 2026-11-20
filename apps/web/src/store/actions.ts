@@ -1012,9 +1012,9 @@ export function setRulesCss(kitId: string, css: string): string[] {
   const forest = state.forest;
   const kit = customKits().find((k) => k.id === kitId);
   if (!forest || !kit) return [];
-  const { rules, skipped, changed } = parseRulesCss(css, kit.rules);
+  const { rules, skipped, reordered, changed } = parseRulesCss(css, kit.rules);
   commit(editRules(forest, kitId, () => rules));
-  return [...skipped, ...changed];
+  return [...skipped, ...reordered, ...changed];
 }
 
 /**
@@ -1041,6 +1041,10 @@ export function extractClass(branchId: string, className: string): void {
   const tree = currentTree();
   const node = tree ? findNode(tree.root, branchId) : null;
   if (!forest || !tree || !isBranch(node)) return;
+  if (instanceRoleIn(tree.root, branchId) === 'inside') {
+    toast(INSIDE_INSTANCE, 'error');
+    return;
+  }
   // A variant view shows base and variant styles merged; moving those into a class would lose the base.
   if (state.componentVariant) {
     toast('Switch to the base view to save styles as a class', 'error');

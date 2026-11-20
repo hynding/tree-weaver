@@ -85,7 +85,7 @@ export function bracketsBalance(value: string): boolean {
  * `;` would end the declaration, so it becomes `,`, except inside a quoted string or `url(…)`,
  * where it can't (`url(data:image/png;base64,…)` must keep it).
  */
-function semicolonsOutsideStrings(value: string): string {
+export function semicolonsOutsideStrings(value: string): string {
   let out = '';
   let quote = '';
   let url = false;
@@ -257,7 +257,12 @@ export function renderNodeHtml(node: TreeNode, opts: HtmlOptions = {}, depth = 0
   const rawText = !opts.inSvg && /^(textarea|title)$/i.test(tag);
   const inner = { ...opts, inSvg, pretty: opts.pretty && !keep, designer: opts.designer && !rawText };
   const inline = !opts.pretty || keep || node.children.some(isInline);
-  if (inline) return `${open}${node.children.map((c) => renderNodeHtml(c, inner, depth + 1)).join('')}</${tag}>`;
+  if (inline) {
+    const content = node.children.map((c) => renderNodeHtml(c, inner, depth + 1)).join('');
+    // HTML parsers drop one newline right after <pre>, <textarea> or <listing>, so a leading one is doubled.
+    const lead = !opts.xml && !opts.inSvg && /^(pre|textarea|listing)$/i.test(tag) && /^(\r\n|\n|\r)/.test(content) ? '\n' : '';
+    return `${open}${lead}${content}</${tag}>`;
+  }
   const pad = '  '.repeat(depth + 1);
   const body = node.children.map((c) => `${pad}${renderNodeHtml(c, inner, depth + 1)}`).join('\n');
   return `${open}\n${body}\n${'  '.repeat(depth)}</${tag}>`;

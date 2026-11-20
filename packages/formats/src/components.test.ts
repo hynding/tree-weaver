@@ -91,8 +91,8 @@ describe('exportComponent', () => {
     const jsx = file(out, 'LandingPage.jsx');
     expect(jsx).toContain('Needs Tailwind CSS');
     expect(jsx).toContain('grid');
-    expect(jsx).toContain('[grid-template-columns:repeat(3,minmax(0,1fr))]');
-    expect(jsx).toContain('max-[1024px]:[grid-template-columns:repeat(2,minmax(0,1fr))]');
+    expect(jsx).toContain('grid-cols-[repeat(3,minmax(0,1fr))]');
+    expect(jsx).toContain('max-[1024px]:grid-cols-[repeat(2,minmax(0,1fr))]');
   });
 
   it('keeps class names valid when the tree name starts with a digit', () => {
@@ -138,7 +138,7 @@ describe('Tailwind helpers', () => {
     expect(tailwindClass('display', 'flex')).toBe('flex');
     expect(tailwindClass('text-align', 'center')).toBe('text-center');
     expect(tailwindClass('padding', '1rem')).toBe('p-[1rem]');
-    expect(tailwindClass('padding', '1rem 2rem')).toBe('[padding:1rem_2rem]');
+    expect(tailwindClass('padding', '1rem 2rem')).toBe('p-[1rem_2rem]');
     expect(tailwindClass('font-family', '"Open Sans", serif')).toBe('[font-family:"Open_Sans",serif]');
   });
 
@@ -183,7 +183,7 @@ describe('design tokens in web exports', () => {
     expect(jsx).toContain('rounded-radius');
     // A length token used as a colour, and a shorthand, keep arbitrary values.
     expect(jsx).toContain('[color:var(--space-3)]');
-    expect(jsx).toContain('[margin:var(--space-3)_0]');
+    expect(jsx).toContain('m-[var(--space-3)_0]');
     const theme = out.files.find((f) => f.path === 'tailwind.theme.css')!.contents;
     expect(theme).toContain('@theme inline {');
     expect(theme).toContain('--color-brand: var(--brand);');

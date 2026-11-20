@@ -158,10 +158,14 @@ function inlineList(nodes: TreeNode[], first: boolean): string {
     const before = parts.slice(0, i).join('');
     const after = parts.slice(i + 1).join('');
     const mark = Object.hasOwn(MARK_INLINE, n.tag) ? MARK_INLINE[n.tag] : n.tag === 'code' && parts[i].startsWith('`') ? '`' : null;
-    if (mark && !delimitersFit(before, parts[i], after, mark)) parts[i] = inlineHtml(renderNodeHtml(n));
+    // Strikethrough mixed with emphasis, or `~~` meeting a nested `~~`, doesn't read back as written.
+    const tilde = mark === '~~' && (/^\s*~~~|~~~\s*$/.test(parts[i]) || hasEmphasis(n));
+    if (mark && (tilde || !delimitersFit(before, parts[i], after, mark))) parts[i] = inlineHtml(renderNodeHtml(n));
   }
   return parts.join('');
 }
+
+const hasEmphasis = (n: Branch): boolean => n.children.some((c) => isBranch(c) && ((Object.hasOwn(MARK_INLINE, c.tag) && MARK_INLINE[c.tag] !== '~~') || hasEmphasis(c)));
 
 const isPunct = (c: string) => /[\p{P}\p{S}]/u.test(c);
 const isSpace = (c: string) => c === '' || /\s/.test(c);
@@ -251,7 +255,8 @@ function list(b: Branch, pad = ''): string | null {
     // Inline content must come first; nested lists after it.
     if (item.children.slice(0, inlineKids.length).some((c) => !isInlineNode(c))) return null;
     const marker = ordered ? `${n++}.` : '-';
-    lines.push(`${pad}${marker} ${inlineLine(inlineKids)}`);
+    // Edge non-breaking spaces as references: a trailing one would read as a paragraph of its own.
+    lines.push(`${pad}${marker} ${inlineLine(inlineKids).replace(/^\u00a0+|\u00a0+$/g, (m) => '&#160;'.repeat(m.length))}`);
     for (const sub of nested) {
       if (!isBranch(sub) || (sub.tag !== 'ul' && sub.tag !== 'ol') || needsMeta(sub)) return null;
       // A nested list lines up with its item's text: past the marker (`10.` is wider than `-`).
@@ -277,7 +282,8 @@ function table(b: Branch): string | null {
       }
     } else return null;
   }
-  if (!rows.length || headerRows > 1) return null;
+  // A Markdown table always has a header row, so one without stays HTML rather than gaining one.
+  if (!rows.length || headerRows !== 1) return null;
   const cells = rows.map((r) => r.children);
   const width = Math.max(...cells.map((c) => c.length));
   for (const row of cells) {

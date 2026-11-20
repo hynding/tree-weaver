@@ -553,15 +553,19 @@ function editTarget(output: string | undefined, file: string): string | undefine
 /** Whether two spellings name the same file (`t.json` and `./t.json`). */
 const sameFile = (a: string, b: string) => b !== '-' && resolvePath(a) === resolvePath(b);
 
-/** Put an updated tree back into its document and write it, in the document's own format. */
+/**
+ * Put an updated tree back into its document and write it: in the document's own format, or
+ * the format `-o`'s extension names when it writes somewhere else.
+ */
 async function writeTree(cli: Cli, loaded: Loaded, file: string, tree: Tree, output: string | undefined, versionAs?: string): Promise<string | undefined> {
-  const { doc, format } = loaded;
+  const { doc } = loaded;
+  const target = editTarget(output, file);
+  const format = (target && !sameFile(target, file) ? formatFromFileName(target) : null) ?? loaded.format;
   let next: TreeDocument;
   if (doc.kind === 'forest') next = { kind: 'forest', forest: { ...replaceTree(doc.forest, tree), updatedAt: now() } };
   else next = { ...doc, tree: { ...tree, updatedAt: now() } };
-  if (!getFormat(format).lossless) cli.note(`${file} is ${getFormat(format).label}, which doesn't keep every style or attribute; consider converting it to JSON first`);
+  if (!getFormat(format).lossless) cli.note(`${target ?? file} is ${getFormat(format).label}, which doesn't keep every style or attribute; consider converting it to JSON first`);
   const data = next.kind === 'forest' ? exportForest(next.forest, format) : exportTree(next.tree, format, next.kits);
-  const target = editTarget(output, file);
   // Overwriting the file: keep what it was, so "versions restore" can bring it back.
   if (versionAs && target && sameFile(target, file) && loaded.text !== data) await keepVersion(cli, file, loaded.text, format, { name: versionAs, source: 'agent', auto: true });
   await cli.emit(target, data);

@@ -456,3 +456,17 @@ describe('pass 21 fixes', () => {
     expect(parseRulesCss('.a { color: red }\n.grid { grid-template-areas:\n  "a b"\n  "c d"; }\n@media (max-width: 767px) { .a { color: blue } }').changed).toEqual([]);
   });
 });
+
+describe('pass 22 fixes', () => {
+  it('keeps semicolons inside url() and strings in token values', async () => {
+    const { sanitizeTokenValue } = await import('./index');
+    const url = 'url("data:image/svg+xml;charset=utf-8,%3Csvg%3E")';
+    expect(sanitizeTokenValue(url)).toBe(url);
+    expect(sanitizeTokenValue('red; } body { color: blue')).not.toMatch(/[;{}]/);
+  });
+
+  it('doubles a leading newline in <pre> so HTML parsers keep it', () => {
+    const tree = createTree('T', createBranch({ tag: 'body', type: 'root', children: [createBranch({ tag: 'pre', children: [text('\nline2')] })] }));
+    expect(renderDocument(tree)).toMatch(/<pre[^>]*>\n\nline2<\/pre>/);
+  });
+});

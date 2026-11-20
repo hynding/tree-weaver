@@ -2,7 +2,7 @@ import { parseColor } from './checks';
 import { createId } from './create';
 import { parseCss, type CssNode } from './css';
 import type { DesignKit } from './model';
-import { bracketsBalance, untilStable } from './render';
+import { bracketsBalance, semicolonsOutsideStrings, untilStable } from './render';
 
 /**
  * Design tokens: the named colours, spacing and type sizes a forest's design kits define as
@@ -64,11 +64,12 @@ export const isTokenName = (name: string): boolean => TOKEN_NAME.test(name);
 
 /** A token value that can't end its declaration or rule early. */
 export function sanitizeTokenValue(value: string): string {
-  const out = untilStable(value, (v) =>
+  // `;` only outside strings and `url()`: a data URL (`data:image/svg+xml;charset=…`) needs its own.
+  const out = untilStable(semicolonsOutsideStrings(value.replace(/[{}]/g, '')), (v) =>
     v
       .replace(/\/\*[\s\S]*?(\*\/|$)/g, '')
       .replace(/<\/?(style|script)/gi, '')
-      .replace(/[{};]/g, ''),
+      .replace(/[{}]/g, ''),
   )
     .replace(/\s+/g, ' ')
     .trim();

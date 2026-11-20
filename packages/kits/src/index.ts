@@ -17,7 +17,8 @@ export interface KitAnalysis {
   ruleCount: number;
 }
 
-const CLASS = /\.(-?[_a-zA-Z][_a-zA-Z0-9-]*(?:\\.[_a-zA-Z0-9-]*)*)/g;
+// Non-ASCII characters are name characters in CSS (`.café`).
+const CLASS = /\.(-?[_a-zA-Z\u0080-\uFFFF][_a-zA-Z0-9\u0080-\uFFFF-]*(?:\\.[_a-zA-Z0-9\u0080-\uFFFF-]*)*)/g;
 const IMPORT_URL = /^(?:url\(\s*)?["']?([^"')\s]+)["']?\s*\)?/;
 
 /** List what a design kit offers: classes, tokens, imports and breakpoints. */
@@ -147,7 +148,8 @@ export async function kitFromUrl(url: string, fetchImpl: typeof fetch = globalTh
  */
 export function parseCssUrls(value: string | undefined | null): string[] {
   const urls: string[] = [];
-  for (const part of (value ?? '').split(/[\s,]+/)) if (part && isStylesheetUrl(part) && !urls.includes(part)) urls.push(part);
+  // A comma separates only before a space, the next URL or the end: Google Fonts URLs hold commas (`ital,wght@0,400`).
+  for (const part of (value ?? '').split(/\s+|,(?=\s|https?:\/\/|,|$)/i)) if (part && isStylesheetUrl(part) && !urls.includes(part)) urls.push(part);
   return urls;
 }
 

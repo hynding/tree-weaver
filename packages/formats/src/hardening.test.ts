@@ -507,7 +507,7 @@ describe('pass 14 fixes', () => {
   it('turns a numeric prop into a number', () => {
     const def = createComponent('Box', createBranch({ tag: 'div', attrs: { tabindex: '{{tab}}' } }));
     const out = exportComponentDef(def, { framework: 'react' }).files[0].contents;
-    expect(out).toContain("tabIndex={tab === '' ? undefined : globalThis.Number(tab)}");
+    expect(out).toContain("tabIndex={tab == null || tab === '' ? undefined : globalThis.Number(tab)}");
   });
 
   it('writes xmlns:xlink as xmlnsXlink and drops other xmlns: names', () => {
@@ -815,5 +815,60 @@ describe('pass 21 fixes', () => {
     const tree = page([createBranch({ tag: 'a', attrs: { href: 'https://example.com/\uD800x' }, children: [text('Go')] })]);
     const swift = exportComponent(tree, { framework: 'swiftui' }).files[0].contents;
     expect(swift).toContain('%EF%BF%BDx');
+  });
+});
+
+describe('pass 22 fixes', () => {
+  const imported = (html: string) => {
+    const doc = importDocument(`<body>${html}</body>`, 'html');
+    return doc.kind === 'tree' ? doc.tree : doc.forest.trees[0];
+  };
+  const shape = (n: TreeNode): unknown => ('children' in n ? { [n.tag]: n.children.map(shape) } : n.type === 'text' ? n.value : n.type);
+  const mdRoundTrip = (html: string) => {
+    const back = importDocument(exportTree(imported(html), 'markdown'), 'markdown');
+    return JSON.stringify(shape(back.kind === 'tree' ? back.tree.root : back.forest.trees[0].root));
+  };
+
+  it('writes multi-value Tailwind classes as utilities, so later longhands still win in v3', () => {
+    const tree = page([createBranch({ tag: 'div', styles: { lg: { margin: '0 auto', 'margin-top': '2rem' } } })]);
+    const out = exportComponent(tree, { framework: 'html', styling: 'tailwind' }).files[0].contents;
+    expect(out).toContain('m-[0_auto] mt-[2rem]');
+  });
+
+  it('writes React textarea text as one defaultValue', () => {
+    const def = createComponent('Note', createBranch({ tag: 'div', children: [createBranch({ tag: 'textarea', children: [text('Dear {{name}},')] })] }), {
+      props: [{ name: 'name', type: 'text', default: 'you' }],
+    } as never);
+    expect(exportComponentDef(def, { framework: 'react' }).files[0].contents).toContain('<textarea defaultValue={`Dear ${name},`} />');
+  });
+
+  it('repairs nesting the HTML parser would undo', () => {
+    const svelte = (html: string) => exportComponent(imported(html), { framework: 'svelte' }).files[0].contents;
+    expect(svelte('<table><col width="50"><tr><td>a</td></tr></table>')).toMatch(/<colgroup>\s*<col[^>]*\/?>\s*<\/colgroup>/);
+    const nested = page([createBranch({ tag: 'ul', children: [createBranch({ tag: 'li', children: [createBranch({ tag: 'li', children: [text('x')] })] })] })]);
+    expect(exportComponent(nested, { framework: 'svelte' }).files[0].contents).toMatch(/<li[^>]*>\s*<div[^>]*>x<\/div>/);
+  });
+
+  it('keeps strikethrough mixed with emphasis, trailing list spaces and headerless tables in Markdown', () => {
+    for (const html of ['<p><strong><del>a <em>b</em></del></strong></p>', '<p><del>was <s>old</s></del></p>', '<ul><li>a\u00a0</li></ul>', '<table><tbody><tr><td>a</td></tr></tbody></table>']) {
+      expect(mdRoundTrip(html)).toBe(JSON.stringify(shape(imported(html).root)));
+    }
+  });
+
+  it('keeps a leading newline in <pre> through HTML', () => {
+    const tree = page([createBranch({ tag: 'pre', children: [text('\nline2')] })]);
+    const back = importDocument(exportTree(tree, 'html'), 'html');
+    const root = back.kind === 'tree' ? back.tree.root : back.forest.trees[0].root;
+    expect(JSON.stringify(shape(root))).toContain('"\\nline2"');
+  });
+
+  it('writes React attributes its types and renderer accept', () => {
+    const def = createComponent('Card', createBranch({ tag: 'div', children: [createBranch({ tag: 'a', attrs: { hidden: 'until-found', tabindex: '{{tab}}' }, children: [text('x')] })] }), {
+      props: [{ name: 'tab', type: 'text' }],
+    } as never);
+    const out = exportComponentDef(def, { framework: 'react' }).files[0].contents;
+    expect(out).toContain(' hidden');
+    expect(out).not.toContain('until-found');
+    expect(out).toContain("tab == null || tab === ''");
   });
 });
