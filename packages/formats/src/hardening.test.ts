@@ -589,7 +589,7 @@ describe('pass 15 fixes', () => {
       props: [{ name: 'disabled', type: 'text', default: '' }, { name: 'pressed', type: 'boolean', default: '' }],
     } as never);
     const out = exportComponentDef(btn, { framework: 'react', typescript: true }).files[0].contents;
-    expect(out).toContain("disabled={disabled !== 'false'}");
+    expect(out).toContain("disabled={String(disabled) !== 'false'}");
     expect(out).toContain('title={String(pressed)}');
     expect(out).toContain('tabIndex={globalThis.Number(pressed)}');
   });
@@ -599,5 +599,45 @@ describe('pass 15 fixes', () => {
     const all = exportStorybook(createForest('Site', [tree])).files.map((f) => f.content).join('\n');
     expect(all).toContain('export const Step1a ');
     expect(all).toContain('export const Step1A2 ');
+  });
+});
+
+describe('pass 16 fixes', () => {
+  const imported = (html: string) => {
+    const doc = importDocument(`<body>${html}</body>`, 'html');
+    return doc.kind === 'tree' ? doc.tree : doc.forest.trees[0];
+  };
+  const texts = (node: TreeNode): string[] => ('children' in node ? node.children.flatMap(texts) : node.type === 'text' ? [node.value] : []);
+
+  it('keeps a whitespace-only text at the edge of an inline element', () => {
+    expect(texts(imported('<p><strong><em>Note:</em> </strong>text</p>').root).join('')).toBe('Note: text');
+    expect(texts(imported('<p>Go<span> <b>now</b></span></p>').root).join('')).toBe('Go now');
+  });
+
+  it('keeps a whitespace-only edge text in Vue', () => {
+    const out = exportComponent(imported('<p><strong><em>Note:</em> </strong>text</p>'), { framework: 'vue' }).files[0].contents;
+    expect(out).toContain("</em>{{ ' ' }}</strong>");
+  });
+
+  it('binds boolean attributes the same way in every export', () => {
+    const def = createComponent('Btn', createBranch({ tag: 'button', attrs: { disabled: '{{off}}', hidden: '{{gone}}' } }), {
+      props: [{ name: 'off', type: 'text', default: 'false' }, { name: 'gone', type: 'boolean', default: '' }],
+    } as never);
+    const react = exportComponentDef(def, { framework: 'react', typescript: true }).files[0].contents;
+    expect(react).toContain("disabled={String(off) !== 'false'}");
+    expect(react).toContain('hidden={gone}');
+    const vue = exportComponentDef(def, { framework: 'vue' }).files[0].contents;
+    expect(vue).toContain(`:disabled="off !== 'false'"`);
+    expect(vue).toContain(':hidden="gone"');
+    const svelte = exportComponentDef(def, { framework: 'svelte' }).files[0].contents;
+    expect(svelte).toContain("disabled={off !== 'false'}");
+    expect(svelte).toContain('hidden={gone}');
+    // The editor's expansion leaves both off.
+    const inst = instantiateComponent(def);
+    expect(inst.attrs.disabled).toBeUndefined();
+    expect(inst.attrs.hidden).toBeUndefined();
+    const on = instantiateComponent(def, { off: '', gone: 'true' });
+    expect(on.attrs.disabled).toBe('');
+    expect(on.attrs.hidden).toBe('true');
   });
 });

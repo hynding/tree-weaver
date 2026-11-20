@@ -394,3 +394,13 @@ describe('pass 15 fixes', () => {
     expect(result.warnings.filter((i) => /Duplicate id/.test(i.message))).toEqual([]);
   });
 });
+
+describe('pass 16 fixes', () => {
+  it('rejects an empty repeat() at once', async () => {
+    const { parseTracks } = await import('./index');
+    const start = Date.now();
+    expect(parseTracks('repeat(1000000000000, )')).toBeNull();
+    expect(Date.now() - start).toBeLessThan(100);
+    expect(parseTracks('repeat(3, 1fr)')).toHaveLength(3);
+  });
+});

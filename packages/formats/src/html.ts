@@ -184,7 +184,9 @@ function convertChildren(nodes: ChildNode[], ctx: Ctx, raw: boolean, svg = false
         if (i === 0 && !inline) value = value.trimStart();
         if (i === kept.length - 1 && !inline) value = value.trimEnd();
         // Whitespace only matters between two pieces of inline content.
-        if (value.trim() === '') value = !svg && inlineish(kept[i - 1]) && inlineish(kept[i + 1]) ? ' ' : '';
+        // At an inline element's edge the other side is the text around the element.
+        const side = (n: ChildNode | undefined) => (n ? inlineish(n) : inline);
+        if (value.trim() === '') value = !svg && side(kept[i - 1]) && side(kept[i + 1]) ? ' ' : '';
       }
       if (value) items.push({ kind: 'leaf', type: 'text', value });
       return;

@@ -1,4 +1,5 @@
 import {
+  BOOLEAN_ATTRS,
   canonicalSvgAttr,
   canonicalTag,
   DISPLAYS,
@@ -475,6 +476,12 @@ function childLines(children: El[], pad: string, write: (c: El) => string): stri
  */
 function inlineChildren(children: El[], mode: 'html' | 'vue' | 'svelte', write: (c: El) => string): string {
   const parts = children.map(write);
+  if (mode === 'vue' && parts.length) {
+    // Vue drops a whitespace-only first or last child.
+    const blank = (i: number) => children[i].kind === 'text' && parts[i] !== '' && parts[i].trim() === '';
+    if (blank(0)) parts[0] = `{{ ' ' }}`;
+    if (blank(parts.length - 1)) parts[parts.length - 1] = `{{ ' ' }}`;
+  }
   if (mode === 'svelte' && parts.length) {
     if (children[0].kind === 'text' && /^\s/.test(parts[0])) parts[0] = `{' '}${parts[0].replace(/^\s+/, '')}`;
     const last = parts.length - 1;
@@ -484,7 +491,8 @@ function inlineChildren(children: El[], mode: 'html' | 'vue' | 'svelte', write: 
 }
 
 /** HTML (also Vue and Svelte templates). */
-function writeHtml(el: El, depth: number, mode: 'html' | 'vue' | 'svelte', props = false): string {
+/** `props` is false outside a component; in one, the names of its boolean props. */
+function writeHtml(el: El, depth: number, mode: 'html' | 'vue' | 'svelte', props: false | ReadonlySet<string> = false): string {
   if (el.kind === 'text' && props && mode !== 'html' && hasProps(el.value)) {
     // Vue: {{ title }}; Svelte: {title}. Literal parts are escaped as usual.
     return segments(el.value)
@@ -492,7 +500,7 @@ function writeHtml(el: El, depth: number, mode: 'html' | 'vue' | 'svelte', props
       .join('');
   }
   if (el.kind === 'el' && props && mode !== 'html') {
-    const inner = writePropsEl(el, depth, mode);
+    const inner = writePropsEl(el, depth, mode, props);
     if (el.cond && mode === 'svelte') return `{#if ${el.cond.negate ? '!' : ''}${el.cond.prop}}${inner}{/if}`;
     return inner;
   }
@@ -569,11 +577,6 @@ const JSX_ATTRS: Record<string, string> = {
   'xml:lang': 'xmlLang',
 };
 
-/** HTML attributes that are on when present; any other empty attribute is written as `=""` in JSX. */
-const BOOLEAN_ATTRS = new Set([
-  'allowfullscreen', 'async', 'autofocus', 'autoplay', 'checked', 'controls', 'default', 'defer', 'disabled', 'formnovalidate', 'hidden', 'inert',
-  'ismap', 'itemscope', 'loop', 'multiple', 'muted', 'nomodule', 'novalidate', 'open', 'playsinline', 'readonly', 'required', 'reversed', 'selected',
-]);
 
 /** HTML attributes React's types take as numbers. */
 const NUMERIC_ATTRS = new Set(['tabindex', 'colspan', 'rowspan', 'rows', 'cols', 'size', 'maxlength', 'minlength', 'start', 'span']);
@@ -595,13 +598,20 @@ export function jsxAttrName(name: string): string {
 }
 
 /** An element of a Vue or Svelte component template, with prop bindings. */
-function writePropsEl(el: El & { kind: 'el' }, depth: number, mode: 'vue' | 'svelte'): string {
+function writePropsEl(el: El & { kind: 'el' }, depth: number, mode: 'vue' | 'svelte', props: ReadonlySet<string>): string {
   // Escape for HTML first, then Svelte's braces, so the &#123; entities are not escaped again.
   const esc = (v: string) => (mode === 'svelte' ? escapeAttr(v).replace(/[{}]/g, (c) => (c === '{' ? '&#123;' : '&#125;')) : escapeAttr(v));
   const attrs = el.attrs
     .map(([n, v]) => {
       const variant = n === 'class' && el.variantClass;
       if (!hasProps(v) && !variant) return v === '' && !el.svg ? ` ${n}` : ` ${n}="${esc(v)}"`;
+      // A boolean attribute is on unless its prop is off (see `expandComponent` in core): a
+      // boolean prop as it is, any other value unless it is "false".
+      if (!variant && !el.svg && BOOLEAN_ATTRS.has(n.toLowerCase())) {
+        const expr = propExpr(v);
+        const on = props.has(expr) ? expr : `${expr} !== 'false'`;
+        return mode === 'vue' ? ` :${n}="${escapeAttr(on)}"` : ` ${n}={${on}}`;
+      }
       if (mode === 'vue') return ` :${n}="${escapeAttr(variant ? templateLiteral(v, variantSuffix) : propExpr(v))}"`;
       // Svelte: attribute values can hold {expressions} between literal text.
       const body = segments(v)
@@ -613,9 +623,9 @@ function writePropsEl(el: El & { kind: 'el' }, depth: number, mode: 'vue' | 'sve
   const cond = mode === 'vue' && el.cond ? ` v-if="${el.cond.negate ? '!' : ''}${el.cond.prop}"` : '';
   if (!el.svg && VOID_TAGS.has(el.tag)) return `<${el.tag}${cond}${attrs}>`;
   if (!el.children.length) return el.svg ? `<${el.tag}${cond}${attrs} />` : `<${el.tag}${cond}${attrs}></${el.tag}>`;
-  if (oneLine(el.children)) return `<${el.tag}${cond}${attrs}>${inlineChildren(el.children, mode, (c) => writeHtml(c, depth + 1, mode, true))}</${el.tag}>`;
+  if (oneLine(el.children)) return `<${el.tag}${cond}${attrs}>${inlineChildren(el.children, mode, (c) => writeHtml(c, depth + 1, mode, props))}</${el.tag}>`;
   const pad = '  '.repeat(depth + 1);
-  return `<${el.tag}${cond}${attrs}>\n${childLines(el.children, pad, (c) => writeHtml(c, depth + 1, mode, true))}\n${'  '.repeat(depth)}</${el.tag}>`;
+  return `<${el.tag}${cond}${attrs}>\n${childLines(el.children, pad, (c) => writeHtml(c, depth + 1, mode, props))}\n${'  '.repeat(depth)}</${el.tag}>`;
 }
 
 const jsxString = (value: string): string => JSON.stringify(value);
@@ -651,7 +661,7 @@ function writeJsx(el: El, depth: number, props: false | ReadonlySet<string> = fa
         // `globalThis.Number`: a component or prop may itself be called Number.
         if (props.has(expr)) return ` ${name}={${boolAttr ? expr : numeric ? `globalThis.Number(${expr})` : `String(${expr})`}}`;
         // A text prop turns a boolean attribute on as HTML does (any value), unless it is "false".
-        if (boolAttr) return ` ${name}={${expr} !== 'false'}`;
+        if (boolAttr) return ` ${name}={String(${expr}) !== 'false'}`;
         // An empty prop leaves the attribute off, as the string form does, rather than giving 0.
         return numeric ? ` ${name}={${expr} === '' ? undefined : globalThis.Number(${expr})}` : ` ${name}={${expr}}`;
       }
@@ -950,6 +960,7 @@ export function exportComponentDef(def: ComponentDef, opts: ComponentOptions): C
   const options = variants.map((v) => slugs.get(v)!);
   // With variants, `variant` is the generated variant prop; a prop of the same name would be declared twice.
   const allProps = variants.length ? [...props.filter((p) => p.name !== 'variant'), { name: 'variant', type: 'enum' as const, default: '', options }] : props;
+  const booleanProps: ReadonlySet<string> = new Set(allProps.filter((p) => p.type === 'boolean').map((p) => p.name));
   const helper = variants.length ? variantHelper(rootCls, opts.typescript && framework === 'react' ? name : undefined) : '';
 
   const css = styling === 'css' ? renderDisplayCss(build.rules) : '';
@@ -981,7 +992,7 @@ export function exportComponentDef(def: ComponentDef, opts: ComponentOptions): C
       const params = allProps.length ? `{ ${allProps.map((p) => `${p.name} = ${jsDefault(p)}`).join(', ')} }${opts.typescript ? `: ${name}Props` : ''}` : '';
       files.push({
         path: entry,
-        contents: `// ${header}\n${imports ? `${imports}\n` : ''}${iface}${helper ? `\n${helper}\n` : ''}\nexport default function ${name}(${params}) {\n  return (\n    ${writeJsx(root, 2, new Set(allProps.filter((p) => p.type === 'boolean').map((p) => p.name)))}\n  );\n}\n`,
+        contents: `// ${header}\n${imports ? `${imports}\n` : ''}${iface}${helper ? `\n${helper}\n` : ''}\nexport default function ${name}(${params}) {\n  return (\n    ${writeJsx(root, 2, booleanProps)}\n  );\n}\n`,
       });
       break;
     }
@@ -992,7 +1003,7 @@ export function exportComponentDef(def: ComponentDef, opts: ComponentOptions): C
         ? `<script setup>\ndefineProps({\n${allProps.map((p) => `  ${p.name}: { type: ${vueType(p)}, default: ${jsDefault(p)} },`).join('\n')}\n});\n${helper ? `\n${helper}\n` : ''}</script>\n\n`
         : '';
       const style = [kitCss ? `<style src="./kits.css"></style>` : '', css ? `<style>\n${css}\n</style>` : ''].filter(Boolean).join('\n');
-      files.push({ path: entry, contents: `<!-- ${header} -->\n${script}<template>\n  ${writeHtml(root, 1, 'vue', true)}\n</template>\n${style ? `\n${style}\n` : ''}` });
+      files.push({ path: entry, contents: `<!-- ${header} -->\n${script}<template>\n  ${writeHtml(root, 1, 'vue', booleanProps)}\n</template>\n${style ? `\n${style}\n` : ''}` });
       break;
     }
     case 'svelte': {
@@ -1000,7 +1011,7 @@ export function exportComponentDef(def: ComponentDef, opts: ComponentOptions): C
       const lines = [kitCss ? `  import './kits.css';` : '', ...allProps.map((p) => `  export let ${p.name} = ${jsDefault(p)};`), helper ? `\n${helper.replace(/^(?=.)/gm, '  ')}` : ''].filter(Boolean);
       const script = lines.length ? `<script>\n${lines.join('\n')}\n</script>\n\n` : '';
       const style = css ? `\n<style>\n  /* Global: the classes are generated, so scoping only gets in the way of overrides. */\n${css.replace(/^(\s*)(\.[^{}\n]*?)\s*\{/gm, '$1:global($2) {')}\n</style>\n` : '';
-      files.push({ path: entry, contents: `<!-- ${header} -->\n${script}${writeHtml(root, 0, 'svelte', true)}\n${style}` });
+      files.push({ path: entry, contents: `<!-- ${header} -->\n${script}${writeHtml(root, 0, 'svelte', booleanProps)}\n${style}` });
       break;
     }
     default:

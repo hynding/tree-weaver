@@ -79,8 +79,10 @@ export function parseTracks(template: string | undefined): GridTrack[] | null {
       const inner = splitTopLevel(repeat[2]);
       if (inner.some((t) => t.startsWith('['))) return null;
       // More columns than anyone edits by hand is treated as custom, rather than expanded.
-      if (Number(repeat[1]) * inner.length + tracks.length > MAX_TRACKS) return null;
-      for (let i = 0; i < Number(repeat[1]); i++) tracks.push(...inner.map(parseTrack));
+      // An empty repeat() is invalid CSS (and would loop `count` times for nothing).
+      const count = Number(repeat[1]);
+      if (!inner.length || count > MAX_TRACKS || count * inner.length + tracks.length > MAX_TRACKS) return null;
+      for (let i = 0; i < count; i++) tracks.push(...inner.map(parseTrack));
     } else if (token.startsWith('repeat(') || token === 'subgrid' || token === 'masonry') return null;
     else tracks.push(parseTrack(token));
   }

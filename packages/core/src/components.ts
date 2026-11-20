@@ -119,6 +119,12 @@ export function fillPlaceholders(value: string, values: Record<string, string>):
 
 const truthy = (v: string | undefined) => !!v && v !== 'false' && v !== '0';
 
+/** HTML attributes that are on when present, whatever their value. */
+export const BOOLEAN_ATTRS: ReadonlySet<string> = new Set([
+  'allowfullscreen', 'async', 'autofocus', 'autoplay', 'checked', 'controls', 'default', 'defer', 'disabled', 'formnovalidate', 'hidden', 'inert',
+  'ismap', 'itemscope', 'loop', 'multiple', 'muted', 'nomodule', 'novalidate', 'open', 'playsinline', 'readonly', 'required', 'reversed', 'selected',
+]);
+
 /** Prop values for an instance: its own, then the defaults. */
 export function instanceValues(def: ComponentDef, instance: ComponentInstance | undefined): Record<string, string> {
   const values: Record<string, string> = {};
@@ -187,7 +193,18 @@ export function expandComponent(def: ComponentDef, instance: ComponentInstance, 
       if (negate ? on : !on) return null;
     }
     const attrs: Record<string, string> = {};
-    for (const [k, v] of Object.entries(node.attrs)) if (k !== IF_ATTR) attrs[k] = fillPlaceholders(v, values);
+    for (const [k, v] of Object.entries(node.attrs)) {
+      if (k === IF_ATTR) continue;
+      // A boolean attribute bound to a prop is left off when the prop is off: a boolean prop that
+      // isn't truthy, or any other prop set to "false". The component exports follow the same rule.
+      const bound = BOOLEAN_ATTRS.has(k.toLowerCase()) ? /^\{\{\s*([A-Za-z][A-Za-z0-9_]*)\s*\}\}$/.exec(v.trim()) : null;
+      if (bound) {
+        const value = Object.hasOwn(values, bound[1]) ? values[bound[1]] : '';
+        const isBool = def.props.some((p) => p.name === bound[1] && p.type === 'boolean');
+        if (isBool ? !truthy(value) : value === 'false') continue;
+      }
+      attrs[k] = fillPlaceholders(v, values);
+    }
     const branch: Branch = {
       ...node,
       id: isRoot ? instanceId : expandedId(instanceId, node.id),
