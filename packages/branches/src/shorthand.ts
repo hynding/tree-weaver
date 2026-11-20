@@ -59,6 +59,9 @@ const HTML_TAGS = [
 const KNOWN_TAGS = new Set([...HTML_TAGS, ...SVG_BRANCH_TAGS.map((t) => t.toLowerCase())]);
 
 const SELECTOR = /^([A-Za-z][A-Za-z0-9-]*)((?:\.[A-Za-z_][\w-]*)*)(?:#([A-Za-z][\w-]*))?((?:\[[A-Za-z_:][\w:.-]*(?:=(?:"[^"]*"|'[^']*'|[^\]]*))?\])*)$/;
+/** The most columns a `grid` takes, so a number can't make a million cells. */
+const MAX_GRID_COLUMNS = 24;
+
 const ATTR = /\[([A-Za-z_:][\w:.-]*)(?:=("[^"]*"|'[^']*'|[^\]]*))?\]/g;
 
 /**
@@ -130,7 +133,8 @@ function expandString(value: string, path: string): TreeNode {
   const m = splitStringForm(value);
   if (!m) return text(value);
   const content = m[1] ?? '';
-  if (m[0].toLowerCase() === 'img') {
+  // Lower case only, like other tags: a capitalised label (`IMG: …`) stays text.
+  if (m[0] === 'img') {
     const [src, ...alt] = content.split(' | ');
     return imageLeaf(src, alt.length ? alt.join(' | ') : '');
   }
@@ -234,6 +238,7 @@ function expandObject(value: Obj, path: string): TreeNode {
   switch (key as (typeof LAYOUT_KEYS)[number]) {
     case 'grid': {
       const children = kids(listOf(value.children, path));
+      if (typeof body === 'number' && Number.isInteger(body) && body > MAX_GRID_COLUMNS) fail(`"grid" takes 1 to ${MAX_GRID_COLUMNS} columns`, path);
       if (typeof body === 'number' && Number.isInteger(body) && body > 0) {
         node = responsiveGrid(body, children, typeof value.name === 'string' ? value.name : 'Grid');
       } else if (typeof body === 'string' && body.trim()) {

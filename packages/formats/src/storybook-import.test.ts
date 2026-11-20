@@ -141,6 +141,14 @@ describe('Storybook styles', () => {
     expect(kits.some((k) => k.css.includes('sb-show-main'))).toBe(false);
   });
 
+  it('puts @import rules first in the runtime styles', () => {
+    const kits = storyKits(
+      [snapshot({ sheets: [{ css: '.btn{color:red}' }] }), snapshot({ id: 'b', sheets: [{ css: '@import url("https://fonts.example/inter.css"); .card{margin:0}' }] })],
+      { name: 'SB', styles: 'link', source: 'x' },
+    );
+    expect(kits.at(-1)!.css.trim().startsWith('@import')).toBe(true);
+  });
+
   it('copies stylesheet files when asked', () => {
     const [file] = storyKits([snapshot({ sheets: [sheets[0]] })], { name: 'SB', styles: 'copy', source: 'x' });
     expect(file.href).toBeUndefined();

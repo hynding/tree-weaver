@@ -199,6 +199,8 @@ function list(b: Branch, pad = ''): string | null {
   const lines: string[] = [];
   const start = Number.parseInt(b.attrs.start ?? '1', 10);
   let n = Number.isFinite(start) ? start : 1;
+  // CommonMark list markers are 0 to 999999999; any other start keeps the HTML form.
+  if (ordered && (n < 0 || n + b.children.length - 1 > 999999999)) return null;
   for (const item of b.children) {
     if (!isBranch(item) || item.tag !== 'li' || needsMeta(item)) return null;
     const inlineKids = item.children.filter(isInlineNode);

@@ -33,6 +33,8 @@ export interface Blueprint {
 
 /** A responsive grid: `columns` on desktop, two on tablet, one on a portrait phone. */
 export function responsiveGrid(columns: number, children: TreeNode[] = [], name = 'Grid'): Branch {
+  // Capped so a stray number can't build a huge grid of placeholder cells.
+  columns = Math.min(Math.max(1, Math.floor(columns) || 1), 24);
   const styles: DisplayStyles = {
     lg: { display: 'grid', 'grid-template-columns': equalColumns(columns), gap: '1rem' },
   };

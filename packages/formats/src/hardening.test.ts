@@ -641,3 +641,47 @@ describe('pass 16 fixes', () => {
     expect(on.attrs.hidden).toBe('true');
   });
 });
+
+describe('pass 17 fixes', () => {
+  const imported = (html: string) => {
+    const doc = importDocument(`<body>${html}</body>`, 'html');
+    return doc.kind === 'tree' ? doc.tree : doc.forest.trees[0];
+  };
+  const texts = (node: TreeNode): string[] => ('children' in node ? node.children.flatMap(texts) : node.type === 'text' ? [node.value] : []);
+
+  it('leaves whitespace inside <pre> alone in Svelte and Vue', () => {
+    const tree = imported('<pre><code>    indented();\n  more();\n\n</code></pre>');
+    for (const framework of ['svelte', 'vue'] as const) {
+      const out = exportComponent(tree, { framework }).files[0].contents;
+      expect(out).toContain('    indented();\n  more();\n\n</code>');
+      expect(out).not.toContain("' '");
+    }
+  });
+
+  it('keeps the space beside a comment and between other inline elements', () => {
+    expect(texts(imported('<p>Hello<!-- name --> <b>World</b></p>').root).join('')).toBe('Hello World');
+    expect(texts(imported('<p><my-badge>New</my-badge> <b>Item</b></p>').root).join('')).toBe('New Item');
+  });
+
+  it('drops the line break after <pre> as a browser does', () => {
+    expect(texts(imported('<pre>\n  def f():</pre>').root)).toEqual(['  def f():']);
+  });
+
+  it('tests data-show-if on a text prop the way the editor does', () => {
+    const def = createComponent('Inbox', createBranch({ tag: 'div', children: [text('Inbox'), createBranch({ tag: 'span', attrs: { 'data-show-if': 'count' }, children: [text('{{count}}')] })] }), {
+      props: [{ name: 'count', type: 'text', default: '0' }],
+    } as never);
+    expect(exportComponentDef(def, { framework: 'react' }).files[0].contents).toContain("(count && String(count) !== 'false' && String(count) !== '0') && (");
+    expect(exportComponentDef(def, { framework: 'svelte' }).files[0].contents).toContain("{#if (count && String(count) !== 'false' && String(count) !== '0')}");
+    expect(exportComponentDef(def, { framework: 'vue' }).files[0].contents).toContain('v-if="(count &amp;&amp; String(count) !== \'false\'');
+  });
+
+  it('keeps an ordered list with an unusual start as HTML in Markdown', () => {
+    const tree = imported('<ol start="-1"><li>a</li><li>b</li></ol>');
+    const md = exportTree(tree, 'markdown');
+    expect(md).not.toMatch(/^-1\. a/m);
+    const back = importDocument(md, 'markdown');
+    const root = back.kind === 'tree' ? back.tree.root : back.forest.trees[0].root;
+    expect(JSON.stringify(root)).toContain('"tag":"ol"');
+  });
+});

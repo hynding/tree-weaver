@@ -7,7 +7,6 @@ import {
   TOKENS_KIT_SOURCE,
   createId,
   displayForMedia,
-  INLINE_TAGS,
   isShapeTag,
   isStylesheetUrl,
   LEAF_ATTR,
@@ -23,6 +22,7 @@ import {
 import type { ChildNode, Element } from 'domhandler';
 import { parseDocument } from 'htmlparser2';
 import { fromData } from './data';
+import { isInlineTag } from './inline';
 import type { TreeDocument } from './types';
 
 export interface HtmlExportOptions {
@@ -131,7 +131,15 @@ function parseDirectiveJson(text: string): RawNode {
   }
 }
 
-const inlineish = (n: ChildNode | undefined): boolean => !!n && (n.type === 'text' || (isElement(n) && INLINE_TAGS.has(n.name)));
+const inlineish = (n: ChildNode | undefined): boolean => !!n && (n.type === 'text' || (isElement(n) && isInlineTag(n.name)));
+
+/** A browser drops one line break straight after `<pre>`, `<textarea>` or `<listing>`; so does the import. */
+function dropLeadingNewline(tag: string, children: RawNode[]): RawNode[] {
+  const first = children[0];
+  if (!['pre', 'textarea', 'listing'].includes(tag) || first?.kind !== 'leaf' || typeof first.value !== 'string' || !/^\r?\n/.test(first.value)) return children;
+  const value = first.value.replace(/^\r?\n/, '');
+  return value ? [{ ...first, value }, ...children.slice(1)] : children.slice(1);
+}
 
 function applyMeta(node: RawNode, meta: RawNode, ctx: Ctx): void {
   if (node.kind !== 'branch') return;
@@ -147,7 +155,10 @@ function applyMeta(node: RawNode, meta: RawNode, ctx: Ctx): void {
 
 function convertChildren(nodes: ChildNode[], ctx: Ctx, raw: boolean, svg = false, inline = false): RawNode[] {
   // An SVG <title> is the drawing's accessible name, so it stays.
-  const kept = nodes.filter((n) => n.type === 'text' || n.type === 'comment' || (isElement(n) && (!SKIP_TAGS.has(n.name) || (svg && n.name === 'title'))));
+  // Plain comments are dropped here, so the text either side of one still sees its neighbours.
+  const kept = nodes.filter(
+    (n) => n.type === 'text' || (n.type === 'comment' && DIRECTIVE.test(n.data)) || (isElement(n) && (!SKIP_TAGS.has(n.name) || (svg && n.name === 'title'))),
+  );
   // Stack of open `tw:branch` directives; the bottom entry collects this level's output.
   const stack: { branch: RawNode | null; items: RawNode[] }[] = [{ branch: null, items: [] }];
   const close = () => {
@@ -281,7 +292,7 @@ export function convertParts(tag: string, attribs: Record<string, string>, child
     classes: a.class ?? '',
     attrs,
     styles,
-    children: impliedTbody(tag, convertChildren(children, ctx, raw || RAW_TEXT_TAGS.has(tag), childrenInSvg({ tag }, svg), !svg && INLINE_TAGS.has(tag))),
+    children: dropLeadingNewline(tag, impliedTbody(tag, convertChildren(children, ctx, raw || RAW_TEXT_TAGS.has(tag), childrenInSvg({ tag }, svg), !svg && isInlineTag(tag)))),
   };
 }
 

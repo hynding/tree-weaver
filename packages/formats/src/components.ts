@@ -40,6 +40,7 @@ import {
   resolveStyles,
   walk,
 } from '@tree-weaver/core';
+import { isInlineTag, PRE_TAGS } from './inline';
 import { commentText, slugify } from './slug';
 import { DESIGN_TOKENS_DART, DESIGN_TOKENS_SWIFT, dartFileName, exportFlutter, exportFlutterTokens, exportSwiftUI, exportSwiftUITokens, nativeTypeName } from './native';
 import { tailwindPreset, tailwindThemeCss, tailwindTokenClass } from './tokens';
@@ -261,8 +262,24 @@ type El =
       cond?: { prop: string; negate: boolean };
       /** Component exports: the root's class list gets the variant modifier classes from the `variant` prop. */
       variantClass?: boolean;
+      /** Inside a `<pre>` (or a textarea): whitespace is written exactly as it is. */
+      pre?: boolean;
     }
   | { kind: 'text'; value: string };
+
+/** Mark `<pre>` and `<textarea>` elements and everything inside them. */
+function markPre(el: El, inPre = false): void {
+  if (el.kind !== 'el') return;
+  const pre = inPre || PRE_TAGS.has(el.tag);
+  if (pre) el.pre = true;
+  el.children.forEach((c) => markPre(c, pre));
+}
+
+/** A `data-show-if` test as the editor makes it: a boolean prop as it is; any other prop is off when '', 'false' or '0'. */
+function condExpr(cond: { prop: string; negate: boolean }, props: ReadonlySet<string>): string {
+  const on = props.has(cond.prop) ? cond.prop : `(${cond.prop} && String(${cond.prop}) !== 'false' && String(${cond.prop}) !== '0')`;
+  return cond.negate ? `!${on}` : on;
+}
 
 interface Build {
   /** Prop defaults (component exports), to check URLs as they will be filled. */
@@ -446,12 +463,7 @@ const variantSuffix = `\${${VARIANT_CALL}}`;
 
 /* ------------------------------------------------------------- writers */
 
-const INLINE = new Set([
-  ...INLINE_TAGS,
-  'audio', 'canvas', 'iframe', 'math', 'meter', 'object', 'output', 'picture', 'progress', 'ruby', 'slot', 'svg', 'tspan', 'video',
-]);
-// A custom element (`my-badge`) is inline until styled otherwise.
-const isInlineEl = (el: El): boolean => el.kind === 'text' || INLINE.has(el.tag) || el.tag.includes('-');
+const isInlineEl = (el: El): boolean => el.kind === 'text' || isInlineTag(el.tag);
 /** Keep children on one line when line breaks could change the text: any text, or only inline elements. */
 const oneLine = (children: El[]): boolean => children.some((c) => c.kind === 'text') || children.every(isInlineEl);
 /**
@@ -474,8 +486,10 @@ function childLines(children: El[], pad: string, write: (c: El) => string): stri
  * Children written on one line. Svelte drops whitespace at the start and end of an element,
  * which shows inside inline elements (`<strong>Note: </strong>`), so it is written as `{' '}`.
  */
-function inlineChildren(children: El[], mode: 'html' | 'vue' | 'svelte', write: (c: El) => string): string {
+function inlineChildren(children: El[], mode: 'html' | 'vue' | 'svelte', write: (c: El) => string, pre = false): string {
   const parts = children.map(write);
+  // Both keep whitespace inside a <pre> as written.
+  if (pre) return parts.join('');
   if (mode === 'vue' && parts.length) {
     // Vue drops a whitespace-only first or last child.
     const blank = (i: number) => children[i].kind === 'text' && parts[i] !== '' && parts[i].trim() === '';
@@ -501,7 +515,7 @@ function writeHtml(el: El, depth: number, mode: 'html' | 'vue' | 'svelte', props
   }
   if (el.kind === 'el' && props && mode !== 'html') {
     const inner = writePropsEl(el, depth, mode, props);
-    if (el.cond && mode === 'svelte') return `{#if ${el.cond.negate ? '!' : ''}${el.cond.prop}}${inner}{/if}`;
+    if (el.cond && mode === 'svelte') return `{#if ${condExpr(el.cond, props)}}${inner}{/if}`;
     return inner;
   }
   if (el.kind === 'text') {
@@ -516,7 +530,7 @@ function writeHtml(el: El, depth: number, mode: 'html' | 'vue' | 'svelte', props
   const attrs = el.attrs.map(([n, v]) => (v === '' && !el.svg ? ` ${n}` : ` ${n}="${esc(v)}"`)).join('');
   if (!el.svg && VOID_TAGS.has(el.tag)) return `<${el.tag}${attrs}>`;
   if (!el.children.length) return el.svg ? `<${el.tag}${attrs} />` : `<${el.tag}${attrs}></${el.tag}>`;
-  if (oneLine(el.children)) return `<${el.tag}${attrs}>${inlineChildren(el.children, mode, (c) => writeHtml(c, depth + 1, mode))}</${el.tag}>`;
+  if (el.pre || oneLine(el.children)) return `<${el.tag}${attrs}>${inlineChildren(el.children, mode, (c) => writeHtml(c, depth + 1, mode), el.pre)}</${el.tag}>`;
   const pad = '  '.repeat(depth + 1);
   return `<${el.tag}${attrs}>\n${childLines(el.children, pad, (c) => writeHtml(c, depth + 1, mode))}\n${'  '.repeat(depth)}</${el.tag}>`;
 }
@@ -620,10 +634,10 @@ function writePropsEl(el: El & { kind: 'el' }, depth: number, mode: 'vue' | 'sve
       return ` ${n}="${body}${variant ? `{${VARIANT_CALL}}` : ''}"`;
     })
     .join('');
-  const cond = mode === 'vue' && el.cond ? ` v-if="${el.cond.negate ? '!' : ''}${el.cond.prop}"` : '';
+  const cond = mode === 'vue' && el.cond ? ` v-if="${escapeAttr(condExpr(el.cond, props))}"` : '';
   if (!el.svg && VOID_TAGS.has(el.tag)) return `<${el.tag}${cond}${attrs}>`;
   if (!el.children.length) return el.svg ? `<${el.tag}${cond}${attrs} />` : `<${el.tag}${cond}${attrs}></${el.tag}>`;
-  if (oneLine(el.children)) return `<${el.tag}${cond}${attrs}>${inlineChildren(el.children, mode, (c) => writeHtml(c, depth + 1, mode, props))}</${el.tag}>`;
+  if (el.pre || oneLine(el.children)) return `<${el.tag}${cond}${attrs}>${inlineChildren(el.children, mode, (c) => writeHtml(c, depth + 1, mode, props), el.pre)}</${el.tag}>`;
   const pad = '  '.repeat(depth + 1);
   return `<${el.tag}${cond}${attrs}>\n${childLines(el.children, pad, (c) => writeHtml(c, depth + 1, mode, props))}\n${'  '.repeat(depth)}</${el.tag}>`;
 }
@@ -644,7 +658,7 @@ function writeJsx(el: El, depth: number, props: false | ReadonlySet<string> = fa
   }
   if (props && el.cond) {
     const { cond, ...rest } = el;
-    return `{${cond.negate ? '!' : ''}${cond.prop} && (${writeJsx(rest, depth, props)})}`;
+    return `{${condExpr(cond, props)} && (${writeJsx(rest, depth, props)})}`;
   }
   const attrs = el.attrs
     // A `.` in a name is fine in HTML but not in JSX, and of the `xmlns:` names React knows only `xmlnsXlink`.
@@ -734,6 +748,7 @@ export function exportComponent(tree: Tree, opts: ComponentOptions): ComponentEx
   // A page root is a <body>; in a component it becomes a wrapper <div>.
   const rootTag = svgTree ? undefined : framework === 'html' ? 'body' : 'div';
   const root = branchEl(repairNesting(tree.root), build, false, rootTag);
+  markPre(root);
   if (root.kind === 'el' && !svgTree && framework !== 'html' && !root.attrs.some(([n]) => n === 'class')) {
     // Name the wrapper so it can be styled from outside.
     root.attrs.unshift(['class', cssIdent(slugify(tree.name, 'layout'))]);
@@ -951,6 +966,7 @@ export function exportComponentDef(def: ComponentDef, opts: ComponentOptions): C
     classes: new Map(),
   };
   const root = branchEl(repairNesting(def.root), build, false);
+  markPre(root);
   // The editor ignores `data-show-if` on a component's root (see expandComponent), and so does the export.
   if (root.kind === 'el') delete root.cond;
   const rootCls = build.classes!.get(def.root.id)!;

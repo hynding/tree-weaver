@@ -424,6 +424,9 @@ function placement(root: Branch, targetId: string, position: DropPosition): { pa
 }
 
 /** Shapes and SVG groups only go inside an `<svg>`, and HTML can't be drawn inside one. Says why with a toast. */
+/** Said when an edit would change what an instance holds, which comes from its component. */
+export const INSIDE_INSTANCE = 'This is part of a component instance: edit the component, or detach the instance, to change it';
+
 /** The instance a node is part of (itself, or its nearest instance ancestor). */
 export function instanceOwner(root: Branch, id: string): Branch | null {
   const node = findNode(root, id);
@@ -506,6 +509,11 @@ export function moveTo(id: string, targetId: string, position: DropPosition): vo
   const tree = currentTree();
   const node = tree && findNode(tree.root, id);
   if (id === targetId || !tree || !node) return;
+  // Moved out, the instance would put it straight back, leaving two nodes with one id.
+  if (instanceRoleIn(tree.root, id) === 'inside') {
+    toast(INSIDE_INSTANCE, 'error');
+    return;
+  }
   const { parentId, index } = placement(tree.root, targetId, position);
   // Checked against the tree without the node, as it will be once moved.
   const without = removeNode(tree.root, id);

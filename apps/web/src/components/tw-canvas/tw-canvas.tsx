@@ -21,6 +21,7 @@ import {
   resolveStyles,
   trackLabel,
   isSvgRoot,
+  instanceRoleIn,
   renderTreeBody,
   renderTreeCss,
   type Branch,
@@ -29,7 +30,7 @@ import {
   type GridTrack,
 } from '@tree-weaver/core';
 import { allKits, currentTree, insertBlueprint,
-  insertComponent, moveTo, pathTo, select, selectedNode, setStyleValue, updateLeaf, type DropPosition } from '../../store/actions';
+  insertComponent, INSIDE_INSTANCE, moveTo, pathTo, select, selectedNode, setStyleValue, toast, updateLeaf, type DropPosition } from '../../store/actions';
 import { onChange, state } from '../../store/editor';
 import { dropLibraryBranch } from '../../store/storybook';
 import { nodeKind, nodeLabel } from '../../utils/describe';
@@ -321,6 +322,12 @@ export class TwCanvas {
     if (!span || span.tagName === 'IMG' || span.namespaceURI !== 'http://www.w3.org/1999/xhtml') return;
     e.preventDefault();
     const id = span.getAttribute(LEAF_ATTR)!;
+    // An instance's text comes from its component; an edit here would be undone at once.
+    const tree = currentTree();
+    if (tree && instanceRoleIn(tree.root, id) === 'inside') {
+      toast(INSIDE_INSTANCE, 'error');
+      return;
+    }
     const original = span.textContent ?? '';
     this.editing = span;
     span.setAttribute('contenteditable', 'plaintext-only');

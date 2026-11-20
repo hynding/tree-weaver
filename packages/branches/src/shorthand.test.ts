@@ -144,3 +144,15 @@ describe('capitalised labels', () => {
     expect(expandShorthand('address: 1 Main St')).toMatchObject({ kind: 'branch', tag: 'address' });
   });
 });
+
+describe('pass 17 fixes', () => {
+  it('keeps a capitalised IMG: label as text', () => {
+    expect((expandShorthand('IMG: see the gallery') as Leaf).type).toBe('text');
+    expect((expandShorthand('img: /a.png | A') as Leaf).type).toBe('image');
+  });
+
+  it('caps grid columns', () => {
+    expect(() => expandShorthand({ grid: 1e9 })).toThrow(/1 to 24 columns/);
+    expect((expandShorthand({ grid: 3 }) as Branch).children).toHaveLength(3);
+  });
+});

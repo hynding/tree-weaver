@@ -329,7 +329,10 @@ export function storyKits(snapshots: StorySnapshot[], opts: StoryKitOptions): De
     if (opts.styles === 'link') kit.href = href;
     kits.push(kit);
   }
-  if (rules.length) kits.push({ id: createId('k'), name: `${opts.name}: runtime styles`, css: rules.join('\n'), enabled: true, source: opts.source });
+  // `@import` and `@charset` count only before every other rule, so they go first.
+  const leading = (r: string) => /^@(import|charset)\b/i.test(r.trim());
+  const ordered = [...rules.filter(leading), ...rules.filter((r) => !leading(r))];
+  if (rules.length) kits.push({ id: createId('k'), name: `${opts.name}: runtime styles`, css: ordered.join('\n'), enabled: true, source: opts.source });
   return kits;
 }
 
