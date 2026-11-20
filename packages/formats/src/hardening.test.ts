@@ -1595,3 +1595,22 @@ describe('pass 48 fixes', () => {
     expect(theme).toMatch(/--text-lg--line-height: initial;/);
   });
 });
+
+describe('pass 49 fixes', () => {
+  it('reads a leading rule, text and rule as Markdown, not front matter', () => {
+    for (const md of ['---\n\nIntro paragraph\n\n---\n\nMore text', '---\n- a\n- b\n---\nBody', '---\nJust a sentence\n---\nBody']) {
+      const doc = importDocument(md, 'markdown');
+      const html = exportTree(doc.kind === 'tree' ? doc.tree : doc.forest.trees[0], 'html');
+      expect(html, md).toMatch(/<hr/);
+    }
+  });
+
+  it('writes a token clashing with a Tailwind sizing keyword as an arbitrary value', () => {
+    const kits = [withTokens(createKit('T', ''), [{ name: '--lg', value: '700px', kind: 'space' }, { name: '--gap', value: '8px', kind: 'space' }])];
+    const tree = page([createBranch({ tag: 'div', styles: { lg: { 'max-width': 'var(--lg)', padding: 'var(--gap)' } }, children: [text('x')] })]);
+    const jsx = exportComponent(tree, { framework: 'react', styling: 'tailwind', kits }).files[0].contents;
+    expect(jsx).not.toMatch(/\bmax-w-lg\b/);
+    expect(jsx).toContain('max-w-[var(--lg)]');
+    expect(jsx).toMatch(/\bp-gap\b/);
+  });
+});

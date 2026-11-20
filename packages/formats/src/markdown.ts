@@ -508,13 +508,18 @@ const FRONT_MATTER = /^﻿?---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/;
 export function splitFrontMatter(text: string): { data: Record<string, unknown>; body: string } {
   const m = FRONT_MATTER.exec(text);
   if (!m) return { data: {}, body: text };
+  // Our own front matter says `tree-weaver:`; anything else may just be a rule, some text and a rule.
+  const ours = /^tree-weaver:/m.test(m[1]);
   let data: unknown;
   try {
     data = parseYaml(m[1]);
   } catch (err) {
+    if (!ours) return { data: {}, body: text };
     throw new FormatError(`Invalid front matter: ${(err as Error).message}`, 'markdown');
   }
-  return { data: typeof data === 'object' && data !== null ? (data as Record<string, unknown>) : {}, body: text.slice(m[0].length) };
+  // Only a mapping is front matter: a string or list between two rules is the document's content.
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) return { data: {}, body: text };
+  return { data: data as Record<string, unknown>, body: text.slice(m[0].length) };
 }
 
 /**

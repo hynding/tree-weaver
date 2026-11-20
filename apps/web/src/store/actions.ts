@@ -1256,17 +1256,6 @@ export async function importText(text: string, format?: FormatId, fileName?: str
 }
 
 /** A forest as saved on this device, or null. */
-/** Whether the open forest or any stored one mentions `text` (an uploaded Storybook's asset URL, say). */
-export async function forestsMention(text: string): Promise<boolean> {
-  if (state.forest && JSON.stringify(state.forest).includes(text)) return true;
-  for (const meta of state.forests) {
-    if (meta.id === state.forest?.id) continue;
-    const forest = await loadStoredForest(meta.id);
-    if (forest && JSON.stringify(forest).includes(text)) return true;
-  }
-  return false;
-}
-
 export async function loadStoredForest(id: string): Promise<Forest | null> {
   try {
     return (await store.load(id)) ?? null;

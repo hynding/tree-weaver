@@ -62,6 +62,10 @@ export const tailwindTokenKey = (name: string): string => name.replace(/^--/, ''
 /** Tokens Tailwind can name: those with a kind that has a theme namespace. */
 export const tailwindTokens = (tokens: ThemeToken[]): ThemeToken[] => tokens.filter((t) => TAILWIND_NAMESPACE[t.kind]);
 
+/** Keywords Tailwind's spacing and sizing utilities read as their own values. */
+const SPACE_KEYWORDS = new Set(['auto', 'px', 'full', 'screen', 'min', 'max', 'fit', 'none', 'svw', 'lvw', 'dvw', 'svh', 'lvh', 'dvh', 'lh', 'dvi', 'svi', 'lvi']);
+const SIZING = new Set(['w', 'h', 'min-w', 'max-w', 'min-h', 'max-h', 'size']);
+
 /**
  * The theme utility for a declaration whose whole value is `var(--token)`, when the token's kind
  * fits the property: `bg-brand` for `background: var(--brand)`. Undefined otherwise.
@@ -71,6 +75,10 @@ export function tailwindTokenClass(prop: string, value: string, kinds: ReadonlyM
   const use = Object.hasOwn(TOKEN_UTILITIES, prop) ? TOKEN_UTILITIES[prop] : undefined;
   if (!m || !use) return undefined;
   if (kinds.get(m[1]) !== use.kind || !TAILWIND_NAMESPACE[use.kind]) return undefined;
+  // Tailwind's own keywords win over a token of that name (`max-w-lg` is 32rem, `w-screen` 100vw):
+  // those take the arbitrary-value form instead.
+  const key = tailwindTokenKey(m[1]);
+  if (use.kind === 'space' && (SPACE_KEYWORDS.has(key) || (SIZING.has(use.prefix) && /^(\d?xs|sm|md|lg|\d?xl|prose)$/.test(key)))) return undefined;
   // `background` is a shorthand that also clears any background image; `bg-x` sets only the colour.
   return `${prop === 'background' ? 'bg-none ' : ''}${use.prefix}-${tailwindTokenKey(m[1])}`;
 }
