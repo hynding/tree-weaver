@@ -1333,3 +1333,45 @@ describe('pass 39 fixes', () => {
     expect(storyKits([snap], { name: 'SB', styles: 'copy', source: 'x' })).toEqual([]);
   });
 });
+
+describe('pass 40 fixes', () => {
+  const rootOf = (doc: ReturnType<typeof importDocument>) => (doc.kind === 'tree' ? doc.tree.root : doc.forest.trees[0].root);
+
+  it('lets a shape’s inline style beat its attributes, and keeps CSS-only declarations on a group', () => {
+    const doc = importDocument('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect fill="red" style="fill: blue"/><circle style="transform: rotate(45deg); mix-blend-mode: multiply" transform="scale(2)"/></svg>', 'svg');
+    const [rect, g] = rootOf(doc).children as TreeNode[];
+    expect((rect as { attrs: Record<string, string> }).attrs.fill).toBe('blue');
+    expect(g.kind === 'branch' && g.tag).toBe('g');
+    expect((g as Branch).styles.lg).toEqual({ transform: 'rotate(45deg)', 'mix-blend-mode': 'multiply' });
+    expect(((g as Branch).children[0] as { attrs?: Record<string, string> }).attrs?.transform).toBeUndefined();
+  });
+
+  it('lists escaped classes from compiled CSS as written in HTML', async () => {
+    const { analyzeKit } = await import('@tree-weaver/kits');
+    expect(analyzeKit('.w-\\[200px\\]{} .\\!p-2{} .md\\:w-1\\/2{} .\\32 xl\\:flex{} a[href$=".pdf"]{}').classes).toEqual(['!p-2', '2xl:flex', 'md:w-1/2', 'w-[200px]']);
+  });
+
+  it('exports a shape outside an SVG to Markdown without crashing', () => {
+    const tree = page([createBranch({ tag: 'h1', children: [text('Logo')] }), createLeaf('circle', 'shape', { r: '4' })]);
+    expect(exportTree(tree, 'markdown')).toContain('<circle');
+  });
+
+  it('keeps obsolete inline tags on one line', () => {
+    const doc = importDocument('<body><p><font>Total:</font><big>42</big></p></body>', 'html');
+    expect(exportTree(createTree('T', rootOf(doc) as Branch), 'html')).toMatch(/<font[^>]*>Total:<\/font><big/);
+  });
+
+  it('keeps an img’s inline styles', () => {
+    const img = rootOf(importDocument('<body><img src="a.png" style="border-radius:50%"></body>', 'html')).children[0] as Branch;
+    expect(img.kind).toBe('branch');
+    expect(img.styles.lg).toEqual({ 'border-radius': '50%' });
+  });
+
+  it('reads lowercase SVG names as text outside an SVG in shorthand documents', async () => {
+    const { expandShorthandDocument } = await import('@tree-weaver/branches');
+    const doc = expandShorthandDocument(['title: Welcome back', { svg: ['text: Hi'] }]) as { tree: { root: Branch } };
+    const [first, svg] = doc.tree.root.children as TreeNode[];
+    expect(first.kind).toBe('leaf');
+    expect(((svg as Branch).children[0] as Branch).tag).toBe('text');
+  });
+});

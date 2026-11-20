@@ -253,7 +253,13 @@ function blocks(nodes: TreeNode[]): string[] {
       prevList = '';
     } else {
       flush();
-      const md = block(node as Branch);
+      // A leaf that isn't inline content (an SVG shape outside an <svg>) goes in as HTML.
+      if (!isBranch(node)) {
+        out.push(inlineHtml(renderNodeHtml(node)));
+        prevList = '';
+        continue;
+      }
+      const md = block(node);
       // Two lists of a kind side by side would read back as one (loose) list; an empty comment
       // between them is CommonMark's way to keep them apart.
       const tag = (node as Branch).tag;

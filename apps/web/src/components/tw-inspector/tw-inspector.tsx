@@ -431,18 +431,20 @@ export class TwInspector {
         {branch.classes.length ? (
           <div class="chips">
             {branch.classes.map((c) => {
-              const custom = findRule({ selector: `.${c}` });
+              // Classes like `w-1/2` need escaping to make a valid selector.
+              const selector = `.${CSS.escape(c)}`;
+              const custom = findRule({ selector });
               const known = defined.has(c);
               return (
                 <span class={{ chip: true, undefined: !known }} title={known ? undefined : `No kit defines .${c} yet`}>
                   {custom ? (
-                    <button class="chip-link" title={`Edit .${c} in the Classes tab`} onClick={() => showRule(custom.rule.id)}>
+                    <button class="chip-link" title={`Edit ${selector} in the Classes tab`} onClick={() => showRule(custom.rule.id)}>
                       {c}
                     </button>
                   ) : known ? (
                     c
                   ) : (
-                    <button class="chip-link" title={`Create .${c} in the Classes tab`} onClick={() => addRule(`.${c}`)}>
+                    <button class="chip-link" title={`Create ${selector} in the Classes tab`} onClick={() => addRule(selector)}>
                       {c}
                     </button>
                   )}

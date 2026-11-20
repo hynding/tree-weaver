@@ -27,6 +27,8 @@ export const INLINE_TAGS = new Set([
 /** Elements that sit in a line of text by default, beyond the phrasing tags above. */
 const MORE_INLINE = new Set([
   'audio', 'canvas', 'iframe', 'math', 'meter', 'object', 'output', 'picture', 'progress', 'ruby', 'slot', 'svg', 'tspan', 'textpath', 'video',
+  // Obsolete phrasing elements, still inline in browsers.
+  'acronym', 'big', 'blink', 'font', 'nobr', 'strike', 'tt',
 ]);
 
 /** Whether an element is inline by default: a phrasing tag, one like `<svg>` or `<progress>`, or a custom element (`my-badge`). */

@@ -18,7 +18,12 @@ export interface KitAnalysis {
 }
 
 // Non-ASCII characters are name characters in CSS (`.café`).
-const CLASS = /\.(-?[_a-zA-Z\u0080-\uFFFF][_a-zA-Z0-9\u0080-\uFFFF-]*(?:\\.[_a-zA-Z0-9\u0080-\uFFFF-]*)*)/g;
+// Escapes may come anywhere, the first character too (`.\\!p-2`, `.\\32 xl\\:flex`, `.w-\\[200px\\]`).
+const ESC = String.raw`\\(?:[0-9a-fA-F]{1,6} ?|[^0-9a-fA-F\n])`;
+const CLASS = new RegExp(String.raw`\.(-?(?:[_a-zA-Z\u0080-\uFFFF]|${ESC})(?:[_a-zA-Z0-9\u0080-\uFFFF-]|${ESC})*)`, 'g');
+/** A class name as written in HTML, from its escaped form in a selector. */
+const unescapeClass = (name: string): string =>
+  name.replace(/\\(?:([0-9a-fA-F]{1,6}) ?|([^0-9a-fA-F\n]))/g, (_, hex: string | undefined, ch: string | undefined) => (hex ? String.fromCodePoint(((cp) => (cp > 0 && cp <= 0x10ffff ? cp : 0xfffd))(Number.parseInt(hex, 16))) : ch!));
 const IMPORT_URL = /^(?:url\(\s*)?["']?([^"')\s]+)["']?\s*\)?/;
 
 /** List what a design kit offers: classes, tokens, imports and breakpoints. */
@@ -35,8 +40,9 @@ export function analyzeKit(css: string): KitAnalysis {
         // In a nested rule body the declarations before the nested selector parse as part of it.
         const raw = nested ? (node.selector.split(';').pop() ?? '') : node.selector;
         // Ignore attribute selectors and strings so `[href$=".pdf"]` doesn't yield a class.
-        const selector = raw.replace(/\[[^\]]*\]/g, '').replace(/(["'])(?:\\.|(?!\1).)*\1/g, '');
-        for (const m of selector.matchAll(CLASS)) classes.add(m[1].replace(/\\/g, ''));
+        // Only unescaped brackets open an attribute selector (`.w-\[2px\]` is a class).
+        const selector = raw.replace(/(?<!\\)\[(?:\\.|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\]\\"'])*\]/g, '').replace(/(["'])(?:\\.|(?!\1).)*\1/g, '');
+        for (const m of selector.matchAll(CLASS)) classes.add(unescapeClass(m[1]));
         // CSS nesting: rules inside a rule's body (`.card { & .title { … } }`).
         if (node.body.includes('{') && depth < 32) visit(parseCss(node.body), depth + 1, true);
       } else {

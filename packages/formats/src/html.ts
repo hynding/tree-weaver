@@ -257,17 +257,35 @@ function svgAttrs(a: Record<string, string>): Record<string, string> {
  * A shape or image inside an SVG becomes a leaf. Leaves have no styles, so a shape's
  * inline `style` declarations become presentation attributes (`fill`, `stroke`, ...).
  */
+/** SVG presentation attributes: a shape's inline style for these can be written as the attribute. */
+const PRESENTATION = new Set(
+  'alignment-baseline baseline-shift clip-path clip-rule color color-interpolation color-interpolation-filters color-rendering cursor direction display dominant-baseline fill fill-opacity fill-rule filter flood-color flood-opacity font-family font-size font-size-adjust font-stretch font-style font-variant font-weight image-rendering letter-spacing lighting-color marker-end marker-mid marker-start mask opacity overflow paint-order pointer-events shape-rendering stop-color stop-opacity stroke stroke-dasharray stroke-dashoffset stroke-linecap stroke-linejoin stroke-miterlimit stroke-opacity stroke-width text-anchor text-decoration text-rendering transform unicode-bidi vector-effect visibility word-spacing writing-mode'.split(' '),
+);
+/** Whether a declaration reads the same as an attribute (a `transform` with CSS units doesn't). */
+const asAttribute = (prop: string, value: string): boolean =>
+  PRESENTATION.has(prop) && !/!\s*important/i.test(value) && !/\bvar\(/i.test(value) && (prop !== 'transform' || !/\d(deg|rad|grad|turn|px|em|rem|%)|\b(translate|scale|rotate|skew)[XYZ3]|\b(matrix3d|perspective)\(/i.test(value));
+
 function svgLeaf(tag: string, a: Record<string, string>): RawNode | null {
   if (!isShapeTag(tag) && tag !== 'image') return null;
   const attrs: Record<string, string> = {};
   for (const [k, v] of Object.entries(a)) if (!isHandlerOrStyle(k) && k !== LEAF_ATTR && !k.startsWith(`${BRANCH_ATTR}`)) attrs[k] = v;
-  if (a.style) for (const [prop, value] of Object.entries(parseDeclarations(a.style))) attrs[prop] ??= value;
+  // Inline style beats presentation attributes, as in the browser. What an attribute can't say
+  // (CSS-only properties, a transform in CSS units) goes on a <g> around the shape.
+  const outer: Record<string, string> = {};
+  if (a.style) for (const [prop, value] of Object.entries(parseDeclarations(a.style))) {
+    if (asAttribute(prop, value)) attrs[prop] = value;
+    else outer[prop] = value;
+  }
+  // A CSS transform replaces the attribute's, rather than adding to it.
+  if (outer.transform !== undefined) delete attrs.transform;
   const id = a[LEAF_ATTR] ?? a[BRANCH_ATTR];
+  let leaf: RawNode;
   if (tag === 'image') {
     const { href = '', ...rest } = attrs;
-    return { kind: 'leaf', id, type: 'image', value: href, attrs: rest };
-  }
-  return { kind: 'leaf', id, type: 'shape', value: tag, attrs };
+    leaf = { kind: 'leaf', id, type: 'image', value: href, attrs: rest };
+  } else leaf = { kind: 'leaf', id, type: 'shape', value: tag, attrs };
+  if (!Object.keys(outer).length) return leaf;
+  return { kind: 'branch', id: createId('b'), tag: 'g', classes: '', attrs: {}, styles: { lg: outer }, children: [leaf] };
 }
 
 export function convertParts(tag: string, attribs: Record<string, string>, children: ChildNode[], ctx: Ctx, raw: boolean, svg = false): RawNode {
@@ -279,7 +297,8 @@ export function convertParts(tag: string, attribs: Record<string, string>, child
     const leaf = svgLeaf(tag, a);
     if (leaf) return leaf;
   }
-  if (tag === 'img' && a[BRANCH_ATTR] === undefined) {
+  // An <img> with inline styles becomes an img branch, which keeps them (an image leaf has no styles).
+  if (tag === 'img' && a[BRANCH_ATTR] === undefined && !Object.keys(a.style ? parseDeclarations(a.style) : {}).length) {
     const attrs: Record<string, string> = {};
     for (const [k, v] of Object.entries(a)) if (k !== 'src' && k !== LEAF_ATTR && k !== 'style' && !k.startsWith('on')) attrs[k] = v;
     return { kind: 'leaf', id: a[LEAF_ATTR], type: 'image', value: a.src ?? '', attrs };

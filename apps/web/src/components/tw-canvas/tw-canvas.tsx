@@ -104,6 +104,8 @@ export class TwCanvas {
   private editing: HTMLElement | null = null;
   // What the frame currently shows, so updates only touch what changed.
   private shownRoot: Branch | null = null;
+  /** The display settings the tree CSS was written for: its media queries follow the breakpoints. */
+  private shownDisplays = -1;
   private shownKits: DesignKit[] = [];
   private shownDisplay: DisplayId | null = null;
   private dropMark: { el: Element; position: DropPosition; id: string } | null = null;
@@ -223,7 +225,7 @@ export class TwCanvas {
       this.shownKits = kits;
       changed = true;
     }
-    if (this.shownRoot !== tree.root && !this.editing) {
+    if ((this.shownRoot !== tree.root || this.shownDisplays !== state.displaysVersion) && !this.editing) {
       const root = tree.root;
       doc.getElementById('tw-tree')!.textContent = renderTreeCss(root);
       const body = doc.body;
@@ -246,6 +248,7 @@ export class TwCanvas {
       body.innerHTML = renderTreeBody(root, { designer: true });
       body.querySelectorAll(`[${BRANCH_ATTR}]`).forEach((el) => el.setAttribute('draggable', 'true'));
       this.shownRoot = root;
+      this.shownDisplays = state.displaysVersion;
       changed = true;
     }
     if (this.shownDisplay !== state.display) {
