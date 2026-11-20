@@ -218,7 +218,8 @@ export function renderBranch({ html, leaves }, args) {
     const el = host.querySelector(\`[data-tw-leaf="\${CSS.escape(leaf.id)}"]\`);
     if (!el) continue;
     const value = args[key] == null ? '' : String(args[key]);
-    if (leaf.type === 'image') el.setAttribute('src', value);
+    // An image inside an SVG is an <image href>.
+    if (leaf.type === 'image') el.setAttribute(el instanceof SVGElement ? 'href' : 'src', value);
     else el.replaceWith(document.createTextNode(value));
   }
   return host;

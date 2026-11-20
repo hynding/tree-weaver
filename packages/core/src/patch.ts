@@ -163,7 +163,8 @@ export function stylePatchByDisplay(styles: unknown, display: DisplayId = 'lg'):
   const out: Partial<Record<DisplayId, Record<string, string | null>>> = {};
   const put = (d: DisplayId, prop: string, value: unknown) => {
     if (value !== null && typeof value !== 'string' && typeof value !== 'number') throw new Error(`Style "${prop}" must be a string, or null to remove it`);
-    const kebab = prop.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
+    // Custom properties are case-sensitive, so `--brandColor` stays as written.
+    const kebab = prop.startsWith('--') ? prop : prop.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
     (out[d] ??= {})[kebab] = value === null ? null : String(value);
   };
   for (const [key, value] of Object.entries(styles)) {
@@ -217,6 +218,13 @@ export function applyPatch(root: Branch, ops: unknown, options: PatchOptions = {
     } catch (err) {
       throw new Error(err instanceof TreeDataError ? err.message : (err as Error).message);
     }
+    // An instance's content is its component's, expanded on every load: a node a patch writes can't
+    // be one (or hold one), or the next load would replace what it holds.
+    let instance = false;
+    walk(node, (n) => {
+      if (isBranch(n) && n.instance) instance = true;
+    });
+    if (instance) throw new Error('A patch can\u2019t create a component instance; insert one with `tree-weaver components insert` (or the MCP insert_component tool)');
     // A new root keeps the tree's root id, tag and type, so its children are checked where they will live.
     if (asRoot) {
       if (!isBranch(node)) throw new Error('The root must stay a branch');
@@ -374,14 +382,9 @@ export function applyPatch(root: Branch, ops: unknown, options: PatchOptions = {
             children[hit.index] = wrapped;
             return { ...(p as Branch), children };
           });
-          // The wrapped node and everything in it now sit in the wrapper's context (an SVG shape
-          // wrapped in <foreignObject> would no longer be drawn), so check them there.
-          const recheck = (parent: Branch, child: TreeNode) => {
-            const problem = placementProblem(next, parent.id, child);
-            if (problem) throw new Error(`Can't wrap it in <${wrapper.tag}>: ${problem}`);
-            if (isBranch(child)) child.children.forEach((c) => recheck(child, c));
-          };
-          recheck(wrapped, node);
+          // The wrapper's own children, and the wrapped node with everything in it, now sit in the
+          // wrapper's context (an SVG shape wrapped in <foreignObject> would no longer be drawn).
+          placedInside(next, wrapped, `Can't wrap it in <${wrapper.tag}>: `);
           current = next;
           changed.push({ op: i, kind, id: wrapper.id });
           break;

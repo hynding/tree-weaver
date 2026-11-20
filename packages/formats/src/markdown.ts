@@ -1,6 +1,7 @@
 import {
   INLINE_TAGS,
   isBranch,
+  isSafeAttr,
   isSvgRoot,
   renderNodeHtml,
   walk,
@@ -52,11 +53,14 @@ function metaOf(b: Branch, allowedAttrs: Set<string> = new Set()): Record<string
   return meta;
 }
 
-const isInlineNode = (n: TreeNode): boolean => !isBranch(n) || INLINE_TAGS.has(n.tag);
+// A shape leaf is drawn inside an SVG, never inline text.
+const isInlineNode = (n: TreeNode): boolean => (isBranch(n) ? INLINE_TAGS.has(n.tag) : n.type !== 'shape');
 
 export function escapeMarkdown(text: string, atLineStart = false): string {
   let out = text.replace(/\\/g, '\\\\').replace(/&/g, '&amp;').replace(/([`*_[\]<>|~])/g, '\\$1');
   if (atLineStart) out = out.replace(/^(\s*)([#+-])/, '$1\\$2').replace(/^(\s*)(\d+)([.)])/, '$1$2\\$3');
+  // A `!` right before a link would turn it into an image.
+  out = out.replace(/!$/, '\\!');
   // A closing `#` run would be read as the end of a heading.
   out = out.replace(/(^|\s)(#+)(\s*)$/, '$1\\$2$3');
   // Bare URLs would become links (GFM autolinks).
@@ -73,16 +77,23 @@ const escapeUrl = (url: string): string =>
 /** A one-line title, quoted: a line break would end the paragraph, and a backslash could escape the closing quote. */
 const titleOf = (title: string | undefined): string => (title ? ` "${oneLine(title).replace(inTable ? /[\\"|]/g : /[\\"]/g, '\\$&')}"` : '');
 const oneLine = (text: string): string => text.replace(/\s*[\n\r]\s*/g, ' ');
-/** Inline HTML on one line: a blank line inside it would end the paragraph and start a new block. */
-const inlineHtml = (html: string): string => {
-  const out = html.replace(/\r/g, '&#13;').replace(/\n/g, '&#10;');
-  return inTable ? out.replace(/\|/g, '&#124;') : out;
-};
+/**
+ * Inline HTML on one line (a blank line inside it would end the paragraph and start a new block),
+ * with Markdown syntax in the text between its tags written as entities: only the tags are raw,
+ * so `[x](javascript:…)` or `*` there would otherwise still become links and emphasis.
+ */
+const inlineHtml = (html: string): string =>
+  html
+    .split(/(<[^>]*>)/)
+    .map((part, i) => (i % 2 ? part : part.replace(/[\\`*_[\]~!:|#+\-=.(){}]/g, (c) => `&#${c.charCodeAt(0)};`)))
+    .join('')
+    .replace(/\r/g, '&#13;')
+    .replace(/\n/g, '&#10;');
 
 function inline(node: TreeNode, first: boolean): string {
   if (!isBranch(node)) {
     if (node.type === 'image') return image(node);
-    return escapeMarkdown(node.value.replace(/\s*\n\s*/g, ' '), first);
+    return escapeMarkdown(oneLine(node.value), first);
   }
   const tag = node.tag;
   const content = () => node.children.map((c) => inline(c, false)).join('');
@@ -96,6 +107,8 @@ function inline(node: TreeNode, first: boolean): string {
     const ticks = '`'.repeat(longest + 1);
     return longest ? `${ticks} ${code} ${ticks}` : `${ticks}${code}${ticks}`;
   }
+  // A script link is dropped, as in every other export; its text stays.
+  if (tag === 'a' && node.attrs.href !== undefined && !isSafeAttr('href', node.attrs.href)) return content();
   if (tag === 'a' && !needsMeta(node, LINK_ATTRS) && node.attrs.href !== undefined) {
     return `[${content()}](${escapeUrl(node.attrs.href)}${titleOf(node.attrs.title)})`;
   }
@@ -110,6 +123,7 @@ function wrapTrimmed(text: string, mark: string): string {
 
 function image(leaf: Leaf): string {
   const alt = escapeMarkdown(oneLine(leaf.attrs?.alt ?? ''));
+  if (!isSafeAttr('src', leaf.value)) return alt;
   const extra = Object.keys(leaf.attrs ?? {}).filter((k) => k !== 'alt' && k !== 'title');
   if (extra.length) return inlineHtml(renderNodeHtml(leaf));
   return `![${alt}](${escapeUrl(leaf.value)}${titleOf(leaf.attrs?.title)})`;
@@ -211,6 +225,9 @@ function table(b: Branch): string | null {
 }
 
 function block(b: Branch): string {
+  // A drawing goes in as one line of inline SVG markup, ids included, so its shapes come back.
+  // Its opening tag stands on a line of its own, which makes the rest an HTML block, not a paragraph.
+  if (b.tag === 'svg') return inlineHtml(renderNodeHtml(b)).replace(/^(<svg\b[^>]*>)/, '$1\n');
   const allInline = b.children.every(isInlineNode);
   const heading = HEADING.exec(b.tag);
   if (heading && allInline && b.children.length) return withMeta(b, `${'#'.repeat(Number(heading[1]))} ${inlineRun(b.children).trim()}`);
@@ -252,7 +269,8 @@ export function exportMarkdown(tree: Tree, opts: MarkdownExportOptions = {}): st
   });
   const front: Record<string, unknown> = { 'tree-weaver': DOCUMENT_VERSION, id: tree.id, name: tree.name };
   const root = metaOf(tree.root);
-  if (Object.keys(root).length > 1 || tree.root.type !== 'root' || tree.root.name !== 'Body') front.root = root;
+  // An SVG tree's root is written as the drawing itself, which carries its id.
+  if (!isSvgRoot(tree.root) && (Object.keys(root).length > 1 || tree.root.type !== 'root' || tree.root.name !== 'Body')) front.root = root;
   if (Object.keys(styles).length) front.styles = styles;
   if (opts.kits?.length) front.kits = opts.kits;
   // Markdown is a page format: an SVG tree's drawing goes in as inline SVG.
@@ -290,7 +308,14 @@ export function importMarkdown(text: string): TreeDocument {
     for (const [id, s] of Object.entries(data.styles as Record<string, DisplayStyles>)) styles.set(id, s);
   }
   const ctx: Ctx = { styles };
-  const root = convertParts('body', {}, dom.children, ctx, false);
+  let root = convertParts('body', {}, dom.children, ctx, false);
+  // An SVG tree comes back as its drawing: the one root SVG the body holds.
+  const kids = root.children as Record<string, unknown>[];
+  if (!data.root && kids.length === 1 && kids[0].kind === 'branch' && kids[0].tag === 'svg' && kids[0].type === 'root') {
+    const firstHeading = /^#\s+(.+)$/m.exec(body)?.[1]?.trim();
+    root = kids[0];
+    return fromData({ tree: { id: data.id, name: typeof data.name === 'string' ? data.name : (firstHeading ?? 'Imported markdown'), root }, kits: Array.isArray(data.kits) ? data.kits : [] }, 'markdown');
+  }
   const rootMeta = (data.root ?? {}) as Record<string, unknown>;
   if (typeof rootMeta.id === 'string') {
     root.id = rootMeta.id;

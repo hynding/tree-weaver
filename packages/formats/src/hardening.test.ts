@@ -276,3 +276,63 @@ describe('pass 8 fixes', () => {
     expect(div.classes).toEqual(['a', 'b']);
   });
 });
+
+describe('pass 9 fixes', () => {
+  const back = (tree: ReturnType<typeof page>) => {
+    const doc = importDocument(exportTree(tree, 'markdown'), 'markdown');
+    if (doc.kind !== 'tree') throw new Error('expected a tree');
+    return doc.tree;
+  };
+  const tags = (n: TreeNode): string[] => (n.kind === 'branch' ? [n.tag, ...n.children.flatMap(tags)] : []);
+
+  it('keeps Markdown syntax in inline HTML text as text', () => {
+    const span = createBranch({ tag: 'span', classes: ['note'], children: [text('[click](javascript:alert(1)) and *em* and `c`')] });
+    const tree = back(page([createBranch({ tag: 'p', children: [span] })]));
+    expect(tags(tree.root)).not.toContain('a');
+    expect(tags(tree.root)).not.toContain('em');
+    expect(JSON.stringify(tree.root)).toContain('[click](javascript:alert(1)) and *em* and `c`');
+  });
+
+  it('drops script URLs from Markdown links and images', () => {
+    const a = createBranch({ tag: 'a', attrs: { href: 'javascript:alert(1)' }, children: [text('click')] });
+    const img = createLeaf('javascript:alert(2)', 'image', { alt: 'x' });
+    const md = exportTree(page([createBranch({ tag: 'p', children: [a, text(' '), img] })]), 'markdown');
+    expect(md).not.toMatch(/javascript/);
+  });
+
+  it('keeps carriage returns and a ! before a link from making new markup', () => {
+    const tree = back(page([createBranch({ tag: 'p', children: [text('line1\r# injected\r\r- list')] }), createBranch({ tag: 'p', children: [text('Look!'), createBranch({ tag: 'a', attrs: { href: 'https://e.com/x.png' }, children: [text('the file')] })] })]));
+    expect(tree.root.children.map((c) => (c as Branch).tag)).toEqual(['p', 'p']);
+    expect(JSON.stringify(tree.root)).not.toContain('"type":"image"');
+  });
+
+  it('round-trips an SVG tree through Markdown with its shapes', async () => {
+    const { createShape } = await import('@tree-weaver/core');
+    const circle = { ...createShape('circle'), attrs: { r: '4' } };
+    const tree = createTree('D', createBranch({ tag: 'svg', type: 'root', attrs: { viewBox: '0 0 10 10' }, children: [circle] }));
+    const out = back(tree as ReturnType<typeof page>);
+    expect(out.root.tag).toBe('svg');
+    expect(out.root.id).toBe(tree.root.id);
+    expect(out.root.children[0]).toMatchObject({ type: 'shape', value: 'circle', id: circle.id });
+  });
+
+  it('writes a well-formed SVG when the tree name has >', () => {
+    const tree = createTree('Before > After', createBranch({ tag: 'svg', type: 'root', children: [createBranch({ tag: 'g', styles: { lg: { fill: 'red' } } })] }));
+    const svg = exportTree(tree, 'svg');
+    expect(svg).toContain('data-tw-tree-name="Before &gt; After"');
+    const doc = importDocument(svg, 'svg');
+    if (doc.kind !== 'tree') throw new Error('expected a tree');
+    expect(doc.tree.name).toBe('Before > After');
+    expect((doc.tree.root.children[0] as Branch).styles.lg).toEqual({ fill: 'red' });
+  });
+
+  it('keeps styles of branches whose ids need escaping in CSS', () => {
+    for (const id of ['a\\b', 'a"b', "a'b", 'a]b', 'a<b', 'a\nb', 'a,b']) {
+      const tree = page([{ ...createBranch({ tag: 'div', styles: { lg: { color: 'red' }, tablet: { color: 'blue' } } }), id }]);
+      const doc = importDocument(exportTree(tree, 'html'), 'html');
+      if (doc.kind !== 'tree') throw new Error('expected a tree');
+      const div = doc.tree.root.children.find((c) => c.kind === 'branch') as Branch;
+      expect([div.id, div.styles]).toEqual([id, { lg: { color: 'red' }, tablet: { color: 'blue' } }]);
+    }
+  });
+});

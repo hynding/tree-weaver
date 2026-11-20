@@ -236,3 +236,38 @@ describe('pass 8 fixes', () => {
     expect(applyPatch(root, [{ op: 'remove', target: inst.id }]).root.children).toHaveLength(0);
   });
 });
+
+describe('pass 9 fixes', () => {
+  it('refuses nodes that are or hold a component instance', () => {
+    const p = createBranch({ tag: 'p' });
+    const root = createBranch({ tag: 'body', children: [p] });
+    const node = { kind: 'branch', tag: 'div', instance: { component: 'card' } };
+    expect(() => applyPatch(root, [{ op: 'insert', node }])).toThrow(/component instance/);
+    expect(() => applyPatch(root, [{ op: 'wrap', target: p.id, node }])).toThrow(/component instance/);
+    expect(() => applyPatch(root, [{ op: 'replace', target: '/', node: { tag: 'div', children: [node] } }])).toThrow(/component instance/);
+  });
+
+  it('keeps the case of custom properties in setStyles', () => {
+    const b = createBranch({ tag: 'div', styles: { lg: { '--brandColor': 'blue' } } });
+    const root = createBranch({ tag: 'body', children: [b] });
+    const out = applyPatch(root, [{ op: 'setStyles', target: b.id, styles: { '--brandColor': 'red', fontSize: '2rem' } }]).root.children[0];
+    expect((out as typeof b).styles.lg).toEqual({ '--brandColor': 'red', 'font-size': '2rem' });
+  });
+
+  it("checks a wrapper's own children too", async () => {
+    const { createShape } = await import('./index');
+    const p = createBranch({ tag: 'p' });
+    const page = createBranch({ tag: 'body', children: [p] });
+    expect(() => applyPatch(page, [{ op: 'wrap', target: p.id, node: { tag: 'div', children: [createShape('circle')] } }])).toThrow(/needs an SVG/);
+  });
+
+  it('puts what is added beside a component template root inside it', async () => {
+    const { createComponent, componentTreeId, updateTreeRoot, insertNode } = await import('./index');
+    const card = createComponent('Card', createBranch({ tag: 'div', children: [text('Hi')] }));
+    const forest = { ...createForest('F'), components: [card] };
+    const next = updateTreeRoot(forest, componentTreeId(card.id), (body) => insertNode(body, body.id, createBranch({ tag: 'hr' })));
+    const tmpl = next.components![0].root;
+    expect(tmpl.id).toBe(card.root.id);
+    expect(tmpl.children.map((c) => (c.kind === 'branch' ? c.tag : 'text'))).toEqual(['text', 'hr']);
+  });
+});

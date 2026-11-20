@@ -237,3 +237,16 @@ describe('concurrent component saves', () => {
     expect(strip(readForest(a))).toEqual(strip(readForest(c)));
   });
 });
+
+describe('peer data that is not a string', () => {
+  it('falls back for tree and forest names that are not strings', () => {
+    const doc = new Y.Doc();
+    writeForest(doc, null, sample());
+    const t = [...doc.getMap<Y.Map<unknown>>('trees').values()][0];
+    t.set('name', 42);
+    doc.getMap<unknown>('forest').set('name', { x: 1 });
+    const f = readForest(doc)!;
+    expect(f.trees[0].name).toBe('Untitled tree');
+    expect(f.name).toBe('Shared forest');
+  });
+});

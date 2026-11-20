@@ -384,8 +384,13 @@ export function updateComponentTree(forest: Forest, treeId: string, fn: (root: B
   const kids = nextBody.children;
   // The body must hold exactly the template; anything else is wrapped into it.
   let nextRoot: Branch;
+  const rootAt = kids.findIndex((k) => isBranch(k) && k.id === def.root.id);
   if (kids.length === 1 && isBranch(kids[0])) nextRoot = kids[0];
-  else nextRoot = { ...def.root, children: kids };
+  else if (rootAt >= 0) {
+    // Something added beside the template root goes inside it, before or after what it holds.
+    const r = kids[rootAt] as Branch;
+    nextRoot = { ...r, children: [...kids.slice(0, rootAt), ...r.children, ...kids.slice(rootAt + 1)] };
+  } else nextRoot = { ...def.root, children: kids };
   const v = variant ? def.variants.find((x) => x.name === variant) : undefined;
   let next: ComponentDef;
   if (v) {

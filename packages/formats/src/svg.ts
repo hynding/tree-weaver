@@ -46,7 +46,7 @@ export function drawingOf(tree: Tree): Branch | null {
 
 const cdata = (css: string): string => `<![CDATA[\n${css.replace(/]]>/g, ']]]]><![CDATA[>')}\n]]>`;
 const xmlAttr = (v: string): string =>
-  v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;').replace(/[\t\n\r]/g, (c) => `&#${c.charCodeAt(0)};`);
+  v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/[\t\n\r]/g, (c) => `&#${c.charCodeAt(0)};`);
 
 /** A standalone SVG file for the tree's drawing, with its kits and responsive styles inside. */
 export function exportSvg(tree: Tree, opts: SvgExportOptions = {}): string {

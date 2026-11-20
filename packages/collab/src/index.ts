@@ -350,6 +350,9 @@ export function hasForest(doc: Y.Doc): boolean {
  * from the same document: a node whose parent is gone (deleted by someone else while they
  * added to it), or that two concurrent moves left in a loop, goes at the end of its tree's root.
  */
+/** A peer's value as a string, or the fallback when it isn't one. */
+const strOr = (value: unknown, fallback: string): string => (typeof value === 'string' ? value : fallback);
+
 export function readForest(doc: Y.Doc): Forest | null {
   if (!hasForest(doc)) return null;
   const m = maps(doc);
@@ -401,11 +404,11 @@ export function readForest(doc: Y.Doc): Forest | null {
     }
     trees.push({
       id: treeId,
-      name: (t.get('name') as string) ?? 'Untitled tree',
+      name: strOr(t.get('name'), 'Untitled tree'),
       root,
-      createdAt: (t.get('createdAt') as string) ?? '',
-      updatedAt: (t.get('updatedAt') as string) ?? '',
-      order: (t.get('order') as string) ?? '',
+      createdAt: strOr(t.get('createdAt'), ''),
+      updatedAt: strOr(t.get('updatedAt'), ''),
+      order: strOr(t.get('order'), ''),
     });
   }
   trees.sort(byOrder);
@@ -429,15 +432,15 @@ export function readForest(doc: Y.Doc): Forest | null {
       // A malformed definition is skipped; its instances keep their last expansion.
     }
   }
-  const updatedAt = trees.reduce((latest, t) => (t.updatedAt > latest ? t.updatedAt : latest), (m.forest.get('createdAt') as string) ?? '');
+  const updatedAt = trees.reduce((latest, t) => (t.updatedAt > latest ? t.updatedAt : latest), strOr(m.forest.get('createdAt'), ''));
   return {
-    id: m.forest.get('id') as string,
-    name: (m.forest.get('name') as string) ?? 'Shared forest',
+    id: strOr(m.forest.get('id'), ''),
+    name: strOr(m.forest.get('name'), 'Shared forest'),
     version: 1,
     trees: trees.map(({ order: _, ...t }) => t),
     kits,
     ...(components?.length ? { components } : {}),
-    createdAt: (m.forest.get('createdAt') as string) ?? updatedAt,
+    createdAt: strOr(m.forest.get('createdAt'), updatedAt),
     updatedAt,
   };
 }

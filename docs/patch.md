@@ -65,4 +65,5 @@ moved, wrapped or given another tag.
 
 A component instance's content comes from its component, so a patch can't edit inside one (or change
 the instance's own tag, classes, styles or attributes); edit the component, or detach the instance.
-The instance as a whole can still be moved, duplicated, wrapped or removed.
+The instance as a whole can still be moved, duplicated, wrapped or removed. A patch can't create an instance
+either; insert one with `tree-weaver components insert` or the MCP `insert_component` tool.
