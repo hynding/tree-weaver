@@ -70,7 +70,9 @@ export function tailwindTokenClass(prop: string, value: string, kinds: ReadonlyM
   const m = /^var\(\s*(--[\w-]+)\s*\)$/.exec(value.trim());
   const use = Object.hasOwn(TOKEN_UTILITIES, prop) ? TOKEN_UTILITIES[prop] : undefined;
   if (!m || !use) return undefined;
-  return kinds.get(m[1]) === use.kind && TAILWIND_NAMESPACE[use.kind] ? `${use.prefix}-${tailwindTokenKey(m[1])}` : undefined;
+  if (kinds.get(m[1]) !== use.kind || !TAILWIND_NAMESPACE[use.kind]) return undefined;
+  // `background` is a shorthand that also clears any background image; `bg-x` sets only the colour.
+  return `${prop === 'background' ? 'bg-none ' : ''}${use.prefix}-${tailwindTokenKey(m[1])}`;
 }
 
 /** Tailwind v4: `@theme inline { --color-brand: var(--brand); }`. Empty when no token fits. */

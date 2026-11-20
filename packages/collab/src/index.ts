@@ -159,9 +159,10 @@ function indexForest(forest: Forest | null): Map<string, Placed> {
  * write), every stored entry `next` doesn't hold is.
  */
 function writeEntries(m: YNode, prefix: string, next: Record<string, string> | undefined, old: Record<string, string> | undefined | null): void {
-  for (const [k, v] of Object.entries(next ?? {})) setIfChanged(m, `${prefix}${k}`, v);
+  // An empty value is kept: `disabled=""`, `checked=""` and `alt=""` are attributes that are set.
+  for (const [k, v] of Object.entries(next ?? {})) if (m.get(`${prefix}${k}`) !== v) m.set(`${prefix}${k}`, v);
   const gone = old === null ? [...m.keys()].filter((k) => k.startsWith(prefix)).map((k) => k.slice(prefix.length)) : Object.keys(old ?? {});
-  for (const k of gone) if (!next || !Object.hasOwn(next, k)) setIfChanged(m, `${prefix}${k}`, undefined);
+  for (const k of gone) if ((!next || !Object.hasOwn(next, k)) && m.has(`${prefix}${k}`)) m.delete(`${prefix}${k}`);
 }
 
 /**

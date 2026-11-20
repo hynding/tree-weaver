@@ -255,7 +255,7 @@ const bracket = (value: string): string =>
 export function tailwindClass(prop: string, value: string, tokenKinds?: ReadonlyMap<string, TokenKind>): string {
   // Tailwind v4 generates nothing for `!important` inside the brackets; its `!` modifier works in v3 and v4.
   const important = /\s*!\s*important\s*$/i;
-  if (important.test(value)) return `!${tailwindClass(prop, value.replace(important, ''), tokenKinds)}`;
+  if (important.test(value)) return tailwindClass(prop, value.replace(important, ''), tokenKinds).split(' ').map((c) => `!${c}`).join(' ');
   const v = value.trim();
   const themed = tokenKinds ? tailwindTokenClass(prop, v, tokenKinds) : undefined;
   if (themed) return themed;
@@ -285,8 +285,35 @@ const MORE_LONGHANDS: Record<string, string[]> = {
   'border-style': ['border-top-style', 'border-right-style', 'border-bottom-style', 'border-left-style'],
   'border-width': ['border-top-width', 'border-right-width', 'border-bottom-width', 'border-left-width'],
 };
-const covers = (a: string, b: string) => b.startsWith(`${a}-`) || (Object.hasOwn(MORE_LONGHANDS, a) && MORE_LONGHANDS[a].includes(b));
-const overlaps = (a: string, b: string) => covers(a, b) || covers(b, a);
+/** The physical longhands a box property sets (left-to-right for the logical ones), so partial overlaps show. */
+function boxLonghands(prop: string): string[] | undefined {
+  const SIDES = ['top', 'right', 'bottom', 'left'];
+  const AXES: Record<string, string[]> = { inline: ['left', 'right'], block: ['top', 'bottom'], 'inline-start': ['left'], 'inline-end': ['right'], 'block-start': ['top'], 'block-end': ['bottom'] };
+  let m = /^(padding|margin|inset|scroll-margin|scroll-padding)(?:-(inline|block)(?:-(start|end))?|-(top|right|bottom|left))?$/.exec(prop);
+  if (m) {
+    const sides = m[4] ? [m[4]] : m[2] ? AXES[m[3] ? `${m[2]}-${m[3]}` : m[2]] : SIDES;
+    return sides.map((side) => (m![1] === 'inset' ? side : `${m![1]}-${side}`));
+  }
+  m = /^border(?:-(inline|block)(?:-(start|end))?|-(top|right|bottom|left))?(?:-(width|style|color))?$/.exec(prop);
+  if (m) {
+    const sides = m[3] ? [m[3]] : m[1] ? AXES[m[2] ? `${m[1]}-${m[2]}` : m[1]] : SIDES;
+    const parts = m[4] ? [m[4]] : ['width', 'style', 'color'];
+    return sides.flatMap((side) => parts.map((part) => `border-${side}-${part}`));
+  }
+  if (prop === 'border-radius') return ['border-top-left-radius', 'border-top-right-radius', 'border-bottom-right-radius', 'border-bottom-left-radius'];
+  return undefined;
+}
+const longhandSet = (p: string): Set<string> => new Set(boxLonghands(p) ?? [p]);
+const covers = (a: string, b: string) => {
+  if (b.startsWith(`${a}-`) || (Object.hasOwn(MORE_LONGHANDS, a) && MORE_LONGHANDS[a].includes(b))) return true;
+  const la = longhandSet(a);
+  return a !== b && [...longhandSet(b)].every((x) => la.has(x));
+};
+const overlaps = (a: string, b: string) => {
+  if (covers(a, b) || covers(b, a)) return true;
+  const la = longhandSet(a);
+  return [...longhandSet(b)].some((x) => la.has(x));
+};
 
 function tailwindClasses(branch: Branch, tokenKinds: ReadonlyMap<string, TokenKind>): string[] {
   const decls: { prop: string; cls: string; variant: string; tier: number }[] = [];
@@ -307,12 +334,14 @@ function tailwindClasses(branch: Branch, tokenKinds: ReadonlyMap<string, TokenKi
       let tier = 1;
       for (const d of decls) {
         if (d.prop === prop) tier = Math.max(tier, d.tier);
-        else if (overlaps(d.prop, prop)) tier = Math.max(tier, /^!?\[/.test(d.cls) || /^!?\[/.test(cls) || covers(prop, d.prop) ? d.tier + 1 : d.tier);
+        // Only a named shorthand followed by a named longhand it covers is already in order.
+        else if (overlaps(d.prop, prop)) tier = Math.max(tier, /^!?\[/.test(d.cls) || /^!?\[/.test(cls) || !covers(d.prop, prop) ? d.tier + 1 : d.tier);
       }
       decls.push({ prop, cls, variant, tier });
     }
   }
-  return decls.map((d) => `${d.variant}${d.tier > 1 ? `[${'&'.repeat(d.tier)}]:` : ''}${d.cls}`);
+  // A declaration can take two classes (`bg-none bg-brand`); each gets the variant.
+  return decls.flatMap((d) => d.cls.split(' ').map((c) => `${d.variant}${d.tier > 1 ? `[${'&'.repeat(d.tier)}]:` : ''}${c}`));
 }
 
 /* ------------------------------------------------------- element model */

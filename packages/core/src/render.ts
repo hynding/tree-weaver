@@ -229,7 +229,7 @@ function renderLeaf(leaf: Leaf, opts: HtmlOptions): string {
       .join('');
     const src = isSafeAttr('src', leaf.value) ? leaf.value : '';
     const alt = leaf.attrs?.alt === undefined ? ' alt=""' : '';
-    return `<img${opts.inForeign && !opts.inSvg ? XHTML : ''} ${LEAF_ATTR}="${escapeAttr(leaf.id)}" src="${escapeAttr(src)}"${alt}${attrs}>`;
+    return `<img${opts.inForeign && !opts.inSvg ? XHTML : ''} ${LEAF_ATTR}="${escapeAttr(leaf.id)}" src="${escapeAttr(src)}"${alt}${attrs}${opts.xml ? '/' : ''}>`;
   }
   const content = escapeHtml(leaf.value);
   // Inside an SVG a <span> would end the drawing, so selectable text uses <tspan>.

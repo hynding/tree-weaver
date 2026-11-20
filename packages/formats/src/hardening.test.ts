@@ -1148,3 +1148,32 @@ describe('pass 32 fixes', () => {
     expect(svg).not.toMatch(/<svg[^>]*xmlns="http:\/\/www\.w3\.org\/1999\/xhtml"/);
   });
 });
+
+describe('pass 33 fixes', () => {
+  it('closes an image leaf in .svg files', () => {
+    const div = createBranch({ tag: 'div', children: [createLeaf('logo.png', 'image', { alt: 'Logo' }), text('Caption')] });
+    const tree = createTree('Drawing', createBranch({ tag: 'svg', type: 'root', attrs: { viewBox: '0 0 200 100' }, children: [createBranch({ tag: 'foreignObject', attrs: { width: '200', height: '100' }, children: [div] })] }));
+    const svg = exportTree(tree, 'svg');
+    expect(svg).toMatch(/<img [^>]*\/>/);
+    const back = importDocument(svg, 'svg');
+    expect(JSON.stringify(back)).toContain('Caption');
+  });
+
+  it('keeps a background token’s reset of the background image in Tailwind', async () => {
+    const { createTokenKit } = await import('@tree-weaver/core');
+    const kits = [createTokenKit([{ name: '--surface', value: '#fff' }])];
+    const tree = page([createBranch({ tag: 'section', styles: { lg: { background: 'var(--surface)' }, tablet: { background: 'var(--surface)' } }, children: [text('x')] })]);
+    const out = exportComponent(tree, { framework: 'html', styling: 'tailwind', kits }).files.map((f) => f.contents).join('\n');
+    expect(out).toContain('bg-none bg-surface');
+    expect(out).toContain('max-[1024.02px]:bg-none max-[1024.02px]:bg-surface');
+  });
+
+  it('bumps the later of two partly overlapping declarations in Tailwind', () => {
+    const cls = (styles: Record<string, string>) =>
+      /class="([^"]*)"/.exec(exportComponent(page([createBranch({ tag: 'div', styles: { lg: styles }, children: [text('x')] })]), { framework: 'html', styling: 'tailwind' }).files[0].contents.split('<body')[1])![1];
+    expect(cls({ 'border-top-left-radius': '10px', 'border-radius': '4px' })).toContain('[&&]:rounded-[4px]');
+    expect(cls({ 'padding-inline': '2rem', 'padding-left': '1rem' })).toContain('[&&]:pl-[1rem]');
+    expect(cls({ 'border-bottom': '2px solid black', 'border-color': 'red' })).toMatch(/\[&&\]:\S*border-color|\[&&\]:border-\[red\]/);
+    expect(cls({ padding: '1rem', 'padding-top': '2rem' })).not.toContain('[&&]');
+  });
+});

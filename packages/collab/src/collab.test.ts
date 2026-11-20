@@ -406,3 +406,14 @@ describe('pass 31 fixes', () => {
     for (const doc of [a, c]) expect((readForest(doc)!.trees[0].root.children.find((n) => n.id === 'img') as typeof img).attrs).toEqual({ alt: 'A alt', width: '300' });
   });
 });
+
+describe('pass 33 fixes', () => {
+  it('keeps attributes with empty values', () => {
+    const input = b('in', { tag: 'input', attrs: { type: 'checkbox', checked: '', disabled: '' } });
+    const f = withRoot(sample(), (r) => ({ ...r, children: [...r.children, input] }));
+    const { a, c } = pair();
+    writeForest(a, null, f);
+    const read = readForest(c)!.trees[0].root.children.find((n) => n.id === 'in') as Branch;
+    expect(read.attrs).toEqual({ type: 'checkbox', checked: '', disabled: '' });
+  });
+});
