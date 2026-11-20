@@ -228,7 +228,8 @@ const bracket = (value: string): string =>
           part
             .replace(/^(url\()\s+/i, '$1')
             .replace(/\s+\)$/, ')')
-            .replace(/\s/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`)
+            // `<` and `>` too (inline SVG data URIs): markup would escape them, and Tailwind reads the source.
+            .replace(/[\s<>]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`)
         : part
             .replace(/_/g, '\\_')
             .replace(/\s*,\s*/g, ',')
@@ -611,11 +612,14 @@ function inlineChildren(children: El[], mode: 'html' | 'vue' | 'svelte', write: 
 
 /** HTML (also Vue and Svelte templates). */
 /** `props` is false outside a component; in one, the names of its boolean props. */
+/** An `&` a parser would read as a character reference: `&#…` or `&name;` (`&fit=crop` is left alone). */
+const REF_AMP = /&(?=#|[A-Za-z][A-Za-z0-9]*;)/g;
+
 /**
  * A class attribute, with `&` left as written unless it could start a character reference:
  * Tailwind reads classes from the source text, so `[&&]:` written `[&amp;&amp;]:` would be missed.
  */
-const escapeClassAttr = (v: string): string => v.replace(/&(?=[#A-Za-z0-9])/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const escapeClassAttr = (v: string): string => v.replace(REF_AMP, '&amp;').replace(/"/g, '&quot;');
 
 /** HTML (and Vue and Svelte templates) drop one newline right after these tags, so a leading one is doubled. */
 const leadNewline = (tag: string, content: string): string => (/^(pre|textarea|listing)$/i.test(tag) && /^[\r\n]/.test(content) ? `\n${content}` : content);
@@ -814,7 +818,7 @@ function writeJsx(el: El, depth: number, props: false | ReadonlySet<string> = fa
       // `&` only where it could start a reference: Tailwind reads `[&&]:` classes from the source text.
       // JSX attribute strings are literal (backslashes and braces included), so a JS string is only
       // needed for a value holding both quote kinds or a line break; Tailwind reads classes as written.
-      const amp = v.replace(/&(?=[#A-Za-z0-9])/g, '&amp;');
+      const amp = v.replace(REF_AMP, '&amp;');
       if (/[\n\r]/.test(v) || (v.includes('"') && v.includes("'"))) return ` ${name}={${jsxString(v)}}`;
       return v.includes('"') ? ` ${name}='${amp}'` : ` ${name}="${amp}"`;
     })

@@ -40,7 +40,15 @@ async function fetchDocument(src: string): Promise<{ text: string; fileName: str
   if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('Only http(s) links can be opened');
   const res = await fetch(url.href, { credentials: 'omit' });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return { text: await res.text(), fileName: decodeURIComponent(url.pathname.split('/').pop() ?? '') };
+  // The file name is only a format hint, so a stray `%` (`100%.json`) leaves it as written.
+  const last = url.pathname.split('/').pop() ?? '';
+  let fileName = last;
+  try {
+    fileName = decodeURIComponent(last);
+  } catch {
+    /* kept as written */
+  }
+  return { text: await res.text(), fileName };
 }
 
 /** Open the document named in the URL, if any. */

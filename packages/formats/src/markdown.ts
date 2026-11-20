@@ -4,6 +4,7 @@ import {
   isSafeAttr,
   isSvgRoot,
   renderNodeHtml,
+  keepsWhitespace,
   walk,
   type Branch,
   type DesignKit,
@@ -101,12 +102,16 @@ const inlineHtml = (html: string): string =>
     .replace(/\n/g, '&#10;')
     .replace(/[\u2028\u2029]/g, (c) => `&#${c.charCodeAt(0)};`);
 
+const hasLineBreakOrRun = (node: Branch): boolean => node.children.some((c) => (isBranch(c) ? hasLineBreakOrRun(c) : c.type === 'text' && /\n|\r|[ \t]{2}|\t/.test(c.value)));
+
 function inline(node: TreeNode, first: boolean): string {
   if (!isBranch(node)) {
     if (node.type === 'image') return image(node);
     return escapeMarkdown(oneLine(node.value), first);
   }
   const tag = node.tag;
+  // Its whitespace shows, and Markdown would collapse it: HTML, with line breaks as references.
+  if (keepsWhitespace(node) && hasLineBreakOrRun(node)) return inlineHtml(renderNodeHtml(node));
   const content = () => inlineList(node.children, false);
   if (Object.hasOwn(MARK_INLINE, tag) && !needsMeta(node) && node.children.length) {
     const mark = MARK_INLINE[tag];
@@ -320,10 +325,25 @@ function table(b: Branch): string | null {
   return [line(header), `| ${Array.from({ length: width }, () => '---').join(' | ')} |`, ...body.map(line)].join('\n');
 }
 
+/** A `<pre>` holding just a `<code>` of text, written as a fenced code block. */
+const fencedCode = (b: Branch): boolean => {
+  const code = b.children[0];
+  return b.tag === 'pre' && !needsMeta(b) && b.children.length === 1 && isBranch(code) && code.tag === 'code' && !needsMeta(code) && code.children.every((c) => !isBranch(c) && c.type === 'text');
+};
+
+/** Tags that open a CommonMark HTML block with content on the same line (kinds 1 and 6). */
+const HTML_BLOCK_TAGS = new Set(
+  'pre textarea address article aside blockquote caption center dd details dialog dir div dl dt fieldset figcaption figure footer form h1 h2 h3 h4 h5 h6 header hgroup legend li main menu nav ol p section summary table tbody td tfoot th thead tr ul'.split(' '),
+);
+
 function block(b: Branch): string {
   // A drawing goes in as one line of inline SVG markup, ids included, so its shapes come back.
   // Its opening tag stands on a line of its own, which makes the rest an HTML block, not a paragraph.
   if (b.tag === 'svg') return inlineHtml(renderNodeHtml(b)).replace(/^(<svg\b[^>]*>)/, '$1\n');
+  // Text whose whitespace shows (`<pre>`, `white-space: pre*`) as one line of HTML, its line breaks
+  // as references: Markdown would join its lines and collapse its spaces. (A fenced code block
+  // covers `pre > code` holding only text.) Only tags that start an HTML block mid-line qualify.
+  if (keepsWhitespace(b) && HTML_BLOCK_TAGS.has(b.tag) && !fencedCode(b)) return inlineHtml(renderNodeHtml(b));
   const allInline = b.children.every(isInlineNode);
   const heading = HEADING.exec(b.tag);
   // A heading's text is trimmed of every kind of space when read, so edge non-breaking spaces are written as references.
@@ -349,15 +369,13 @@ function block(b: Branch): string {
       .map((l) => (l ? `> ${l}` : '>'))
       .join('\n');
   }
-  if (b.tag === 'pre' && !needsMeta(b) && b.children.length === 1) {
-    const code = b.children[0];
-    if (isBranch(code) && code.tag === 'code' && !needsMeta(code) && code.children.every((c) => !isBranch(c) && c.type === 'text')) {
-      const text = code.children.map((c) => (c as Leaf).value).join('').replace(/\n$/, '');
-      // Backticks, more than the longest run in the code, so no line of it can close the fence.
-      const longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((r) => r.length));
-      const fence = '`'.repeat(Math.max(3, longest + 1));
-      return `${fence}\n${text}\n${fence}`;
-    }
+  if (fencedCode(b)) {
+    const code = b.children[0] as Branch;
+    const text = code.children.map((c) => (c as Leaf).value).join('').replace(/\n$/, '');
+    // Backticks, more than the longest run in the code, so no line of it can close the fence.
+    const longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((r) => r.length));
+    const fence = '`'.repeat(Math.max(3, longest + 1));
+    return `${fence}\n${text}\n${fence}`;
   }
   return container(b);
 }

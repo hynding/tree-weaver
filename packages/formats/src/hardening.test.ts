@@ -959,3 +959,29 @@ describe('pass 25 fixes', () => {
     );
   });
 });
+
+describe('pass 26 fixes', () => {
+  it('leaves plain ampersands raw and percent-encodes angle brackets in Tailwind url() classes', () => {
+    const tree = page([
+      createBranch({ tag: 'div', styles: { lg: { 'background-image': 'url("https://img.example/p?auto=format&fit=crop")' } } }),
+      createBranch({ tag: 'i', styles: { lg: { 'background-image': 'url("data:image/svg+xml,<svg></svg>")' } } }),
+    ]);
+    for (const framework of ['html', 'react', 'vue', 'svelte'] as const) {
+      const out = exportComponent(tree, { framework, styling: 'tailwind' }).files[0].contents;
+      expect(out).toContain("[background-image:url('https://img.example/p?auto=format&fit=crop')]");
+      expect(out).toContain("url('data:image/svg+xml,%3Csvg%3E%3C/svg%3E')");
+    }
+  });
+
+  it('keeps line breaks and spaces of pre and white-space: pre branches in Markdown', () => {
+    const tree = page([
+      createBranch({ tag: 'pre', children: [text('line 1\n  indented\nline 3')] }),
+      createBranch({ tag: 'p', styles: { lg: { 'white-space': 'pre-line' } }, children: [text('Roses\nViolets')] }),
+    ]);
+    const back = importDocument(exportTree(tree, 'markdown'), 'markdown');
+    const root = back.kind === 'tree' ? back.tree.root : back.forest.trees[0].root;
+    const texts = JSON.stringify(root);
+    expect(texts).toContain('"line 1\\n  indented\\nline 3"');
+    expect(texts).toContain('"Roses\\nViolets"');
+  });
+});

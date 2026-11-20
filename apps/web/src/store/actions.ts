@@ -57,6 +57,7 @@ import {
   type Tree,
   type TreeNode,
   addKitsBeforeTokens,
+  displayProblems,
   isTokenKit,
   resetToken,
   setToken,
@@ -137,6 +138,13 @@ const prefs = new Preferences({
 });
 const history = new History<Forest>(150);
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
+/**
+ * The stored version this tab last loaded or saved, by its `updatedAt` (set on every save). A
+ * different one in storage at save time means another tab saved the forest in between.
+ */
+let baseline: { id: string; at: string } | null = null;
+/** Tells this browser's other tabs that a forest was saved, so an idle one can pick it up. */
+const tabs: BroadcastChannel | null = typeof BroadcastChannel === 'function' && !isEmbedded() ? new BroadcastChannel('tree-weaver-forests') : null;
 
 /** Undo and redo in a shared forest, which undo only this editor's changes (see store/collab.ts). */
 export interface HistoryOverride {
@@ -165,13 +173,28 @@ function scheduleSave() {
 }
 
 /** Save the open forest now. Resolves false (after telling the user) when the save failed. */
-export async function saveNow(): Promise<boolean> {
+export async function saveNow(checkOtherTabs = true): Promise<boolean> {
   clearTimeout(saveTimer);
   const forest = state.forest;
   if (!forest) return true;
   state.saveState = 'saving';
   try {
-    await store.save(forest);
+    const at = new Date().toISOString();
+    if (checkOtherTabs && baseline?.id === forest.id) {
+      const stored = await store.load(forest.id);
+      if (stored && stored.updatedAt !== baseline.at) {
+        // Another tab saved this forest since: keep both, this tab's version as a copy.
+        const copy: Forest = { ...forest, id: createId('f'), name: uniqueName(`${forest.name} (other tab)`, state.forests.map((f) => f.name)), updatedAt: at };
+        await store.save(copy);
+        state.forests = await store.list();
+        openLoaded(copy, state.treeId);
+        toast(`“${forest.name}” was changed in another tab, so your changes here are kept as “${copy.name}”.`, 'error');
+        return true;
+      }
+    }
+    await store.save({ ...forest, updatedAt: at });
+    baseline = { id: forest.id, at };
+    tabs?.postMessage({ id: forest.id, at });
     state.forests = await store.list();
     if (state.forest === forest) state.saveState = 'saved';
     else scheduleSave();
@@ -275,12 +298,24 @@ export async function init(): Promise<void> {
     await saveNow();
   }
   state.ready = true;
+  // Another tab saved the forest open here: with nothing unsaved in this tab, show its version.
+  tabs?.addEventListener('message', (e: MessageEvent<{ id: string; at: string }>) => {
+    const { id, at } = e.data ?? {};
+    if (!id || id !== state.forest?.id || state.saveState !== 'saved' || baseline?.at === at) return;
+    void store.load(id).then((latest) => {
+      if (!latest || state.forest?.id !== id || state.saveState !== 'saved') return;
+      openLoaded(latest, state.treeId);
+      toast('Updated with changes saved in another tab');
+    });
+  });
   window.addEventListener('beforeunload', () => {
-    if (state.saveState !== 'saved') void saveNow();
+    // No read first: the page may be gone before it answers.
+    if (state.saveState !== 'saved') void saveNow(false);
   });
 }
 
 function openLoaded(forest: Forest, treeId: string) {
+  baseline = { id: forest.id, at: forest.updatedAt };
   history.clear();
   state.forest = withCurrentBreakpoints(forest);
   state.treeId = forest.trees.some((t) => t.id === treeId) ? treeId : (forest.trees[0]?.id ?? '');
@@ -371,6 +406,9 @@ export function setDisplaySetting(id: DisplayId, field: DisplayField, value: num
   if (value === null) delete entry[field];
   else entry[field] = value;
   saveDisplaySettings({ ...state.displaySettings, [id]: entry });
+  // Saved as asked, but a size that hides a display's own styles is worth saying.
+  const problem = displayProblems()[0];
+  if (problem) toast(problem, 'error');
 }
 
 /** Change several display values in this browser at once, skipping any the deployment locks. Returns the displays changed. */

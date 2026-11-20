@@ -479,3 +479,14 @@ describe('pass 23 fixes', () => {
     expect(sanitizeTokenValue('#2f6f4f;')).toBe('#2f6f4f');
   });
 });
+
+describe('pass 26 fixes', () => {
+  it('reports display sizes that hide a display\'s own styles', async () => {
+    const { displayProblems, DEFAULT_DISPLAYS } = await import('./index');
+    expect(displayProblems(DEFAULT_DISPLAYS)).toEqual([]);
+    const wide = DEFAULT_DISPLAYS.map((d) => (d.id === 'tablet' ? { ...d, width: 1100 } : d));
+    expect(displayProblems(wide)[0]).toMatch(/wider than its breakpoint/);
+    const order = DEFAULT_DISPLAYS.map((d) => (d.id === 'mobile-portrait' ? { ...d, breakpoint: 2000, media: '(max-width: 2000px) and (orientation: portrait)', width: 390 } : d));
+    expect(displayProblems(order).join(' ')).toMatch(/breakpoint \(2000px\) is above/);
+  });
+});
