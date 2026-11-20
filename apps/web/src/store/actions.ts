@@ -9,6 +9,7 @@ import {
   ancestorsOf,
   canHaveChildren,
   cloneTree,
+  walk,
   createBranch,
   createCustomKit,
   createForest,
@@ -30,7 +31,6 @@ import {
   removeTableColumn,
   removeTableRow,
   parseRulesCss,
-  placementProblem,
   renderDocument,
   renderForestIndex,
   setRuleStyle as setRuleDeclaration,
@@ -66,6 +66,10 @@ import {
   findComponent,
   findTree,
   instancesOf,
+  idsOutside,
+  insertionProblem,
+  instanceRoleIn,
+  VOID_TAGS,
   instantiateComponent,
   isComponentTreeId,
   updateComponent,
@@ -159,20 +163,33 @@ function scheduleSave() {
   saveTimer = setTimeout(() => void saveNow(), 400);
 }
 
-export async function saveNow(): Promise<void> {
+/** Save the open forest now. Resolves false (after telling the user) when the save failed. */
+export async function saveNow(): Promise<boolean> {
   clearTimeout(saveTimer);
   const forest = state.forest;
-  if (!forest) return;
+  if (!forest) return true;
   state.saveState = 'saving';
   try {
     await store.save(forest);
     state.forests = await store.list();
     if (state.forest === forest) state.saveState = 'saved';
     else scheduleSave();
+    return true;
   } catch (err) {
     state.saveState = 'error';
     toast(`Could not save locally: ${(err as Error).message}`, 'error');
+    return false;
   }
+}
+
+/**
+ * Save the open forest before something replaces it. When the save fails, the forest stays
+ * open (replacing it would lose the unsaved edits) and this resolves false.
+ */
+async function saveBeforeLeaving(): Promise<boolean> {
+  if (await saveNow()) return true;
+  toast('The open forest stays open because its changes could not be saved. Export it to keep a copy, then try again.', 'error');
+  return false;
 }
 
 /** Replace the forest. Records an undo step unless `record` is false; `meta` says where the change came from (default: the editor). */
@@ -414,9 +431,19 @@ export function instanceOwner(root: Branch, id: string): Branch | null {
   return [...ancestorsOf(root, id)].reverse().find((a) => a.instance) ?? null;
 }
 
+/** Why a branch can't take another tag where it is, or null (the same rules as a patch's `update`). */
+function tagChangeProblem(root: Branch, node: Branch, tag: string): string | null {
+  if (node.children.length && VOID_TAGS.has(tag.toLowerCase())) return `<${tag}> can't hold children, and this branch has ${node.children.length}`;
+  const parent = findParent(root, node.id)?.parent;
+  if (!parent) return null;
+  const next: Branch = { ...node, tag };
+  return insertionProblem(removeNode(root, node.id), parent.id, next);
+}
+
 function allowed(root: Branch, parentId: string, node: TreeNode): boolean {
   const owner = instanceOwner(root, parentId);
-  const problem = owner ? `“${owner.name ?? 'This branch'}” is a component instance: edit the component to change what is inside it` : placementProblem(root, parentId, node);
+  // The node and everything it holds must suit where it lands (an <a> works in HTML and SVG, what it holds may not).
+  const problem = owner ? `“${owner.name ?? 'This branch'}” is a component instance: edit the component to change what is inside it` : insertionProblem(root, parentId, node);
   if (problem) toast(problem, 'error');
   return !problem;
 }
@@ -480,7 +507,9 @@ export function moveTo(id: string, targetId: string, position: DropPosition): vo
   const node = tree && findNode(tree.root, id);
   if (id === targetId || !tree || !node) return;
   const { parentId, index } = placement(tree.root, targetId, position);
-  if (!allowed(tree.root, parentId, node)) return;
+  // Checked against the tree without the node, as it will be once moved.
+  const without = removeNode(tree.root, id);
+  if (!allowed(findNode(without, parentId) ? without : tree.root, parentId, node)) return;
   editTree((root) => moveNode(root, id, parentId, index));
 }
 
@@ -535,6 +564,15 @@ export function selectParent(): void {
 }
 
 export function updateBranch(id: string, patch: Partial<Omit<Branch, 'kind' | 'id' | 'children'>>): void {
+  const tree = currentTree();
+  const node = tree && findNode(tree.root, id);
+  if (tree && node && isBranch(node) && patch.tag !== undefined && patch.tag !== node.tag) {
+    const problem = tagChangeProblem(tree.root, node, patch.tag);
+    if (problem) {
+      toast(problem, 'error');
+      return;
+    }
+  }
   editTree((root) =>
     updateNode(root, id, (node) => {
       if (!isBranch(node)) return node;
@@ -618,6 +656,10 @@ export function saveAsComponent(branchId: string, name: string): ComponentDef | 
   if (!forest || !tree || isComponentTreeId(tree.id)) return null;
   const node = findNode(tree.root, branchId);
   if (!node || !isBranch(node)) return null;
+  if (instanceRoleIn(tree.root, node.id) === 'inside') {
+    toast('This branch is part of a component instance. Edit the component, or detach the instance first.', 'error');
+    return null;
+  }
   // The branch itself becomes an instance, so it follows the component from now on.
   const saved = saveComponent(forest, tree.id, node.id, name);
   if (!saved) return null;
@@ -735,7 +777,7 @@ export function renameForest(name: string): void {
 }
 
 export async function newForest(name?: string): Promise<void> {
-  await saveNow();
+  if (!(await saveBeforeLeaving())) return;
   const forest = freshForest(name || uniqueName('New forest', state.forests.map((f) => f.name)));
   openLoaded(forest, '');
   await saveNow();
@@ -746,7 +788,7 @@ export async function newForest(name?: string): Promise<void> {
 export async function newForestFromStarter(id: string, name?: string): Promise<void> {
   const starter = getStarter(id);
   if (!starter) return toast(`No template "${id}"`, 'error');
-  await saveNow();
+  if (!(await saveBeforeLeaving())) return;
   const forest = starter.create(name || uniqueName(starter.label, state.forests.map((f) => f.name)));
   state.dialog = null;
   openLoaded(forest, '');
@@ -756,7 +798,7 @@ export async function newForestFromStarter(id: string, name?: string): Promise<v
 
 export async function openForest(id: string): Promise<void> {
   if (id === state.forest?.id) return;
-  await saveNow();
+  if (!(await saveBeforeLeaving())) return;
   const forest = await store.load(id);
   if (!forest) {
     toast('That forest could not be loaded', 'error');
@@ -997,7 +1039,7 @@ export interface ImportResult {
 export async function importText(text: string, format?: FormatId, fileName?: string): Promise<ImportResult> {
   const doc = importDocument(text, format, fileName);
   if (doc.kind === 'forest') {
-    await saveNow();
+    if (!(await saveNow())) throw new Error('The open forest’s changes could not be saved, so it stays open. Export it to keep a copy, then import again.');
     let forest = doc.forest;
     if (state.forests.some((f) => f.id === forest.id)) {
       forest = { ...forest, id: createId('f'), name: uniqueName(forest.name, state.forests.map((f) => f.name)) };
@@ -1009,7 +1051,16 @@ export async function importText(text: string, format?: FormatId, fileName?: str
   const forest = state.forest;
   if (!forest) throw new Error('No forest is open');
   let tree = doc.tree;
-  if (forest.trees.some((t) => t.id === tree.id)) tree = { ...tree, id: createId('t') };
+  // Node ids are unique across a forest (collab and history match nodes by id): importing a
+  // tree the forest already holds, or one with clashing ids, gives it fresh ids.
+  const taken = new Set<string>();
+  for (const t of forest.trees) walk(t.root, (n) => void taken.add(n.id));
+  let clash = false;
+  walk(tree.root, (n) => {
+    if (taken.has(n.id)) clash = true;
+  });
+  if (clash) tree = cloneTree(tree, true);
+  else if (forest.trees.some((t) => t.id === tree.id)) tree = { ...tree, id: createId('t') };
   tree = { ...tree, name: uniqueName(tree.name, forest.trees.map((t) => t.name)) };
   // Skip kits the forest already has, and the deployment's own stylesheets.
   const added = newKits(doc.kits);
@@ -1017,6 +1068,15 @@ export async function importText(text: string, format?: FormatId, fileName?: str
   switchTree(tree.id);
   const kitNote = added.length ? ` and ${added.length} design kit${added.length === 1 ? '' : 's'}` : '';
   return { summary: `Added tree “${tree.name}”${kitNote}` };
+}
+
+/** A forest as saved on this device, or null. */
+export async function loadStoredForest(id: string): Promise<Forest | null> {
+  try {
+    return (await store.load(id)) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -1033,7 +1093,14 @@ export async function openDocument(doc: TreeDocument, meta: ChangeMeta = {}): Pr
   }
   if (open && doc.kind === 'tree' && open.trees.some((t) => t.id === doc.tree.id)) {
     const added = newKits(doc.kits);
-    commit({ ...replaceTree(open, doc.tree), kits: addKitsBeforeTokens(open.kits, added) }, true, meta);
+    // Node ids are unique across the forest: one the forest's other trees use gets a fresh id.
+    const taken = idsOutside(open.trees, doc.tree.id);
+    const reId = (n: TreeNode): TreeNode => {
+      const id = taken.has(n.id) ? createId(isBranch(n) ? 'b' : 'l') : n.id;
+      return isBranch(n) ? { ...n, id, children: n.children.map(reId) } : { ...n, id };
+    };
+    const incoming = taken.size ? { ...doc.tree, root: { ...(reId(doc.tree.root) as Branch), id: doc.tree.root.id } } : doc.tree;
+    commit({ ...replaceTree(open, incoming), kits: addKitsBeforeTokens(open.kits, added) }, true, meta);
     switchTree(doc.tree.id);
     await saveNow();
     return { kind: 'tree', trees: 1 };
@@ -1044,6 +1111,8 @@ export async function openDocument(doc: TreeDocument, meta: ChangeMeta = {}): Pr
     forest = createForest(doc.tree.name, [doc.tree]);
     forest.kits = doc.kits.filter((k) => !isEnvKit(k));
   }
+  // Edits still waiting for the debounced save would be lost when the forest is replaced.
+  if (open && state.saveState !== 'saved' && !(await saveNow())) throw new Error('The open forest’s changes could not be saved, so it stays open');
   openLoaded(forest, '');
   await saveNow();
   return { kind: doc.kind, trees: forest.trees.length };

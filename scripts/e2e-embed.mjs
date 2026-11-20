@@ -12,8 +12,9 @@ import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const repo = new URL('..', import.meta.url).pathname;
+const repo = fileURLToPath(new URL('..', import.meta.url));
 const www = join(repo, 'apps/web/www');
 const examples = join(repo, 'examples');
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml' };

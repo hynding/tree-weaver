@@ -37,7 +37,7 @@ import {
   parseSpan,
   parseTracks,
   resolveStyles,
-  SHAPE_GEOMETRY,
+  shapeGeometry,
   SHAPE_PAINT,
   SHAPES,
   SVG_BRANCH_TAGS,
@@ -306,7 +306,7 @@ export class TwInspector {
       else next[name] = value.trim();
       updateLeaf(leaf.id, { attrs: next });
     };
-    const geometry = SHAPE_GEOMETRY[leaf.value] ?? [];
+    const geometry = shapeGeometry(leaf.value);
     const paint = leaf.value === 'stop' || leaf.value.startsWith('fe') ? [] : SHAPE_PAINT;
     const field = (name: string) => (
       <div class="field" key={`${leaf.id}:${name}`}>
@@ -1469,7 +1469,7 @@ export class TwInspector {
             ]
           : [
               this.renderLeaf(node),
-              node.type === 'shape' ? this.renderAttributes(node, [...(SHAPE_GEOMETRY[node.value] ?? []), ...SHAPE_PAINT]) : null,
+              node.type === 'shape' ? this.renderAttributes(node, [...shapeGeometry(node.value), ...SHAPE_PAINT]) : null,
               this.renderMatchedStyles(node),
               this.renderActions(),
             ]}

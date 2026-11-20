@@ -122,7 +122,7 @@ export class TwKitsPanel {
           state.openKitId === kit.id ? (
             <div class="kit-details">
               <p class="hint">
-                <a href={kit.href} target="_blank" rel="noopener noreferrer">
+                <a href={kit.href && isStylesheetUrl(kit.href) ? kit.href : undefined} target="_blank" rel="noopener noreferrer">
                   {kit.href}
                 </a>
               </p>

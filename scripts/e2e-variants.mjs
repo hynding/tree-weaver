@@ -10,10 +10,12 @@
  *   pnpm e2e:variants
  */
 import { createRequire } from 'node:module';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const root = new URL('../packages', import.meta.url).pathname;
-const core = await import(`${root}/core/dist/index.js`);
-const formats = await import(`${root}/formats/dist/index.js`);
+const root = fileURLToPath(new URL('../packages', import.meta.url));
+// import() takes URLs, so a path with `#` or a Windows drive still loads.
+const core = await import(pathToFileURL(`${root}/core/dist/index.js`).href);
+const formats = await import(pathToFileURL(`${root}/formats/dist/index.js`).href);
 const { chromium } = createRequire(import.meta.url)('playwright');
 const { createBranch, createComponent, text, expandComponent, renderTreeCss, renderNodeHtml, DISPLAYS } = core;
 

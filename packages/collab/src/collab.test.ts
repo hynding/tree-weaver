@@ -198,3 +198,120 @@ describe('rooms', () => {
     expect(parseRoomHash('#collab=nope')).toBeNull();
   });
 });
+
+describe('components over collab', () => {
+  it('carries component definitions and instance links', () => {
+    const f = sample();
+    const forest: Forest = {
+      ...withRoot(f, (root) => ({ ...root, children: root.children.map((c) => (c.id === 'h' ? { ...(c as Branch), instance: { component: 'c1', props: { title: 'Hi' } } } : c)) })),
+      components: [{ id: 'c1', name: 'Card', root: b('cr', { tag: 'div' }), props: [], variants: [] }],
+    };
+    const doc = new Y.Doc();
+    writeForest(doc, null, forest);
+    const back = readForest(doc)!;
+    expect(back.components).toEqual(forest.components);
+    expect((back.trees[0].root.children[0] as Branch).instance).toEqual({ component: 'c1', props: { title: 'Hi' } });
+  });
+
+  it('drops kit links that are not stylesheet URLs', () => {
+    const f = sample();
+    f.kits = [{ ...f.kits[0], href: 'javascript:alert(1)' }];
+    const doc = new Y.Doc();
+    writeForest(doc, null, f);
+    expect(readForest(doc)!.kits[0].href).toBeUndefined();
+  });
+});
+
+describe('concurrent component saves', () => {
+  it('keeps both components', () => {
+    const { a, c, sync } = offline();
+    const f = sample();
+    writeForest(a, null, f);
+    sync();
+    const base = readForest(c)!;
+    const def = (id: string) => ({ id, name: id, root: b(`${id}r`, { tag: 'div' }), props: [], variants: [] });
+    writeForest(a, base, { ...base, components: [def('A')] });
+    writeForest(c, base, { ...base, components: [def('B')] });
+    sync();
+    expect(readForest(a)!.components!.map((x) => x.id).sort()).toEqual(['A', 'B']);
+    expect(strip(readForest(a))).toEqual(strip(readForest(c)));
+  });
+});
+
+describe('peer data that is not a string', () => {
+  it('falls back for tree and forest names that are not strings', () => {
+    const doc = new Y.Doc();
+    writeForest(doc, null, sample());
+    const t = [...doc.getMap<Y.Map<unknown>>('trees').values()][0];
+    t.set('name', 42);
+    doc.getMap<unknown>('forest').set('name', { x: 1 });
+    const f = readForest(doc)!;
+    expect(f.trees[0].name).toBe('Untitled tree');
+    expect(f.name).toBe('Shared forest');
+  });
+});
+
+describe('peer kits and components', () => {
+  it('skips a malformed kit instead of throwing', () => {
+    const doc = new Y.Doc();
+    writeForest(doc, null, sample());
+    const kits = doc.getMap<Y.Map<unknown>>('kits');
+    const bad = new Y.Map<unknown>();
+    kits.set('bad', bad);
+    bad.set('order', 'zz');
+    bad.set('data', JSON.stringify({ name: 'Bad', css: '', enabled: true, tokens: [null] }));
+    const f = readForest(doc)!;
+    expect(f.kits.some((k) => k.id === 'bad')).toBe(false);
+  });
+});
+
+describe('malformed order keys from peers', () => {
+  it('makes fresh keys instead of looping forever', () => {
+    expect(keyBetween(undefined, '0')).toMatch(/^[0-9a-z]*[1-9a-z]$/);
+    expect(keyBetween('a', 'A')).toMatch(/^[0-9a-z]*[1-9a-z]$/);
+    const keys = orderKeys(['x', 'y', 'z'], (id) => ({ y: '0', z: 'A' })[id]);
+    const list = ['x', 'y', 'z'].map((id) => keys.get(id)!);
+    expect([...list].sort()).toEqual(list);
+    expect(new Set(list).size).toBe(3);
+  });
+});
+
+describe('entries from peers that are not maps', () => {
+  it('reads, prunes and writes around them, and cuts very deep nesting', () => {
+    const doc = new Y.Doc();
+    const f = sample();
+    writeForest(doc, null, f);
+    doc.getMap('nodes').set('junk', 'boom');
+    doc.getMap('trees').set('junk', 'boom');
+    doc.getMap('kits').set('junk', 7);
+    doc.getMap('components').set('junk', null);
+    expect(() => pruneStrays(doc)).not.toThrow();
+    const read = readForest(doc)!;
+    expect(read.trees).toHaveLength(f.trees.length);
+    const tree = read.trees[0];
+    doc.getMap('nodes').set(tree.root.children[0]?.id ?? 'x', 'boom');
+    expect(() => writeForest(doc, read, withRoot(read, (r) => r))).not.toThrow();
+  });
+
+  it('cuts a peer chain deeper than any layout', () => {
+    const doc = new Y.Doc();
+    const f = sample();
+    writeForest(doc, null, f);
+    const nodes = doc.getMap<Y.Map<unknown>>('nodes');
+    const treeId = f.trees[0].id;
+    let parent = f.trees[0].root.id;
+    doc.transact(() => {
+      for (let i = 0; i < 5000; i++) {
+        const n = new Y.Map<unknown>();
+        n.set('kind', 'branch');
+        n.set('tree', treeId);
+        n.set('parent', parent);
+        n.set('order', 'i');
+        n.set('tag', 'div');
+        nodes.set(`deep${i}`, n);
+        parent = `deep${i}`;
+      }
+    });
+    expect(() => readForest(doc)).not.toThrow();
+  });
+});

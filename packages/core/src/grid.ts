@@ -67,6 +67,8 @@ export function formatTrack(track: GridTrack): string {
  * Returns `null` for values that are not a fixed list of columns (auto-fit, subgrid,
  * named lines), which the editor leaves to the raw CSS field.
  */
+const MAX_TRACKS = 1000;
+
 export function parseTracks(template: string | undefined): GridTrack[] | null {
   if (!template || template.trim() === 'none') return [];
   const tracks: GridTrack[] = [];
@@ -76,6 +78,8 @@ export function parseTracks(template: string | undefined): GridTrack[] | null {
     if (repeat) {
       const inner = splitTopLevel(repeat[2]);
       if (inner.some((t) => t.startsWith('['))) return null;
+      // More columns than anyone edits by hand is treated as custom, rather than expanded.
+      if (Number(repeat[1]) * inner.length + tracks.length > MAX_TRACKS) return null;
       for (let i = 0; i < Number(repeat[1]); i++) tracks.push(...inner.map(parseTrack));
     } else if (token.startsWith('repeat(') || token === 'subgrid' || token === 'masonry') return null;
     else tracks.push(parseTrack(token));

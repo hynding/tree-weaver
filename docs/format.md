@@ -150,7 +150,7 @@ The importer also reads these; the validator warns and suggests the canonical fo
 
 ## Other formats
 
-The same tree also moves as XML (lossless), HTML (a standalone page that imports back) and
+The same tree also moves as XML (lossless), HTML (a standalone page that imports back, without component links or text-leaf attributes) and
 Markdown (readable content, layout in front matter). See the [README](../README.md#formats).
 
 ## Shorthand and patches

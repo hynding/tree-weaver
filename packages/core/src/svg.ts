@@ -137,6 +137,9 @@ export const SHAPE_GEOMETRY: Record<string, readonly string[]> = {
   stop: ['offset', 'stop-color', 'stop-opacity'],
 };
 
+/** A shape's geometry attributes; none for a value that isn't a known shape (`constructor` included). */
+export const shapeGeometry = (shape: string): readonly string[] => (Object.hasOwn(SHAPE_GEOMETRY, shape) ? SHAPE_GEOMETRY[shape] : []);
+
 /** Presentation attributes the editor offers on every shape. */
 export const SHAPE_PAINT: readonly string[] = ['fill', 'stroke', 'stroke-width', 'opacity', 'transform'];
 

@@ -116,3 +116,31 @@ describe('shorthand documents', () => {
     expect(() => expandShorthandDocument({ tree: { name: 'x' } })).toThrow(/no "root"/);
   });
 });
+
+describe('string form selectors with colons and spaces', () => {
+  it('reads attribute values that hold colons, spaces and namespaces', () => {
+    const a = expandShorthand('a[href=https://example.com]: Join') as Branch;
+    expect(a.tag).toBe('a');
+    expect(a.attrs.href).toBe('https://example.com');
+    const b = expandShorthand('a[title="Hello world"]: Hi') as Branch;
+    expect(b.attrs.title).toBe('Hello world');
+    const u = expandShorthand('a[xlink:href=#x]:') as Branch;
+    expect(u.attrs['xlink:href']).toBe('#x');
+    expect(expandShorthand('Note:this is text')).toMatchObject({ value: 'Note:this is text' });
+  });
+});
+
+describe('unquoted attribute values with quotes inside', () => {
+  it('treats an apostrophe mid-value as text', () => {
+    expect((expandShorthand("a[title=it's]: x") as Branch).attrs.title).toBe("it's");
+    expect((expandShorthand("a[href=/o'brien]: Bio") as Branch).attrs.href).toBe("/o'brien");
+  });
+});
+
+describe('capitalised labels', () => {
+  it('stays text when a label looks like a tag name', async () => {
+    const { expandShorthand } = await import('./shorthand');
+    for (const s of ['Q: How much?', 'Address: 1 Main St', 'Time: 9am']) expect(expandShorthand(s)).toMatchObject({ kind: 'leaf', value: s });
+    expect(expandShorthand('address: 1 Main St')).toMatchObject({ kind: 'branch', tag: 'address' });
+  });
+});

@@ -10,8 +10,9 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const repo = new URL('..', import.meta.url).pathname;
+const repo = fileURLToPath(new URL('..', import.meta.url));
 const work = mkdtempSync(join(tmpdir(), 'tree-weaver-smoke-'));
 const packs = join(work, 'packs');
 const app = join(work, 'app');

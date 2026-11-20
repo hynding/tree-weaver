@@ -1,9 +1,11 @@
 import {
+  CONTROL_CHARS,
   createId,
   isBranch,
   isSvgRoot,
   renderNodeHtml,
   renderTreeCss,
+  SVG_NAMESPACE,
   walk,
   type Branch,
   type DesignKit,
@@ -44,7 +46,8 @@ export function drawingOf(tree: Tree): Branch | null {
 }
 
 const cdata = (css: string): string => `<![CDATA[\n${css.replace(/]]>/g, ']]]]><![CDATA[>')}\n]]>`;
-const xmlAttr = (v: string): string => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+const xmlAttr = (v: string): string =>
+  v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/[\t\n\r]/g, (c) => `&#${c.charCodeAt(0)};`);
 
 /** A standalone SVG file for the tree's drawing, with its kits and responsive styles inside. */
 export function exportSvg(tree: Tree, opts: SvgExportOptions = {}): string {
@@ -58,9 +61,13 @@ export function exportSvg(tree: Tree, opts: SvgExportOptions = {}): string {
   const branchCss = renderTreeCss(svg);
   if (branchCss) styles.push(`<style data-tw-styles="">${cdata(branchCss)}</style>`);
   // Designer markup keeps text leaves' ids on <tspan>s, which a standalone SVG draws the same.
-  const markup = renderNodeHtml(svg, { pretty: true, xml: true, designer: true });
+  // The tree's name, and whether the namespace was added here, ride on the root so import can restore them.
+  const marks = ` data-tw-tree-name="${xmlAttr(tree.name)}"${svg.attrs.xmlns === undefined ? ' data-tw-added-xmlns=""' : ''}`;
+  const markup = renderNodeHtml(svg, { pretty: true, xml: true, designer: true }).replace(/^<svg\b/, `$&${marks}`);
   const body = styles.length ? markup.replace(/^(<svg\b[^>]*>)/, `$1\n  ${styles.join('\n  ')}`) : markup;
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<!-- ${tree.name.replace(/--/g, '- -')} · made with Tree Weaver -->\n${body}\n`;
+  const out = `<?xml version="1.0" encoding="UTF-8"?>\n<!-- ${tree.name.replace(/-(?=-)/g, '- ')} · made with Tree Weaver -->\n${body}\n`;
+  // XML 1.0 can't hold these even as references.
+  return out.replace(CONTROL_CHARS, '');
 }
 
 /* ----------------------------------------------------------------- import */
@@ -77,7 +84,10 @@ function clean(el: Element): Element {
   el.children = el.children.filter((c) => !isElement(c) || (!DROP.has(c.name.replace(/^svg:/, '')) && !/^(?!svg:)\w+:/.test(c.name)));
   el.name = el.name.replace(/^svg:/, '');
   for (const name of Object.keys(el.attribs)) {
-    if (/^(xmlns:|inkscape:|sodipodi:|sketch:|serif:)/.test(name)) delete el.attribs[name];
+    // Namespace declarations are dropped, so any other prefixed attribute (`i:extraneous`,
+    // `xlink:title`) would be unbound in the file written back. `xml:` needs none, and
+    // `xlink:href` is read as `href`.
+    if (/^xmlns:/.test(name) || (/^[\w.-]+:/.test(name) && !/^xml:/.test(name) && name.toLowerCase() !== 'xlink:href')) delete el.attribs[name];
   }
   el.children.forEach((c) => isElement(c) && clean(c));
   return el;
@@ -111,13 +121,18 @@ export function importSvg(text: string): TreeDocument {
   const titleEl = top.children.find((c): c is Element => isElement(c) && c.name.replace(/^svg:/, '') === 'title');
   const title = titleEl ? textOf(titleEl).trim() : '';
   const comment = dom.children.find((c) => c.type === 'comment' && / · made with Tree Weaver $/.test(c.data));
-  const name = comment && 'data' in comment ? (comment.data as string).replace(/ · made with Tree Weaver $/, '').trim() : title;
+  const fromComment = comment && 'data' in comment ? (comment.data as string).replace(/ · made with Tree Weaver $/, '').trim() : title;
+  const name = top.attribs['data-tw-tree-name'] ?? fromComment;
+  const addedXmlns = top.attribs['data-tw-added-xmlns'] !== undefined;
+  const authored = top.attribs['data-tw'] !== undefined;
   if (looseCss.length) kits.push({ id: createId('k'), name: name ? `${name} styles` : 'Drawing styles', css: looseCss.join('\n\n'), enabled: true, source: 'svg' });
 
   const ctx: Ctx = { styles };
   const root = convertParts('svg', clean(top).attribs, top.children, ctx, false);
   root.type ??= 'root';
-  root.name ??= 'Drawing';
+  const rootAttrs = root.attrs as Record<string, string> | undefined;
+  if (addedXmlns && rootAttrs?.xmlns === SVG_NAMESPACE) delete rootAttrs.xmlns;
+  if (!authored) root.name ??= 'Drawing';
   return fromData({ tree: { name: name || 'Imported drawing', root }, kits }, 'svg');
 }
 

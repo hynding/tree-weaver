@@ -110,6 +110,19 @@ function request<T>(req: IDBRequest<T>): Promise<T> {
   });
 }
 
+/**
+ * Settle when a write's transaction commits. A request can succeed and its transaction still
+ * abort at commit (a full quota is reported that way), so a write is only done on `complete`.
+ */
+function committed(req: IDBRequest): Promise<void> {
+  const tx = req.transaction!;
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onabort = () => reject(tx.error ?? req.error ?? new Error('The write was aborted'));
+    tx.onerror = () => reject(tx.error ?? req.error);
+  });
+}
+
 export class IndexedDbForestStore implements ForestStore {
   readonly kind = 'indexeddb' as const;
   private db: Promise<IDBDatabase> | null = null;
@@ -120,7 +133,8 @@ export class IndexedDbForestStore implements ForestStore {
   ) {}
 
   private open(): Promise<IDBDatabase> {
-    this.db ??= new Promise((resolve, reject) => {
+    if (this.db) return this.db;
+    const db = new Promise<IDBDatabase>((resolve, reject) => {
       const req = this.factory.open(this.name, 1);
       req.onupgradeneeded = () => {
         if (!req.result.objectStoreNames.contains(STORE)) req.result.createObjectStore(STORE, { keyPath: 'id' });
@@ -128,8 +142,13 @@ export class IndexedDbForestStore implements ForestStore {
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
       req.onblocked = () => reject(new Error('The Tree Weaver database is blocked by another tab'));
+    }).catch((err: unknown) => {
+      // Don't keep a failed open: the next call tries again.
+      if (this.db === db) this.db = null;
+      throw err;
     });
-    return this.db;
+    this.db = db;
+    return db;
   }
 
   private async store(mode: IDBTransactionMode): Promise<IDBObjectStore> {
@@ -150,11 +169,11 @@ export class IndexedDbForestStore implements ForestStore {
   }
 
   async save(forest: Forest) {
-    await request((await this.store('readwrite')).put(clone(forest)));
+    await committed((await this.store('readwrite')).put(clone(forest)));
   }
 
   async remove(id: string) {
-    await request((await this.store('readwrite')).delete(id));
+    await committed((await this.store('readwrite')).delete(id));
   }
 
   close(): void {
@@ -260,7 +279,8 @@ export class IndexedDbRecordStore<T extends Keyed> implements RecordStore<T> {
   ) {}
 
   private open(): Promise<IDBDatabase> {
-    this.db ??= new Promise((resolve, reject) => {
+    if (this.db) return this.db;
+    const db = new Promise<IDBDatabase>((resolve, reject) => {
       const req = this.factory.open(this.name, 1);
       req.onupgradeneeded = () => {
         if (!req.result.objectStoreNames.contains('records')) req.result.createObjectStore('records', { keyPath: 'id' });
@@ -268,8 +288,12 @@ export class IndexedDbRecordStore<T extends Keyed> implements RecordStore<T> {
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
       req.onblocked = () => reject(new Error(`The ${this.name} database is blocked by another tab`));
+    }).catch((err: unknown) => {
+      if (this.db === db) this.db = null;
+      throw err;
     });
-    return this.db;
+    this.db = db;
+    return db;
   }
 
   private async store(mode: IDBTransactionMode): Promise<IDBObjectStore> {
@@ -283,10 +307,10 @@ export class IndexedDbRecordStore<T extends Keyed> implements RecordStore<T> {
     return ((await request((await this.store('readonly')).get(id))) as T | undefined) ?? null;
   }
   async put(record: T) {
-    await request((await this.store('readwrite')).put(clone(record)));
+    await committed((await this.store('readwrite')).put(clone(record)));
   }
   async remove(id: string) {
-    await request((await this.store('readwrite')).delete(id));
+    await committed((await this.store('readwrite')).delete(id));
   }
 }
 

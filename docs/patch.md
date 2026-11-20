@@ -59,5 +59,11 @@ A patch can also be an object `{ "ops": [...] }` (with an optional `$schema`), o
 
 Every new or changed node goes through the same strict checks as a whole document: no event
 handlers or script URLs, styles under known displays, HTML kept out of SVG drawings and SVG shapes
-kept inside them. A node that reuses an id already in the tree gets fresh ids. The root can't be
-removed, moved, wrapped or given another tag.
+kept inside them (checked for everything a node holds, wherever it lands). A node that reuses an id
+already in the tree, or in another tree of the forest, gets fresh ids. The root can't be removed,
+moved, wrapped or given another tag.
+
+A component instance's content comes from its component, so a patch can't edit inside one (or change
+the instance's own tag, classes, styles or attributes); edit the component, or detach the instance.
+The instance as a whole can still be moved, duplicated, wrapped or removed. A patch can't create an instance
+either; insert one with `tree-weaver components insert` or the MCP `insert_component` tool.

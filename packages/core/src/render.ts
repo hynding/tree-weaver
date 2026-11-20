@@ -41,13 +41,87 @@ export function safeTag(tag: string): string {
 export function isSafeAttr(name: string, value: string): boolean {
   const n = name.toLowerCase();
   if (!SAFE_ATTR.test(name) || n.startsWith('on') || n === 'style' || n === 'srcdoc' || n === BRANCH_ATTR || n.startsWith(`${BRANCH_ATTR}-`)) return false;
-  if (URL_ATTRS.has(n) && /^\s*(javascript|vbscript|data:text\/html)/i.test(value)) return false;
+  // Browsers drop tabs, newlines and leading control characters before reading a URL's scheme.
+  if (URL_ATTRS.has(n) && /^(javascript|vbscript|data:text\/html)/i.test(value.replace(/[\x00-\x20]/g, ''))) return false;
   return true;
+}
+
+/** Apply `fn` until the text stops changing, so removing one token can't rebuild another (`</sty</stylele>` → `</style>`). */
+export function untilStable(value: string, fn: (v: string) => string): string {
+  let out = value;
+  for (let prev = ''; prev !== out; ) {
+    prev = out;
+    out = fn(out);
+  }
+  return out;
+}
+
+/**
+ * Whether brackets balance outside quoted strings. An unclosed `(` or `[` in CSS keeps reading
+ * to the end of the stylesheet, swallowing every rule after it.
+ */
+export function bracketsBalance(value: string): boolean {
+  const stack: string[] = [];
+  let quote = '';
+  for (let i = 0; i < value.length; i++) {
+    const c = value[i];
+    // An escaped character is part of a name or string (`\)` doesn't close anything); a trailing
+    // backslash would escape the `;` written after the value.
+    if (c === '\\') {
+      if (i === value.length - 1) return false;
+      i++;
+    } else if (quote) {
+      if (c === quote) quote = '';
+    } else if (c === '"' || c === "'") quote = c;
+    else if (c === '(' || c === '[') stack.push(c === '(' ? ')' : ']');
+    else if (c === ')' || c === ']') {
+      if (stack.pop() !== c) return false;
+    }
+  }
+  return !stack.length && !quote;
+}
+
+/**
+ * `;` would end the declaration, so it becomes `,`, except inside a quoted string or `url(…)`,
+ * where it can't (`url(data:image/png;base64,…)` must keep it).
+ */
+function semicolonsOutsideStrings(value: string): string {
+  let out = '';
+  let quote = '';
+  let url = false;
+  for (let i = 0; i < value.length; i++) {
+    const ch = value[i];
+    if (ch === '\\') {
+      out += value.slice(i, i + 2);
+      i++;
+      continue;
+    }
+    if (quote) {
+      if (ch === quote) quote = '';
+    } else if (ch === '"' || ch === "'") quote = ch;
+    else if (url) {
+      if (ch === ')') url = false;
+    } else if (/^url\($/i.test(value.slice(i, i + 4))) {
+      out += value.slice(i, i + 4);
+      i += 3;
+      url = true;
+      continue;
+    } else if (ch === ';') {
+      out += ',';
+      continue;
+    }
+    out += ch;
+  }
+  return out;
 }
 
 /** Strip characters that could break out of a declaration or the style element. */
 export function sanitizeCssValue(value: string): string {
-  return value.replace(/[{}]/g, '').replace(/;/g, ',').replace(/<\/?(style|script)/gi, '').trim();
+  // Comment markers too: an unclosed `/*` would swallow every rule after it. So would an
+  // unclosed bracket, so a value whose brackets don't balance is dropped.
+  // Line breaks become spaces: a CSS string ends at one, so a quote can't hide a `(` on the next line.
+  const out = untilStable(semicolonsOutsideStrings(value.replace(/[{}]/g, '').replace(/[\n\r\f]+/g, ' ')), (v) => v.replace(/<\/?(style|script)/gi, '').replace(/\/\*|\*\//g, '')).trim();
+  return bracketsBalance(out) ? out : '';
 }
 
 export const isSafeCssProp = (prop: string): boolean => SAFE_PROP.test(prop);
@@ -59,7 +133,12 @@ export function declarations(styles: StyleMap, indent = '  '): string {
     .join('\n');
 }
 
-export const branchSelector = (id: string): string => `[${BRANCH_ATTR}="${id.replace(/["\\]/g, '')}"]`;
+/** Escape a branch id for a quoted CSS attribute selector (`<` too, so it can't close a style element). */
+const cssString = (v: string) => v.replace(/["\\]/g, (c) => `\\${c}`).replace(/[<\n\r\f]/g, (c) => `\\${c.charCodeAt(0).toString(16)} `);
+export const branchSelector = (id: string): string => `[${BRANCH_ATTR}="${cssString(id)}"]`;
+
+/** CSS made safe to place inside a <style> element. */
+export const styleText = (css: string): string => css.replace(/<\/style/gi, '<\\/style');
 
 /** Anything with a selector and per-display styles: a branch (by id) or a custom rule. */
 export interface DisplayRule {
@@ -204,7 +283,7 @@ export function renderDocument(tree: Tree, opts: DocumentOptions = {}): string {
     .map((k) => {
       const attrs = `data-tw-kit="${escapeAttr(k.id)}" data-tw-kit-name="${escapeAttr(k.name)}"${k.source === 'env' ? ' data-tw-env' : ''}${k.rules ? ' data-tw-kit-editable' : ''}${k.tokens ? ' data-tw-kit-tokens' : ''}`;
       if (k.href) return `<link rel="stylesheet" href="${escapeAttr(k.href)}" ${attrs}>`;
-      return `<style ${attrs}>\n${k.css.replace(/<\/style/gi, '<\\/style')}\n</style>`;
+      return `<style ${attrs}>\n${styleText(k.css)}\n</style>`;
     })
     .join('\n');
   const body = renderTreeBody(tree.root, { ...opts, pretty: opts.pretty ?? true });
@@ -220,8 +299,8 @@ export function renderDocument(tree: Tree, opts: DocumentOptions = {}): string {
 ${BASE_CSS}
 </style>
 ${kitStyles ? `${kitStyles}\n` : ''}<style data-tw-styles>
-${renderTreeCss(tree.root)}
-</style>${opts.extraCss ? `\n<style>${opts.extraCss}</style>` : ''}
+${styleText(renderTreeCss(tree.root))}
+</style>${opts.extraCss ? `\n<style>${styleText(opts.extraCss)}</style>` : ''}
 </head>
 <body${isSvgRoot(tree.root) ? '' : ` ${rootAttrs(tree.root)}`}>
   ${body}

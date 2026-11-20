@@ -206,3 +206,30 @@ describe('design tokens in web exports', () => {
     expect(tailwindClass('background-color', 'var(--brand)')).toBe('[background-color:var(--brand)]');
   });
 });
+
+describe('exportComponent escaping', () => {
+  it('drops attributes a framework would run as directives', () => {
+    const tree = pageTree('Home', [createBranch({ tag: 'a', attrs: { 'v-on:click': 'alert(1)', ':href': "'javascript:alert(2)'", 'v-html': 'x', 'xlink:href': '#a', title: 'ok' }, children: [text('Go')] })]);
+    for (const framework of ['vue', 'svelte', 'react', 'html'] as const) {
+      const out = exportComponent(tree, { framework }).files.map((f) => f.contents).join('\n');
+      expect(out).not.toMatch(/v-on|v-html|[\s"]:href=|vOnClick|\bHref\b/);
+      expect(out).toMatch(/title="ok"/);
+    }
+  });
+
+  it('keeps tree names on one comment line that cannot be closed early', () => {
+    const tree = pageTree('Home\nalert("pwned") ---->><script>alert(4)</script> **//', [createBranch({ tag: 'p', children: [text('Hi')] })]);
+    const jsx = exportComponent(tree, { framework: 'react' }).files[0].contents;
+    expect(jsx).not.toMatch(/^alert/m);
+    const html = exportComponent(tree, { framework: 'html' }).files.find((f) => f.path.endsWith('.html'))!.contents;
+    const comment = html.slice(html.indexOf('<!--'), html.indexOf('\n', html.indexOf('<!--')));
+    expect(comment.match(/-->/g)).toHaveLength(1);
+    expect(comment.endsWith('-->')).toBe(true);
+  });
+
+  it('does not escape Svelte braces in attributes twice', () => {
+    const tree = pageTree('Home', [createBranch({ tag: 'p', attrs: { title: 'a {x} b' }, children: [text('Hi')] })]);
+    const svelte = exportComponent(tree, { framework: 'svelte' }).files[0].contents;
+    expect(svelte).toContain('title="a &#123;x&#125; b"');
+  });
+});

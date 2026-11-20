@@ -577,3 +577,69 @@ describe('tree-weaver components', () => {
     expect((await cli(['export', 'site.json', '--component', 'Nope'], ins.files)).err).toContain('Components: Card');
   });
 });
+
+describe('stdout output and argument checks', () => {
+  it('writes only the document to stdout with -o -', async () => {
+    const made = await cli(['new', 'home.tree.json', '--template', 'landing']);
+    const r = await cli(['render', 'home.tree.json', '-o', '-'], made.files);
+    expect(r.code).toBe(0);
+    expect(r.out.trimEnd().endsWith('</html>')).toBe(true);
+    expect(r.out).not.toContain('Wrote -');
+    const c = await cli(['convert', 'home.tree.json', '--to', 'yaml', '-o', '-', '--json'], made.files);
+    expect(c.out).not.toContain('"output"');
+  });
+
+  it('keeps edit commands to one document on stdout, without version logs for "-"', async () => {
+    const made = await cli(['new', 'home.tree.json', '--template', 'landing']);
+    const add = await cli(['add', 'home.tree.json', 'section', '-o', '-', '--json'], made.files);
+    expect(add.code).toBe(0);
+    expect(JSON.parse(add.out).format).toBe('tree-weaver');
+    const piped = await cli(['add', '-', 'section', '-o', '-'], {}, made.files['home.tree.json']);
+    expect(JSON.parse(piped.out).format).toBe('tree-weaver');
+    expect(Object.keys(piped.files).some((f) => f.includes('versions'))).toBe(false);
+    const tok = await cli(['tokens', 'home.tree.json', '--set', 'brand=#f00', '-o', '-'], made.files);
+    expect(JSON.parse(tok.out).format).toBe('tree-weaver');
+  });
+
+  it('keeps a version when the output names the input another way', async () => {
+    const made = await cli(['new', 'home.tree.json', '--template', 'landing']);
+    const r = await cli(['add', 'home.tree.json', 'section', '-o', './home.tree.json'], made.files);
+    expect(r.code).toBe(0);
+    expect(Object.keys(r.files).some((f) => f.includes('versions'))).toBe(true);
+  });
+
+  it('checks components insert --index like add does', async () => {
+    const made = await cli(['new', 'site.forest.json', '--forest', '--template', 'landing']);
+    const forest = JSON.parse(made.files['site.forest.json']).forest;
+    const branchId = forest.trees[0].root.children[0].id;
+    const saved = await cli(['components', 'site.forest.json', 'save', branchId, '--name', 'Hero'], made.files);
+    expect(saved.code).toBe(0);
+    const bad = await cli(['components', 'site.forest.json', 'insert', 'Hero', '--index', 'abc'], saved.files);
+    expect(bad.code).toBe(2);
+    expect(bad.err).toContain('--index must be a whole number');
+    const end = await cli(['components', 'site.forest.json', 'insert', 'Hero', '--index=-1', '--json'], saved.files);
+    expect(end.code).toBe(0);
+    const root = JSON.parse(end.files['site.forest.json']).forest.trees[0].root;
+    expect(root.children.at(-1).id).toBe(JSON.parse(end.out).id);
+  });
+});
+
+describe('versions counted from the newest', () => {
+  it('accepts -1 as a version', async () => {
+    const made = await cli(['new', 'home.tree.json', '--template', 'landing']);
+    const added = await cli(['add', 'home.tree.json', 'section'], made.files);
+    const r = await cli(['versions', 'home.tree.json', 'diff', '-1'], added.files);
+    expect(r.err).not.toContain('Unknown option');
+    expect(r.code).toBe(0);
+  });
+
+  it('keeps -1 as a name when it is the value of --name', async () => {
+    const made = await cli(['new', 'home.tree.json', '--template', 'landing']);
+    // `-n -1` is ambiguous to the argument parser (a usage error, never a garbled name); `--name=-1` works.
+    expect((await cli(['versions', 'home.tree.json', 'save', '-n', '-1'], made.files)).code).toBe(2);
+    const r = await cli(['versions', 'home.tree.json', 'save', '--name=-1', '--json'], made.files);
+    expect(r.code).toBe(0);
+    const log = Object.entries(r.files).find(([f]) => f.includes('versions'))![1];
+    expect(JSON.parse(log).versions[0].name).toBe('-1');
+  });
+});

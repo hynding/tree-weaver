@@ -1,6 +1,7 @@
 import {
   INLINE_TAGS,
   isBranch,
+  isSafeAttr,
   isSvgRoot,
   renderNodeHtml,
   walk,
@@ -52,35 +53,78 @@ function metaOf(b: Branch, allowedAttrs: Set<string> = new Set()): Record<string
   return meta;
 }
 
-const isInlineNode = (n: TreeNode): boolean => !isBranch(n) || INLINE_TAGS.has(n.tag);
+// A shape leaf is drawn inside an SVG, never inline text.
+const isInlineNode = (n: TreeNode): boolean => (isBranch(n) ? INLINE_TAGS.has(n.tag) : n.type !== 'shape');
 
 export function escapeMarkdown(text: string, atLineStart = false): string {
-  let out = text.replace(/\\/g, '\\\\').replace(/&/g, '&amp;').replace(/([`*_[\]<>|~])/g, '\\$1');
+  // Brackets and angle brackets as entities: a backslash escape can be taken apart (a link that
+  // fails to parse, an autolink swallowing the backslash), an entity is always literal text.
+  let out = text
+    .replace(/\\/g, '\\\\')
+    .replace(/&/g, '&amp;')
+    .replace(/[[\]<>]/g, (c) => ({ '[': '&#91;', ']': '&#93;', '<': '&lt;', '>': '&gt;' })[c] as string)
+    .replace(/([`*_|~])/g, '\\$1');
   if (atLineStart) out = out.replace(/^(\s*)([#+-])/, '$1\\$2').replace(/^(\s*)(\d+)([.)])/, '$1$2\\$3');
+  // A `!` right before a link would turn it into an image.
+  out = out.replace(/!$/, '\\!');
+  // A closing `#` run would be read as the end of a heading.
+  out = out.replace(/(^|\s)(#+)(\s*)$/, '$1\\$2$3');
+  // Bare URLs would become links (GFM autolinks).
+  out = out.replace(/\b(https?|ftp|mailto):/gi, '$1\\:').replace(/\bwww\./gi, 'www\\.').replace(/([\w.+-])@(?=[\w-]+\.)/g, '$1\\@');
   return out;
 }
 
-const escapeUrl = (url: string): string => url.replace(/[ ()<>]/g, (c) => encodeURIComponent(c));
+/** Set while a table row is written: a `|` there would split the cell, even inside code or a link. */
+let inTable = false;
+
+// Parentheses are backslash-escaped (they come back exactly); spaces, angle brackets and line breaks are percent-encoded.
+const escapeUrl = (url: string): string =>
+  url.replace(inTable ? /[ <>\t\n\r|]/g : /[ <>\t\n\r]/g, (c) => encodeURIComponent(c)).replace(/[\\()]/g, '\\$&');
+/** A one-line title, quoted: a line break would end the paragraph, and a backslash could escape the closing quote. */
+// Every ASCII punctuation mark is backslash-escaped, so nothing in a title reads as Markdown.
+const titleOf = (title: string | undefined): string => (title ? ` "${oneLine(title).replace(/[!-/:-@[-`{-~]/g, '\\$&')}"` : '');
+const oneLine = (text: string): string => text.replace(/\s*[\n\r]\s*/g, ' ');
+/**
+ * Inline HTML on one line (a blank line inside it would end the paragraph and start a new block),
+ * with Markdown syntax in the text between its tags written as entities: only the tags are raw,
+ * so `[x](javascript:…)` or `*` there would otherwise still become links and emphasis.
+ */
+const inlineHtml = (html: string): string =>
+  html
+    .split(/(<[^>]*>)/)
+    .map((part, i) => (i % 2 ? (inTable ? part.replace(/\|/g, '&#124;') : part) : part.replace(/[\\`*_[\]~!:|#+\-=.(){}]/g, (c) => `&#${c.charCodeAt(0)};`)))
+    .join('')
+    .replace(/\r/g, '&#13;')
+    .replace(/\n/g, '&#10;');
 
 function inline(node: TreeNode, first: boolean): string {
   if (!isBranch(node)) {
     if (node.type === 'image') return image(node);
-    return escapeMarkdown(node.value.replace(/\s*\n\s*/g, ' '), first);
+    return escapeMarkdown(oneLine(node.value), first);
   }
   const tag = node.tag;
   const content = () => node.children.map((c) => inline(c, false)).join('');
-  if (MARK_INLINE[tag] && !needsMeta(node) && node.children.length) return wrapTrimmed(content(), MARK_INLINE[tag]);
+  if (Object.hasOwn(MARK_INLINE, tag) && !needsMeta(node) && node.children.length) return wrapTrimmed(content(), MARK_INLINE[tag]);
   if (tag === 'code' && !needsMeta(node) && node.children.every((c) => !isBranch(c) && c.type === 'text')) {
-    const code = node.children.map((c) => (c as Leaf).value).join('');
-    const fence = code.includes('`') ? '`` ' : '`';
-    return `${fence}${code}${fence.split('').reverse().join('')}`;
+    // Markdown turns line breaks in a code span into spaces anyway; a blank line would end the paragraph.
+    let code = oneLine(node.children.map((c) => (c as Leaf).value).join(''));
+    if (inTable) code = code.replace(/\|/g, '\\|');
+    // A fence longer than any run of backticks in the code, padded with spaces when the code has any.
+    const longest = Math.max(0, ...(code.match(/`+/g) ?? []).map((r) => r.length));
+    const ticks = '`'.repeat(longest + 1);
+    return longest ? `${ticks} ${code} ${ticks}` : `${ticks}${code}${ticks}`;
   }
-  if (tag === 'a' && !needsMeta(node, LINK_ATTRS) && node.attrs.href !== undefined) {
-    const title = node.attrs.title ? ` "${node.attrs.title.replace(/"/g, '\\"')}"` : '';
-    return `[${content()}](${escapeUrl(node.attrs.href)}${title})`;
+  // A script link is dropped, as in every other export; its text stays.
+  if (tag === 'a' && node.attrs.href !== undefined && !safeUrl('href', node.attrs.href)) return content();
+  // A link inside a link has no Markdown form.
+  const nestsLink = node.children.some(function has(c: TreeNode): boolean {
+    return isBranch(c) && (c.tag === 'a' || c.children.some(has));
+  });
+  if (tag === 'a' && !needsMeta(node, LINK_ATTRS) && node.attrs.href !== undefined && !nestsLink) {
+    return `[${content()}](${escapeUrl(node.attrs.href)}${titleOf(node.attrs.title)})`;
   }
   if (tag === 'br' && !needsMeta(node)) return '<br>';
-  return renderNodeHtml(node);
+  return inlineHtml(renderNodeHtml(node));
 }
 
 function wrapTrimmed(text: string, mark: string): string {
@@ -89,14 +133,34 @@ function wrapTrimmed(text: string, mark: string): string {
 }
 
 function image(leaf: Leaf): string {
-  const alt = (leaf.attrs?.alt ?? '').replace(/[[\]]/g, '\\$&');
+  const alt = escapeMarkdown(oneLine(leaf.attrs?.alt ?? ''));
+  if (!safeUrl('src', leaf.value)) return alt;
   const extra = Object.keys(leaf.attrs ?? {}).filter((k) => k !== 'alt' && k !== 'title');
-  if (extra.length) return renderNodeHtml(leaf);
-  const title = leaf.attrs?.title ? ` "${leaf.attrs.title.replace(/"/g, '\\"')}"` : '';
-  return `![${alt}](${escapeUrl(leaf.value)}${title})`;
+  if (extra.length) return inlineHtml(renderNodeHtml(leaf));
+  return `![${alt}](${escapeUrl(leaf.value)}${titleOf(leaf.attrs?.title)})`;
 }
 
 const inlineRun = (nodes: TreeNode[]): string => nodes.map((n, i) => inline(n, i === 0)).join('');
+/**
+ * An inline run as one trimmed line, with block syntax at its start escaped: trimming can bring
+ * any child (not just the first) to the start, where `#`, `-` or `1.` would start a block.
+ */
+const inlineLine = (nodes: TreeNode[]): string =>
+  inlineRun(nodes)
+    .trim()
+    .replace(/^([#+-])/, '\\$1')
+    .replace(/^(\d+)([.)])/, '$1\\$2');
+
+/**
+ * Whether a link or image URL is safe as Markdown writes it. Markdown decodes character
+ * references in link targets, so `&#106;avascript:` is checked decoded too.
+ */
+function safeUrl(name: string, url: string): boolean {
+  if (!isSafeAttr(name, url)) return false;
+  const el = parseDocument(`<a x="${url.replace(/"/g, '&quot;')}">`, { decodeEntities: true }).children[0];
+  const decoded = el && 'attribs' in el ? ((el.attribs as Record<string, string>).x ?? '') : '';
+  return isSafeAttr(name, decoded);
+}
 
 const directive = (kind: string, data?: unknown): string => `<!-- tw:${kind}${data === undefined ? '' : ` ${directiveJson(data)}`} -->`;
 
@@ -106,8 +170,8 @@ function blocks(nodes: TreeNode[]): string[] {
   let run: TreeNode[] = [];
   const flush = () => {
     if (!run.length) return;
-    const text = inlineRun(run);
-    if (text.trim()) out.push(`${directive('inline')}\n${text.trim()}`);
+    const text = inlineLine(run);
+    if (text) out.push(`${directive('inline')}\n${text}`);
     run = [];
   };
   for (const node of nodes) {
@@ -130,10 +194,11 @@ function container(b: Branch): string {
   return inner.length ? `${open}\n\n${inner.join('\n\n')}\n\n<!-- /tw:branch -->` : `${open}\n<!-- /tw:branch -->`;
 }
 
-function list(b: Branch, depth: number): string | null {
+function list(b: Branch, pad = ''): string | null {
   const ordered = b.tag === 'ol';
   const lines: string[] = [];
-  let n = Number(b.attrs.start ?? 1);
+  const start = Number.parseInt(b.attrs.start ?? '1', 10);
+  let n = Number.isFinite(start) ? start : 1;
   for (const item of b.children) {
     if (!isBranch(item) || item.tag !== 'li' || needsMeta(item)) return null;
     const inlineKids = item.children.filter(isInlineNode);
@@ -141,11 +206,11 @@ function list(b: Branch, depth: number): string | null {
     // Inline content must come first; nested lists after it.
     if (item.children.slice(0, inlineKids.length).some((c) => !isInlineNode(c))) return null;
     const marker = ordered ? `${n++}.` : '-';
-    const pad = '   '.repeat(depth);
-    lines.push(`${pad}${marker} ${inlineRun(inlineKids).trim()}`);
+    lines.push(`${pad}${marker} ${inlineLine(inlineKids)}`);
     for (const sub of nested) {
       if (!isBranch(sub) || (sub.tag !== 'ul' && sub.tag !== 'ol') || needsMeta(sub)) return null;
-      const md = list(sub, depth + 1);
+      // A nested list lines up with its item's text: past the marker (`10.` is wider than `-`).
+      const md = list(sub, pad + ' '.repeat(marker.length + 1));
       if (md === null) return null;
       lines.push(md);
     }
@@ -175,22 +240,33 @@ function table(b: Branch): string | null {
       if (!isBranch(cell) || (cell.tag !== 'td' && cell.tag !== 'th') || needsMeta(cell) || !cell.children.every(isInlineNode)) return null;
     }
   }
-  const line = (row: TreeNode[]) =>
-    `| ${Array.from({ length: width }, (_, i) => (row[i] ? inlineRun((row[i] as Branch).children).trim() : '')).join(' | ')} |`;
+  const cell = (c: TreeNode | undefined): string => {
+    if (!c) return '';
+    inTable = true;
+    try {
+      return inlineLine((c as Branch).children);
+    } finally {
+      inTable = false;
+    }
+  };
+  const line = (row: TreeNode[]) => `| ${Array.from({ length: width }, (_, i) => cell(row[i])).join(' | ')} |`;
   const header = headerRows ? cells[0] : [];
   const body = headerRows ? cells.slice(1) : cells;
   return [line(header), `| ${Array.from({ length: width }, () => '---').join(' | ')} |`, ...body.map(line)].join('\n');
 }
 
 function block(b: Branch): string {
+  // A drawing goes in as one line of inline SVG markup, ids included, so its shapes come back.
+  // Its opening tag stands on a line of its own, which makes the rest an HTML block, not a paragraph.
+  if (b.tag === 'svg') return inlineHtml(renderNodeHtml(b)).replace(/^(<svg\b[^>]*>)/, '$1\n');
   const allInline = b.children.every(isInlineNode);
   const heading = HEADING.exec(b.tag);
-  if (heading && allInline && b.children.length) return withMeta(b, `${'#'.repeat(Number(heading[1]))} ${inlineRun(b.children).trim()}`);
-  if (b.tag === 'p' && allInline && b.children.length) return withMeta(b, inlineRun(b.children).trim());
+  if (heading && allInline && b.children.length) return withMeta(b, `${'#'.repeat(Number(heading[1]))} ${inlineLine(b.children)}`);
+  if (b.tag === 'p' && allInline && b.children.length) return withMeta(b, inlineLine(b.children));
   if (b.tag === 'hr' && !needsMeta(b)) return '---';
   if ((b.tag === 'ul' || b.tag === 'ol') && b.children.length) {
     const allowed = new Set(b.tag === 'ol' ? ['start'] : []);
-    const md = list(b, 0);
+    const md = list(b);
     if (md !== null) return withMeta(b, md, allowed);
   }
   if (b.tag === 'table') {
@@ -208,7 +284,9 @@ function block(b: Branch): string {
     const code = b.children[0];
     if (isBranch(code) && code.tag === 'code' && !needsMeta(code) && code.children.every((c) => !isBranch(c) && c.type === 'text')) {
       const text = code.children.map((c) => (c as Leaf).value).join('').replace(/\n$/, '');
-      const fence = text.includes('```') ? '~~~~' : '```';
+      // Backticks, more than the longest run in the code, so no line of it can close the fence.
+      const longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((r) => r.length));
+      const fence = '`'.repeat(Math.max(3, longest + 1));
       return `${fence}\n${text}\n${fence}`;
     }
   }
@@ -222,12 +300,20 @@ export function exportMarkdown(tree: Tree, opts: MarkdownExportOptions = {}): st
   });
   const front: Record<string, unknown> = { 'tree-weaver': DOCUMENT_VERSION, id: tree.id, name: tree.name };
   const root = metaOf(tree.root);
-  if (Object.keys(root).length > 1 || tree.root.type !== 'root' || tree.root.name !== 'Body') front.root = root;
+  // An SVG tree's root is written as the drawing itself, which carries its id.
+  if (!isSvgRoot(tree.root) && (Object.keys(root).length > 1 || tree.root.type !== 'root' || tree.root.name !== 'Body')) front.root = root;
   if (Object.keys(styles).length) front.styles = styles;
   if (opts.kits?.length) front.kits = opts.kits;
   // Markdown is a page format: an SVG tree's drawing goes in as inline SVG.
   const body = blocks(isSvgRoot(tree.root) ? [tree.root] : tree.root.children).join('\n\n');
-  return `---\n${stringifyYaml(front, { lineWidth: 0 })}---\n\n${body}\n`;
+  // Renderers without front matter show it as text, where HTML in a name or CSS would be live:
+  // then every string is double-quoted with `<` escaped (YAML reads `\x3C` back as `<`).
+  // Only inside strings: an empty list is written `[]`.
+  let yaml = stringifyYaml(front, { lineWidth: 0 });
+  // Link syntax too: front matter shown as Markdown would make `[x](javascript:…)` a live link.
+  if (/[<[\]`]/.test(yaml))
+    yaml = stringifyYaml(front, { lineWidth: 0, defaultStringType: 'QUOTE_DOUBLE', defaultKeyType: 'QUOTE_DOUBLE' }).replace(/"(?:[^"\\]|\\.)*"/g, (q) => q.replace(/[<[\]`]/g, (c) => `\\x${c.charCodeAt(0).toString(16).toUpperCase()}`));
+  return `---\n${yaml}---\n\n${body}\n`;
 }
 
 /* ----------------------------------------------------------------- import */
@@ -260,7 +346,14 @@ export function importMarkdown(text: string): TreeDocument {
     for (const [id, s] of Object.entries(data.styles as Record<string, DisplayStyles>)) styles.set(id, s);
   }
   const ctx: Ctx = { styles };
-  const root = convertParts('body', {}, dom.children, ctx, false);
+  let root = convertParts('body', {}, dom.children, ctx, false);
+  // An SVG tree comes back as its drawing: the one root SVG the body holds.
+  const kids = root.children as Record<string, unknown>[];
+  if (!data.root && kids.length === 1 && kids[0].kind === 'branch' && kids[0].tag === 'svg' && kids[0].type === 'root') {
+    const firstHeading = /^#\s+(.+)$/m.exec(body)?.[1]?.trim();
+    root = kids[0];
+    return fromData({ tree: { id: data.id, name: typeof data.name === 'string' ? data.name : (firstHeading ?? 'Imported markdown'), root }, kits: Array.isArray(data.kits) ? data.kits : [] }, 'markdown');
+  }
   const rootMeta = (data.root ?? {}) as Record<string, unknown>;
   if (typeof rootMeta.id === 'string') {
     root.id = rootMeta.id;

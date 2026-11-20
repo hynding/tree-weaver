@@ -1,9 +1,13 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { dirname } from 'node:path';
+import { dirname, resolve as resolvePath } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseArgs, type ParseArgsConfig } from 'node:util';
 import {
   applyPatch,
+  idsOutside,
+  insertionProblem,
+  instanceRoleIn,
   saveComponent,
   findComponent,
   instantiateComponent,
@@ -460,6 +464,12 @@ class Cli {
   note(text: string): void {
     this.io.stderr(`${text}\n`);
   }
+
+  /** Report after writing a document: to stdout when it went to a file, else to stderr, so stdout holds only the document. */
+  reportAfter(target: string | undefined, json: boolean, value: unknown, human: string): void {
+    if (target) this.report(json, value, human);
+    else this.note(human);
+  }
 }
 
 /* ------------------------------------------------------------- tree lookups */
@@ -523,6 +533,15 @@ async function keepVersion(cli: Cli, file: string, text: string, format: FormatI
   return version;
 }
 
+/** Where an edited document goes: the output file, else back to its file; undefined means stdout (`-`). */
+function editTarget(output: string | undefined, file: string): string | undefined {
+  const target = output ?? file;
+  return target === '-' ? undefined : target;
+}
+
+/** Whether two spellings name the same file (`t.json` and `./t.json`). */
+const sameFile = (a: string, b: string) => b !== '-' && resolvePath(a) === resolvePath(b);
+
 /** Put an updated tree back into its document and write it, in the document's own format. */
 async function writeTree(cli: Cli, loaded: Loaded, file: string, tree: Tree, output: string | undefined, versionAs?: string): Promise<string | undefined> {
   const { doc, format } = loaded;
@@ -531,9 +550,9 @@ async function writeTree(cli: Cli, loaded: Loaded, file: string, tree: Tree, out
   else next = { ...doc, tree: { ...tree, updatedAt: now() } };
   if (!getFormat(format).lossless) cli.note(`${file} is ${getFormat(format).label}, which doesn't keep every style or attribute; consider converting it to JSON first`);
   const data = next.kind === 'forest' ? exportForest(next.forest, format) : exportTree(next.tree, format, next.kits);
-  const target = output ?? (file === '-' ? undefined : file);
+  const target = editTarget(output, file);
   // Overwriting the file: keep what it was, so "versions restore" can bring it back.
-  if (versionAs && target && target === file && loaded.text !== data) await keepVersion(cli, file, loaded.text, format, { name: versionAs, source: 'agent', auto: true });
+  if (versionAs && target && sameFile(target, file) && loaded.text !== data) await keepVersion(cli, file, loaded.text, format, { name: versionAs, source: 'agent', auto: true });
   await cli.emit(target, data);
   return target;
 }
@@ -571,7 +590,7 @@ async function cmdNew(cli: Cli, args: string[]): Promise<number> {
     if (!getFormat(format).forest) throw new UsageError(`${getFormat(format).label} holds one tree; use json, yaml or xml for a starter forest`);
     const forest = starter.create(values.name);
     await cli.emit(output, exportForest(forest, format));
-    if (output) {
+    if (output && output !== '-') {
       cli.report(
         json,
         { output, format, kind: 'forest', starter: starter.id, trees: forest.trees.map((t) => ({ id: t.id, name: t.name })), components: (forest.components ?? []).map((c) => c.name) },
@@ -595,7 +614,7 @@ async function cmdNew(cli: Cli, args: string[]): Promise<number> {
     data = exportTree(tree, format, kits);
   }
   await cli.emit(output, data);
-  if (output) {
+  if (output && output !== '-') {
     cli.report(json, { output, format, kind: values.forest ? 'forest' : 'tree', template: template.id, tree: { id: tree.id, name: tree.name } }, `Wrote ${output} (${template.label} ${values.forest ? 'forest' : 'tree'}, ${getFormat(format).label})`);
   }
   return 0;
@@ -656,7 +675,7 @@ async function cmdRender(cli: Cli, args: string[]): Promise<number> {
   for (const file of values.kit ?? []) kits.push(kitFromFile(file, await cli.read(file)));
   const html = exportTree(tree, 'html', kits);
   await cli.emit(values.output, html);
-  if (values.output) cli.report(!!values.json, { output: values.output, tree: { id: tree.id, name: tree.name }, bytes: Buffer.byteLength(html) }, `Wrote ${values.output} (${tree.name})`);
+  if (values.output && values.output !== '-') cli.report(!!values.json, { output: values.output, tree: { id: tree.id, name: tree.name }, bytes: Buffer.byteLength(html) }, `Wrote ${values.output} (${tree.name})`);
   return 0;
 }
 
@@ -774,7 +793,7 @@ async function cmdConvert(cli: Cli, args: string[]): Promise<number> {
   }
   if (!getFormat(to).lossless) cli.note(`${getFormat(to).label} keeps the content but not every style or attribute`);
   await cli.emit(values.output, data);
-  if (values.output) cli.report(!!values.json, { output: values.output, from: format, to }, `Wrote ${values.output} (${what}, ${getFormat(format).label} to ${getFormat(to).label})`);
+  if (values.output && values.output !== '-') cli.report(!!values.json, { output: values.output, from: format, to }, `Wrote ${values.output} (${what}, ${getFormat(format).label} to ${getFormat(to).label})`);
   return 0;
 }
 
@@ -836,7 +855,7 @@ async function cmdAdd(cli: Cli, args: string[]): Promise<number> {
   // The same checks as a patch: valid node, unique ids, SVG placement.
   let updated: Tree;
   try {
-    const result = applyPatch(tree.root, [{ op: 'insert', parent: parent.id, index, node }], { expandNode: (n) => n as TreeNode });
+    const result = applyPatch(tree.root, [{ op: 'insert', parent: parent.id, index, node }], { expandNode: (n) => n as TreeNode, takenIds: idsOutside(treesOf(loaded.doc), tree.id) });
     if (result.warnings.length) cli.note(formatIssues({ errors: [], warnings: result.warnings }).replace(/ops\[0\]\.node/g, 'node'));
     updated = { ...tree, root: result.root };
     node = resolveRef(result.root, result.changes[0].id).node;
@@ -877,7 +896,7 @@ async function cmdPatch(cli: Cli, args: string[]): Promise<number> {
   const tree = pickTree(cli, loaded.doc, values.tree, 'a patch edits one tree');
   let result;
   try {
-    result = applyPatch(tree.root, ops, { expandNode: (value, path) => expandShorthand(value, path) });
+    result = applyPatch(tree.root, ops, { expandNode: (value, path) => expandShorthand(value, path), takenIds: idsOutside(treesOf(loaded.doc), tree.id) });
   } catch (err) {
     if (err instanceof PatchError) throw new Error(`${err.message}\nNothing was changed.`);
     throw err;
@@ -931,7 +950,7 @@ async function cmdExpand(cli: Cli, args: string[]): Promise<number> {
   const doc = importDocument(JSON.stringify(plain), 'json');
   const out = doc.kind === 'forest' && getFormat(to).forest ? exportForest(doc.forest, to) : exportTree(pickTree(cli, doc, undefined, `${getFormat(to).label} holds one tree`), to, doc.kind === 'tree' ? doc.kits : doc.forest.kits);
   await cli.emit(values.output, out);
-  if (values.output) {
+  if (values.output && values.output !== '-') {
     const c = check.counts;
     cli.report(!!values.json, { output: values.output, format: to, valid: true, warnings: check.warnings, counts: c }, `Wrote ${values.output} (${c.branches} branches, ${c.leaves} leaves, ${getFormat(to).label})`);
   }
@@ -1023,8 +1042,8 @@ async function cmdComponents(cli: Cli, args: string[]): Promise<number> {
   const components = doc.kind === 'forest' ? (doc.forest.components ?? []) : [];
   const write = async (forest: Forest, label: string) => {
     const data = exportForest(forest, loaded.format);
-    const target = values.output ?? (file === '-' ? undefined : file);
-    if (!values['no-version'] && target && target === file && loaded.text !== data) await keepVersion(cli, file, loaded.text, loaded.format, { name: label, source: 'agent', auto: true });
+    const target = editTarget(values.output, file);
+    if (!values['no-version'] && target && sameFile(target, file) && loaded.text !== data) await keepVersion(cli, file, loaded.text, loaded.format, { name: label, source: 'agent', auto: true });
     await cli.emit(target, data);
     return target;
   };
@@ -1050,11 +1069,12 @@ async function cmdComponents(cli: Cli, args: string[]): Promise<number> {
       const tree = pickTree(cli, doc, values.tree, '');
       const { node } = resolveRef(tree.root, ref);
       if (!isBranch(node)) throw new Error(`"${ref}" is a leaf; save a branch`);
+      if (instanceRoleIn(tree.root, node.id) === 'inside') throw new Error(`"${ref}" is inside a component instance; edit the component, or detach the instance first`);
       const saved = saveComponent({ ...doc.forest, updatedAt: now() }, tree.id, node.id, values.name ?? node.name ?? 'Component');
       if (!saved) throw new Error(`Could not save "${ref}"`);
       const { forest, component: def } = saved;
       const target = await write(forest, 'Before saving a component');
-      cli.report(json, { component: { id: def.id, name: def.name, props: def.props.map((p) => p.name) }, output: target }, `Saved component "${def.name}" #${def.id}${def.props.length ? ` with props ${def.props.map((p) => p.name).join(', ')}` : ''}${target ? ` to ${target}` : ''}`);
+      cli.reportAfter(target, json, { component: { id: def.id, name: def.name, props: def.props.map((p) => p.name) }, output: target }, `Saved component "${def.name}" #${def.id}${def.props.length ? ` with props ${def.props.map((p) => p.name).join(', ')}` : ''}${target ? ` to ${target}` : ''}`);
       return 0;
     }
     case 'insert': {
@@ -1082,10 +1102,15 @@ async function cmdComponents(cli: Cli, args: string[]): Promise<number> {
       const unknown = Object.keys(props).filter((p) => !componentProps(def).some((q) => q.name === p));
       if (unknown.length) cli.note(`"${def.name}" has no prop ${unknown.join(', ')}; ignored when rendering`);
       const inst = instantiateComponent(def, props, variants);
-      const index = values.index !== undefined ? Number(values.index) : undefined;
+      if (values.index !== undefined && !/^-?\d+$/.test(values.index)) throw new UsageError('--index must be a whole number');
+      let index = values.index !== undefined ? Number(values.index) : undefined;
+      // Negative counts from the end, as for `add`.
+      if (index !== undefined && index < 0) index = Math.max(0, parent.children.length + 1 + index);
+      const problem = insertionProblem(tree.root, parent.id, inst);
+      if (problem) throw new Error(problem);
       const root = insertNode(tree.root, parent.id, inst, index);
       const target = await write(replaceTree(doc.forest, { ...tree, root }), `Before inserting "${def.name}"`);
-      cli.report(json, { id: inst.id, component: def.id, output: target }, `Inserted "${def.name}" #${inst.id} into ${parent.name ?? parent.tag}${target ? ` in ${target}` : ''}`);
+      cli.reportAfter(target, json, { id: inst.id, component: def.id, output: target }, `Inserted "${def.name}" #${inst.id} into ${parent.name ?? parent.tag}${target ? ` in ${target}` : ''}`);
       return 0;
     }
     default:
@@ -1138,8 +1163,8 @@ async function cmdTokens(cli: Cli, args: string[]): Promise<number> {
     }
     const next: TreeDocument = doc.kind === 'forest' ? { kind: 'forest', forest: { ...doc.forest, kits, updatedAt: now() } } : { ...doc, kits };
     const data = next.kind === 'forest' ? exportForest(next.forest, loaded.format) : exportTree(next.tree, loaded.format, next.kits);
-    const target = values.output ?? (file === '-' ? undefined : file);
-    if (!values['no-version'] && target && target === file && loaded.text !== data) await keepVersion(cli, file, loaded.text, loaded.format, { name: 'Before tokens', source: 'agent', auto: true });
+    const target = editTarget(values.output, file);
+    if (!values['no-version'] && target && sameFile(target, file) && loaded.text !== data) await keepVersion(cli, file, loaded.text, loaded.format, { name: 'Before tokens', source: 'agent', auto: true });
     await cli.emit(target, data);
     if (target) cli.note(`Wrote ${target}`);
   }
@@ -1163,7 +1188,8 @@ async function cmdTokens(cli: Cli, args: string[]): Promise<number> {
     await cli.emit(values.output, out);
     return 0;
   }
-  if (edits && values.output === undefined && file === '-') return 0;
+  // The edited document went to stdout: nothing else may follow it there.
+  if (edits && editTarget(values.output, file) === undefined) return 0;
   const width = Math.max(4, ...tokens.map((t) => t.name.length));
   const lines = tokens.map((t) => `${t.name.padEnd(width)}  ${t.kind.padEnd(11)}  ${t.value}${t.resolved !== t.value ? `  (${t.resolved})` : ''}${t.edited ? `  [edited${t.kitValue ? `, kit: ${t.kitValue}` : ''}]` : ''}`);
   cli.report(!!values.json, { tokens }, tokens.length ? lines.join('\n') : 'No tokens: add :root { --name: value } to a kit, or use --set');
@@ -1206,10 +1232,17 @@ async function cmdLink(cli: Cli, args: string[]): Promise<number> {
 const when = (iso: string) => iso.replace('T', ' ').replace(/\.\d+Z$/, 'Z');
 
 async function cmdVersions(cli: Cli, args: string[]): Promise<number> {
-  const { values, positionals } = parse(args, {
-    name: { type: 'string', short: 'n' },
-    from: { type: 'string', short: 'F' },
-  });
+  // `-1`, `-2`… name versions from the newest; keep them from being read as options.
+  const NEG = '\u0000';
+  const { values, positionals: raw } = parse(
+    // Not when it is an option's value (`-n -1` names a version "-1").
+    args.map((a, i) => (/^-\d+$/.test(a) && !['-n', '--name', '-F', '--from'].includes(args[i - 1]) ? `${NEG}${a}` : a)),
+    {
+      name: { type: 'string', short: 'n' },
+      from: { type: 'string', short: 'F' },
+    },
+  );
+  const positionals = raw.map((p) => (p.startsWith(NEG) ? p.slice(1) : p));
   const [file, action = 'list', ref, ref2, ...rest] = positionals;
   if (!file || file === '-') throw new UsageError('versions needs a file');
   if (rest.length) throw new UsageError(`Unexpected "${rest[0]}"`);
@@ -1302,7 +1335,7 @@ const ALIASES: Record<string, string> = { component: 'export', check: 'validate'
 
 async function version(io: CliIO): Promise<string> {
   try {
-    const pkg = JSON.parse(await io.readFile(new URL('../package.json', import.meta.url).pathname)) as { version?: string };
+    const pkg = JSON.parse(await io.readFile(fileURLToPath(new URL('../package.json', import.meta.url)))) as { version?: string };
     return pkg.version ?? 'unknown';
   } catch {
     return 'unknown';

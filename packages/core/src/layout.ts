@@ -18,7 +18,8 @@ export function countTracks(template: string | undefined): number {
     total += Number(n) * splitTracks(inner).length;
     return ' ';
   });
-  return total + splitTracks(rest).length;
+  // Capped: a huge repeat() count is not a layout anyone draws column by column.
+  return Math.min(total + splitTracks(rest).length, 1000);
 }
 
 function splitTracks(value: string): string[] {

@@ -53,19 +53,45 @@ function* allElements(nodes: ChildNode[]): Generator<Element> {
 const textContent = (el: Element): string =>
   el.children.map((c) => (c.type === 'text' ? c.data : isElement(c) ? textContent(c) : '')).join('');
 
-const SELECTOR = new RegExp(`^\\[${BRANCH_ATTR}=["']?([^"'\\]]+)["']?\\]$`);
+const SELECTOR = new RegExp(`^\\[${BRANCH_ATTR}=(?:"((?:[^"\\\\]|\\\\[\\s\\S])*)"|'((?:[^'\\\\]|\\\\[\\s\\S])*)'|([^\\]"'\\s]+))\\]$`);
+/** Undo CSS escapes (a backslash before a character, or a hex code point) in a quoted selector value. */
+const cssUnescape = (v: string): string => v.replace(/\\([0-9a-fA-F]{1,6})[ \t\n]?|\\([\s\S])/g, (_, hex: string | undefined, ch: string | undefined) => (hex ? codePoint(Number.parseInt(hex, 16)) : (ch as string)));
+const codePoint = (n: number): string => (n > 0 && n <= 0x10ffff && (n < 0xd800 || n > 0xdfff) ? String.fromCodePoint(n) : '\ufffd');
+/** A selector list split on its commas, but not on commas inside quoted strings. */
+function splitSelectors(list: string): string[] {
+  const out: string[] = [];
+  let cur = '';
+  let quote = '';
+  for (let i = 0; i < list.length; i++) {
+    const ch = list[i];
+    if (quote) {
+      cur += ch;
+      if (ch === '\\') cur += list[++i] ?? '';
+      else if (ch === quote) quote = '';
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+      cur += ch;
+    } else if (ch === ',') {
+      out.push(cur);
+      cur = '';
+    } else cur += ch;
+  }
+  out.push(cur);
+  return out;
+}
 
 /** Read rules written by `renderTreeCss` back into per-branch display styles. */
 export function readTreeCss(css: string, into: Map<string, DisplayStyles>): void {
   const visit = (nodes: CssNode[], display: DisplayId) => {
     for (const node of nodes) {
       if (node.type === 'rule') {
-        for (const sel of node.selector.split(',')) {
+        for (const sel of splitSelectors(node.selector)) {
           const m = SELECTOR.exec(sel.trim());
           if (!m) continue;
-          const styles = into.get(m[1]) ?? {};
+          const id = m[3] ?? cssUnescape(m[1] ?? m[2]);
+          const styles = into.get(id) ?? {};
           styles[display] = { ...styles[display], ...node.declarations };
-          into.set(m[1], styles);
+          into.set(id, styles);
         }
       } else if (node.name === 'media' && node.children) {
         const target = displayForMedia(node.prelude);
@@ -251,8 +277,30 @@ export function convertParts(tag: string, attribs: Record<string, string>, child
     classes: a.class ?? '',
     attrs,
     styles,
-    children: convertChildren(children, ctx, raw || RAW_TEXT_TAGS.has(tag), childrenInSvg({ tag }, svg)),
+    children: impliedTbody(tag, convertChildren(children, ctx, raw || RAW_TEXT_TAGS.has(tag), childrenInSvg({ tag }, svg))),
   };
+}
+
+/** Rows straight under a `<table>` go in a `<tbody>`, as browsers parse them (and frameworks require). */
+function impliedTbody(tag: string, children: RawNode[]): RawNode[] {
+  if (tag !== 'table' || !children.some((c) => c.kind === 'branch' && c.tag === 'tr')) return children;
+  const out: RawNode[] = [];
+  let body: RawNode | null = null;
+  for (const c of children) {
+    if (c.kind === 'branch' && c.tag === 'tr') {
+      if (!body) {
+        body = { kind: 'branch', id: createId('b'), tag: 'tbody', classes: '', attrs: {}, styles: {}, children: [] };
+        out.push(body);
+      }
+      (body.children as RawNode[]).push(c);
+    } else if (c.kind === 'leaf' && typeof c.value === 'string' && !c.value.trim()) {
+      if (!body) out.push(c);
+    } else {
+      body = null;
+      out.push(c);
+    }
+  }
+  return out;
 }
 
 /** The `<svg>` root of an exported SVG tree, when it is all the body holds. */

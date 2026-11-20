@@ -22,8 +22,10 @@ export class TreeDataError extends Error {
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
+/** C0 control characters other than tab and line breaks, and U+FFFE/U+FFFF: XML (and SVG) can't carry them. */
+export const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g;
 const str = (v: unknown, fallback = ''): string =>
-  typeof v === 'string' ? v : typeof v === 'number' || typeof v === 'boolean' ? String(v) : fallback;
+  (typeof v === 'string' ? v : typeof v === 'number' || typeof v === 'boolean' ? String(v) : fallback).replace(CONTROL_CHARS, '');
 
 function stringMap(value: unknown): Record<string, string> {
   const out: Record<string, string> = {};
@@ -46,7 +48,8 @@ function normalizeStyles(value: unknown): DisplayStyles {
 }
 
 function normalizeClasses(value: unknown): string[] {
-  const list = Array.isArray(value) ? value.map((v) => str(v)) : typeof value === 'string' ? value.split(/\s+/) : [];
+  // A class can't hold whitespace (`class="a b"` is two classes), so entries are split on it.
+  const list = Array.isArray(value) ? value.flatMap((v) => str(v).split(/\s+/)) : typeof value === 'string' ? value.split(/\s+/) : [];
   return [...new Set(list.map((c) => c.trim()).filter(Boolean))];
 }
 
@@ -138,14 +141,14 @@ function uniq<T extends TreeNode>(node: T, seen: Set<string>): T {
   return node;
 }
 
-export function normalizeTree(value: unknown, path = 'tree'): Tree {
+export function normalizeTree(value: unknown, path = 'tree', seen = new Set<string>()): Tree {
   if (!isObj(value)) throw new TreeDataError('Expected a tree object', path);
   const rootValue = value.root ?? (value.kind === 'branch' ? value : undefined);
   let root: TreeNode;
   if (rootValue === undefined) {
     root = { kind: 'branch', id: createId('b'), tag: 'body', type: 'root', name: 'Body', classes: [], attrs: {}, styles: {}, children: [] };
   } else {
-    root = normalizeNode(rootValue, `${path}.root`);
+    root = normalizeNode(rootValue, `${path}.root`, seen);
   }
   if (root.kind !== 'branch') throw new TreeDataError('A tree root must be a branch', `${path}.root`);
   // The root is the page body, unless it is an <svg>: then the tree is an SVG tree (a drawing).
@@ -217,11 +220,13 @@ export function normalizeForest(value: unknown, path = 'forest'): Forest {
   if (!Array.isArray(trees)) throw new TreeDataError('"trees" must be a list', path);
   if (!Array.isArray(kits)) throw new TreeDataError('"kits" must be a list', path);
   const ts = now();
+  const nodeIds = new Set<string>();
   const forest: Forest = {
     id: str(value.id) || createId('f'),
     name: str(value.name).trim() || 'Untitled forest',
     version: SCHEMA_VERSION,
-    trees: trees.map((t, i) => normalizeTree(t, `${path}.trees[${i}]`)),
+    // One id set for every tree: node ids are unique across the forest (collab and diffs key nodes by id).
+    trees: trees.map((t, i) => normalizeTree(t, `${path}.trees[${i}]`, nodeIds)),
     kits: kits.map((k, i) => normalizeKit(k, `${path}.kits[${i}]`)),
     createdAt: str(value.createdAt) || ts,
     updatedAt: str(value.updatedAt) || ts,
@@ -231,6 +236,12 @@ export function normalizeForest(value: unknown, path = 'forest'): Forest {
   for (const tree of forest.trees) {
     if (seen.has(tree.id)) tree.id = createId('t');
     seen.add(tree.id);
+  }
+  // So must kit ids.
+  const kitIds = new Set<string>();
+  for (const kit of forest.kits) {
+    if (kitIds.has(kit.id)) kit.id = createId('k');
+    kitIds.add(kit.id);
   }
   if (Array.isArray(value.components) && value.components.length) {
     const ids = new Set<string>();

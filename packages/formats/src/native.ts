@@ -18,6 +18,7 @@ import {
   themeTokens,
   tokenIdentifier,
 } from '@tree-weaver/core';
+import { commentText } from './slug';
 
 /**
  * Native exports: a tree as a SwiftUI view or a Flutter widget, for iOS, macOS, Android and
@@ -478,7 +479,7 @@ function toView(node: TreeNode, ctx: Ctx): NView | null {
   }
   const text = TEXT_BLOCKS.has(b.tag) || !b.children.some(isBranch) ? inlineText(b) : null;
   if (text !== null && (b.children.length > 0 || b.tag === 'button' || b.tag === 'a')) {
-    const role: TextRole = HEADING[b.tag] ?? 'body';
+    const role: TextRole = (Object.hasOwn(HEADING, b.tag) && HEADING[b.tag]) || 'body';
     const label = tidy(text) || b.attrs['aria-label'] || '';
     if (!label && b.tag !== 'button' && b.tag !== 'a') return null;
     if (b.tag === 'a') return { kind: 'text', text: label, role, look, link: safeUrl(b.attrs.href) };
@@ -513,7 +514,8 @@ const gapOf = (l: Layout): string => (namingTokens && l.gapRef ? `DesignTokens.$
 
 const num = (n: number) => (Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100));
 const dbl = (n: number) => (Number.isInteger(n) ? `${n}` : num(n));
-const comment = (text: string) => text.replace(/\*\/|\n/g, ' ');
+/** Text for a Swift or Dart comment: one line, with no block comment openers (they nest) or closers. */
+const comment = commentText;
 
 /* --------------------------------------------------------------- swift */
 
@@ -596,10 +598,12 @@ function swiftBody(v: NView, o: Out, d: number, fill: boolean): void {
     case 'text': {
       if (v.link !== undefined) {
         // Percent-encoded here, so URL(string:) can't fail on spaces and the like.
-        if (/^(https?:|mailto:|tel:)/i.test(v.link)) o.line(d, `Link(${swiftString(v.text)}, destination: URL(string: ${swiftString(encodeUrl(v.link))})!)`);
-        else o.line(d, `Button(${swiftString(v.text)}) { /* go to ${comment(v.link || 'a page')} */ }`);
-      } else if (v.button) o.line(d, `Button(${swiftString(v.text)}) { }`);
-      else o.line(d, `Text(${swiftString(v.text)})`);
+        // Text(verbatim:) everywhere: a string literal is a LocalizedStringKey, which SwiftUI reads as
+        // Markdown, so `[x](https://…)` in imported text would become a live link.
+        if (/^(https?:|mailto:|tel:)/i.test(v.link)) o.line(d, `Link(destination: URL(string: ${swiftString(encodeUrl(v.link))})!) { Text(verbatim: ${swiftString(v.text)}) }`);
+        else o.line(d, `Button { /* go to ${comment(v.link || 'a page')} */ } label: { Text(verbatim: ${swiftString(v.text)}) }`);
+      } else if (v.button) o.line(d, `Button { } label: { Text(verbatim: ${swiftString(v.text)}) }`);
+      else o.line(d, `Text(verbatim: ${swiftString(v.text)})`);
       mods(v.look, { text: v.role, fill: fill && !v.button && v.link === undefined });
       return;
     }
@@ -634,7 +638,7 @@ function swiftBody(v: NView, o: Out, d: number, fill: boolean): void {
       o.line(d, 'VStack(alignment: .leading, spacing: 4) {');
       v.items.forEach((item, i) => {
         o.line(d + 1, 'HStack(alignment: .firstTextBaseline, spacing: 8) {');
-        o.line(d + 2, `Text(${swiftString(v.ordered ? `${i + 1}.` : '•')})`);
+        o.line(d + 2, `Text(verbatim: ${swiftString(v.ordered ? `${i + 1}.` : '•')})`);
         swiftView(item, o, d + 2, false);
         o.line(d + 1, '}');
       });
@@ -695,8 +699,8 @@ function swiftBody(v: NView, o: Out, d: number, fill: boolean): void {
 }
 
 /** Types the generated code uses, which the view's own name must not shadow. */
-const SWIFT_TAKEN = new Set(['View', 'Text', 'Image', 'Link', 'Button', 'Grid', 'GridRow', 'GridItem', 'Divider', 'TextField', 'Color', 'Group', 'Spacer', 'ScrollView', 'VStack', 'HStack', 'LazyVGrid', 'AnyLayout', 'VStackLayout', 'HStackLayout', 'AsyncImage', 'RoundedRectangle', 'EdgeInsets', 'URL', 'Bool', 'String', 'Font', 'Array']);
-const DART_TAKEN = new Set(['Widget', 'StatelessWidget', 'BuildContext', 'Text', 'Image', 'Table', 'TableRow', 'TableBorder', 'Container', 'Wrap', 'Flex', 'Flexible', 'Expanded', 'Row', 'Column', 'Center', 'Opacity', 'Padding', 'Visibility', 'SizedBox', 'Divider', 'TextField', 'TextButton', 'FilledButton', 'Theme', 'Color', 'Colors', 'BoxDecoration', 'BoxConstraints', 'BorderRadius', 'Border', 'EdgeInsets', 'MediaQuery', 'SingleChildScrollView', 'LayoutBuilder', 'InputDecoration', 'OutlineInputBorder', 'Axis', 'List', 'Map', 'String', 'Object']);
+const SWIFT_TAKEN = new Set(['DesignTokens', 'View', 'Text', 'Image', 'Link', 'Button', 'Grid', 'GridRow', 'GridItem', 'Divider', 'TextField', 'Color', 'Group', 'Spacer', 'ScrollView', 'VStack', 'HStack', 'LazyVGrid', 'AnyLayout', 'VStackLayout', 'HStackLayout', 'AsyncImage', 'RoundedRectangle', 'EdgeInsets', 'URL', 'Bool', 'String', 'Font', 'Array', 'Environment', 'EmptyView', 'ForEach', 'Alignment', 'HorizontalAlignment', 'VerticalAlignment']);
+const DART_TAKEN = new Set(['DesignTokens', 'Widget', 'StatelessWidget', 'BuildContext', 'Text', 'Image', 'Table', 'TableRow', 'TableBorder', 'Container', 'Wrap', 'Flex', 'Flexible', 'Expanded', 'Row', 'Column', 'Center', 'Opacity', 'Padding', 'Visibility', 'SizedBox', 'Divider', 'TextField', 'TextButton', 'FilledButton', 'Theme', 'Color', 'Colors', 'BoxDecoration', 'BoxConstraints', 'BorderRadius', 'Border', 'EdgeInsets', 'MediaQuery', 'SingleChildScrollView', 'LayoutBuilder', 'InputDecoration', 'OutlineInputBorder', 'Axis', 'List', 'Map', 'String', 'Object', 'MainAxisAlignment', 'MainAxisSize', 'CrossAxisAlignment', 'WrapCrossAlignment', 'WrapAlignment', 'TableCellVerticalAlignment', 'FontWeight', 'TextAlign', 'TextStyle', 'BoxFit', 'Alignment', 'Radius']);
 
 /** The type name to write: the given name, with a suffix when it would shadow a framework type. */
 export function nativeTypeName(name: string, framework: NativeFramework): string {

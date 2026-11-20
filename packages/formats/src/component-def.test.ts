@@ -98,6 +98,26 @@ describe('exportComponentDef', () => {
     expect(html).not.toContain('New');
     const swift = exportComponentDef(cardDef(), { framework: 'swiftui' });
     expect(swift.name).toBe('Card');
-    expect(file(swift, 'Card.swift')).toContain('Text("Card \\"title\\"")');
+    expect(file(swift, 'Card.swift')).toContain('Text(verbatim: "Card \\"title\\"")');
+  });
+});
+
+describe('exportComponentDef escaping', () => {
+  it('keeps prop defaults and descriptions from breaking out of scripts and comments', () => {
+    const root = createBranch({ tag: 'div', children: [text('{{title}}')] });
+    const def = createComponent('Card', root, {
+      props: [
+        { name: 'title', type: 'text', default: '</script><script>alert(1)</script>', description: 'x\nalert("desc")' },
+        { name: 'flag', type: 'boolean', default: '0' },
+      ],
+    });
+    const svelte = file(exportComponentDef(def, { framework: 'svelte' }), '.svelte');
+    expect(svelte).not.toContain('</script><script>');
+    expect(svelte).toContain('export let title = "\\u003c/script>\\u003cscript>alert(1)\\u003c/script>";');
+    // '0' is off in the editor, so it is off in the export too.
+    expect(svelte).toContain('export let flag = false;');
+    const jsx = file(exportComponentDef(def, { framework: 'react' }), '.jsx');
+    expect(jsx.split('\n')[0]).toContain('alert("desc")');
+    expect(jsx).not.toMatch(/^alert/m);
   });
 });

@@ -16,6 +16,9 @@ import {
   themeTokens,
   type DesignToken,
   applyPatch,
+  idsOutside,
+  insertionProblem,
+  instanceRoleIn,
   findVersion,
   formatDiff,
   parseVersionLog,
@@ -92,8 +95,27 @@ interface Loaded {
   text: string;
 }
 
+/** Tools that read a file, change it and write it back (or write its version log). */
+const WRITING_TOOLS = ['createTree', 'patchTree', 'saveVersion', 'restoreVersion', 'setTokens', 'saveComponent', 'insertComponent'] as const;
+
 export class Tools {
-  constructor(readonly ws: Workspace) {}
+  /** The end of the queue of writing calls. */
+  private queue: Promise<unknown> = Promise.resolve();
+
+  constructor(readonly ws: Workspace) {
+    // An MCP client can send calls in parallel. Writing calls run one at a time, so two edits to the
+    // same file both land (and both reach its version log) instead of one overwriting the other.
+    for (const name of WRITING_TOOLS) {
+      const run = this[name].bind(this) as (args: never) => Promise<ToolOutput>;
+      (this as Record<string, unknown>)[name] = (args: never) => this.serial(() => run(args));
+    }
+  }
+
+  private serial<T>(fn: () => Promise<T>): Promise<T> {
+    const result = this.queue.then(fn, fn);
+    this.queue = result.catch(() => undefined);
+    return result;
+  }
 
   /* ---------------------------------------------------------------- helpers */
 
@@ -136,6 +158,19 @@ export class Tools {
     } catch (err) {
       throw new ToolError(`${logPath}: ${(err as Error).message}`);
     }
+  }
+
+  /**
+   * Where an edited document goes: the explicit output, else back to the file it came from. A
+   * read-only server returns the document instead (undefined), as its help says.
+   */
+  private outputFor(output: string | undefined, path: string | undefined): string | undefined {
+    return output ?? (this.ws.readOnly ? undefined : path);
+  }
+
+  /** Whether two paths name the same workspace file (`t.json` and `./t.json`). */
+  private async samePath(a: string, b: string): Promise<boolean> {
+    return (await this.ws.resolve(a)) === (await this.ws.resolve(b));
   }
 
   private async keepVersion(path: string, text: string, format: string, init: { name?: string; source?: ChangeSource; auto?: boolean }) {
@@ -247,7 +282,7 @@ export class Tools {
     }
     let result;
     try {
-      result = applyPatch(tree.root, ops, { expandNode: (value, path) => expandShorthand(value, path) });
+      result = applyPatch(tree.root, ops, { expandNode: (value, path) => expandShorthand(value, path), takenIds: idsOutside(treesOf(loaded.doc), tree.id) });
     } catch (err) {
       if (err instanceof PatchError || err instanceof TreeDataError) throw new ToolError(`${err.message}\nNothing was changed.`);
       throw err;
@@ -262,11 +297,11 @@ export class Tools {
     if (args.dryRun) return { text: `${summary}\n\nNothing was written.\n\n${outlineText(updated)}`, data: { ...data, dryRun: true } };
 
     const serialized = this.serialize(next, loaded.format);
-    const output = args.output ?? loaded.path;
+    const output = this.outputFor(args.output, loaded.path);
     if (output) {
       // Editing the file in place: keep what it was, so the change can be reviewed (diff_versions) and rolled back (restore_version).
       let versionNote = '';
-      if (loaded.path && output === loaded.path && args.keepVersion !== false && serialized !== loaded.text) {
+      if (loaded.path && (await this.samePath(output, loaded.path)) && args.keepVersion !== false && serialized !== loaded.text) {
         const v = await this.keepVersion(loaded.path, loaded.text, loaded.format, { name: args.label ? `Before ${args.label}` : 'Before patch', source: 'agent', auto: true });
         versionNote = `\nSaved the previous file as version ${v.id} (restore_version to roll back).`;
       }
@@ -516,11 +551,11 @@ export class Tools {
     const next: TreeDocument = loaded.doc.kind === 'forest' ? { kind: 'forest', forest: { ...loaded.doc.forest, kits, updatedAt: new Date().toISOString() } } : { ...loaded.doc, kits };
     const serialized = this.serialize(next, loaded.format);
     const tokens = themeTokens(kits);
-    const output = args.output ?? loaded.path;
+    const output = this.outputFor(args.output, loaded.path);
     const list = tokens.map((t) => `  ${t.name}: ${t.value}  [${t.kind}${t.edited ? ', edited' : ''}]`).join('\n');
     if (!output) return { text: `${serialized}`, data: { tokens, document: serialized } };
     let versionNote = '';
-    if (loaded.path && output === loaded.path && args.keepVersion !== false && serialized !== loaded.text) {
+    if (loaded.path && (await this.samePath(output, loaded.path)) && args.keepVersion !== false && serialized !== loaded.text) {
       const v = await this.keepVersion(loaded.path, loaded.text, loaded.format, { name: 'Before tokens', source: 'agent', auto: true });
       versionNote = `\nSaved the previous file as version ${v.id} (restore_version to roll back).`;
     }
@@ -558,6 +593,7 @@ export class Tools {
     const tree = pickTree(loaded.doc, args.tree);
     const { node } = resolveRef(tree.root, args.branch);
     if (!isBranch(node)) throw new ToolError(`"${args.branch}" is a leaf; save a branch`);
+    if (instanceRoleIn(tree.root, node.id) === 'inside') throw new ToolError(`"${args.branch}" is inside a component instance; edit the component, or detach the instance first`);
     const saved = saveComponent({ ...forest, updatedAt: new Date().toISOString() }, tree.id, node.id, args.name ?? node.name ?? 'Component', args.description ? { description: args.description } : {});
     if (!saved) throw new ToolError(`Could not find "${args.branch}" in "${tree.name}"`);
     const def = saved.component;
@@ -587,6 +623,8 @@ export class Tools {
       if (name) variants[display as DisplayId] = name;
     }
     const inst = instantiateComponent(def, args.props, variants);
+    const problem = insertionProblem(tree.root, parent.id, inst);
+    if (problem) throw new ToolError(problem);
     const root = insertNode(tree.root, parent.id, inst, args.index);
     const next: Forest = { ...forest, trees: forest.trees.map((t) => (t.id === tree.id ? { ...t, root } : t)), updatedAt: new Date().toISOString() };
     const summary = `Inserted "${def.name}" as ${inst.id} into ${parent.name ?? `<${parent.tag}>`} (${parent.id}).`;
@@ -596,10 +634,10 @@ export class Tools {
   /** Write a changed forest back (in place unless `output`), saving a version first. */
   private async writeForest(loaded: Loaded, forest: Forest, args: { output?: string; keepVersion?: boolean }, versionName: string, summary: string, extra: Record<string, unknown>): Promise<ToolOutput> {
     const serialized = this.serialize({ kind: 'forest', forest }, loaded.format);
-    const output = args.output ?? loaded.path;
+    const output = this.outputFor(args.output, loaded.path);
     if (!output) return { text: `${summary}\n\n${serialized}`, data: { ...extra, document: serialized } };
     let versionNote = '';
-    if (loaded.path && output === loaded.path && args.keepVersion !== false && serialized !== loaded.text) {
+    if (loaded.path && (await this.samePath(output, loaded.path)) && args.keepVersion !== false && serialized !== loaded.text) {
       const v = await this.keepVersion(loaded.path, loaded.text, loaded.format, { name: versionName, source: 'agent', auto: true });
       versionNote = `\nSaved the previous file as version ${v.id} (restore_version to roll back).`;
     }

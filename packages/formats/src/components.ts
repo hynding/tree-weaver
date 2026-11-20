@@ -1,8 +1,10 @@
 import {
+  canonicalSvgAttr,
   canonicalTag,
   DISPLAYS,
   escapeAttr,
   escapeHtml,
+  INLINE_TAGS,
   isBranch,
   isSafeAttr,
   isSafeCssProp,
@@ -37,7 +39,7 @@ import {
   resolveStyles,
   walk,
 } from '@tree-weaver/core';
-import { slugify } from './slug';
+import { commentText, slugify } from './slug';
 import { DESIGN_TOKENS_DART, DESIGN_TOKENS_SWIFT, dartFileName, exportFlutter, exportFlutterTokens, exportSwiftUI, exportSwiftUITokens, nativeTypeName } from './native';
 import { tailwindPreset, tailwindThemeCss, tailwindTokenClass } from './tokens';
 
@@ -221,9 +223,9 @@ export function tailwindClass(prop: string, value: string, tokenKinds?: Readonly
   const v = value.trim();
   const themed = tokenKinds ? tailwindTokenClass(prop, v, tokenKinds) : undefined;
   if (themed) return themed;
-  const keyword = KEYWORD_UTILITIES[prop]?.[v];
+  const keyword = Object.hasOwn(KEYWORD_UTILITIES, prop) && Object.hasOwn(KEYWORD_UTILITIES[prop], v) ? KEYWORD_UTILITIES[prop][v] : undefined;
   if (keyword) return keyword;
-  const utility = VALUE_UTILITIES[prop];
+  const utility = Object.hasOwn(VALUE_UTILITIES, prop) ? VALUE_UTILITIES[prop] : undefined;
   // Single values only: `p-[1rem_2rem]` works too, but the arbitrary property reads plainer.
   if (utility && !/\s/.test(v) && !/[[\]]/.test(v)) return `${utility}-[${bracket(v)}]`;
   return `[${prop}:${bracket(v)}]`;
@@ -262,6 +264,8 @@ type El =
   | { kind: 'text'; value: string };
 
 interface Build {
+  /** Prop defaults (component exports), to check URLs as they will be filled. */
+  defaults?: Record<string, string>;
   styling: ComponentStyling;
   classOf: (b: Branch) => string;
   rules: DisplayRule[];
@@ -274,14 +278,55 @@ interface Build {
   classes?: Map<string, string>;
 }
 
-function leafEl(leaf: Leaf, inSvg: boolean): El {
-  const attrs = Object.entries(leaf.attrs ?? {}).filter(([n, v]) => isSafeAttr(n, v));
+/**
+ * Attribute names a framework template takes as plain attributes. Vue reads `:x`, `v-*`, `@x` and
+ * `#x` as directives and Svelte reads `on:x`, `bind:x` and the like, which would run imported
+ * attribute values as code, so only plain names and the XML namespaces are kept.
+ */
+const PLAIN_ATTR = /^(?:(?:xlink|xml|xmlns):)?[a-zA-Z_][\w.-]*$/;
+// `is` too: Vue renders `<component is="script">` and `is="vue:script"` as the element it names.
+/** Attribute names the frameworks take for themselves: `is` (Vue), `ref` and `key` (React, Vue), `slot` (Svelte, Vue). */
+const FRAMEWORK_ATTRS = new Set(['is', 'ref', 'key', 'slot']);
+const isExportAttr = (name: string, value: string, defaults?: Record<string, string>) =>
+  PLAIN_ATTR.test(name) && !/^v-/i.test(name) && !FRAMEWORK_ATTRS.has(name.toLowerCase()) && !isDomPropName(name) && landsAs(name).every((n) => isSafeFilled(n, value, defaults));
+/**
+ * Vue sets an attribute whose name is a property of the element (`innerHTML`) as that property,
+ * so a mixed-case name is kept only when it is an SVG attribute's own case (`viewBox`), and the
+ * HTML-setting property names are never kept.
+ */
+const isDomPropName = (name: string): boolean =>
+  /^(inner|outer)(html|text)$|^textcontent$/i.test(name) || (name !== name.toLowerCase() && !/^(xlink|xml|xmlns):/.test(name) && canonicalSvgAttr(name.toLowerCase()) !== name);
+/**
+ * The names an attribute can end up as in the page: JSX camel-cases `h-ref` to `hRef`, which the
+ * browser reads as `href`, and React writes `xlinkHref` as `xlink:href`, so each is checked.
+ */
+function landsAs(name: string): string[] {
+  const jsx = jsxAttrName(name).toLowerCase();
+  return [name, jsx, jsx === 'xlinkhref' ? 'xlink:href' : jsx];
+}
+/**
+ * `isSafeAttr` for a value as it will be at run time: with its `{{prop}}` placeholders empty and
+ * filled with the props' defaults too (`java{{x}}script:` or a `javascript:` default would
+ * otherwise only become a URL in the exported component).
+ */
+function isSafeFilled(name: string, value: string, defaults?: Record<string, string>): boolean {
+  if (!isSafeAttr(name, value)) return false;
+  if (!/\{\{/.test(value)) return true;
+  const fill = (values: Record<string, string>) => value.replace(/\{\{\s*([A-Za-z][A-Za-z0-9_]*)\s*\}\}/g, (_m, p: string) => (Object.hasOwn(values, p) ? values[p] : ''));
+  return isSafeAttr(name, fill({})) && (!defaults || isSafeAttr(name, fill(defaults)));
+}
+/** Vue's built-in components aren't HTML; exported as they are, `<component>` could render any element. */
+// `slot` too: Vue renders it as a slot outlet and drops its content.
+const FRAMEWORK_TAGS = new Set(['component', 'teleport', 'keep-alive', 'keepalive', 'suspense', 'transition', 'transition-group', 'transitiongroup', 'slot']);
+
+function leafEl(leaf: Leaf, inSvg: boolean, defaults?: Record<string, string>): El {
+  const attrs = Object.entries(leaf.attrs ?? {}).filter(([n, v]) => isExportAttr(n, v, defaults));
   if (leaf.type === 'shape') {
     const tag = canonicalTag(leaf.value);
     return { kind: 'el', tag: SVG_SHAPES.has(tag) ? tag : 'g', attrs, children: [], svg: true };
   }
   if (leaf.type === 'image') {
-    const src = isSafeAttr('src', leaf.value) ? leaf.value : '';
+    const src = isSafeFilled('src', leaf.value, defaults) ? leaf.value : '';
     if (inSvg) return { kind: 'el', tag: 'image', attrs: [['href', src], ...attrs.filter(([n]) => n !== 'href' && n !== 'alt')], children: [], svg: true };
     const rest = attrs.filter(([n]) => n !== 'src' && n !== 'alt');
     return { kind: 'el', tag: 'img', attrs: [['src', src], ['alt', leaf.attrs?.alt ?? ''], ...rest], children: [], svg: false };
@@ -289,8 +334,57 @@ function leafEl(leaf: Leaf, inSvg: boolean): El {
   return { kind: 'text', value: leaf.value };
 }
 
+/**
+ * Mend nesting a browser would repair while parsing, which Svelte refuses to compile (and React
+ * warns about): a link in a link becomes a span, a paragraph or heading holding blocks a div,
+ * rows straight under a table go in a tbody, and whitespace between table parts goes.
+ */
+/** Whether a block element sits anywhere below `node` (Svelte refuses one at any depth under a `<p>`). */
+function blockBelow(node: Branch, inSvg = false): boolean {
+  return node.children.some((c) => {
+    if (!isBranch(c)) return false;
+    const lower = c.tag.toLowerCase();
+    if (inSvg) return blockBelow(c, lower !== 'foreignobject');
+    if (lower === 'svg') return blockBelow(c, true);
+    return !INLINE_TAGS.has(lower) || blockBelow(c);
+  });
+}
+
+export function repairNesting(node: Branch, ctx: { a?: boolean; form?: boolean; button?: boolean } = {}): Branch {
+  const lower = node.tag.toLowerCase();
+  if (lower === 'svg') return node;
+  let tag = node.tag;
+  if ((lower === 'a' && ctx.a) || (lower === 'button' && ctx.button)) tag = 'span';
+  if (lower === 'form' && ctx.form) tag = 'div';
+  const holdsBlock = blockBelow(node);
+  if ((lower === 'p' || /^h[1-6]$/.test(lower)) && holdsBlock) tag = 'div';
+  const inner = { a: ctx.a || lower === 'a', form: ctx.form || lower === 'form', button: ctx.button || lower === 'button' };
+  let children: TreeNode[] = node.children.map((c) => (isBranch(c) ? repairNesting(c, inner) : c));
+  if (/^(table|thead|tbody|tfoot|tr)$/.test(lower)) children = children.filter((c) => isBranch(c) || c.type !== 'text' || c.value.trim() !== '');
+  if (lower === 'table' && children.some((c) => isBranch(c) && c.tag.toLowerCase() === 'tr')) {
+    const out: TreeNode[] = [];
+    let body: Branch | null = null;
+    for (const c of children) {
+      if (isBranch(c) && c.tag.toLowerCase() === 'tr') {
+        if (!body) {
+          body = { kind: 'branch', id: `${node.id}~tbody${out.length}`, tag: 'tbody', classes: [], attrs: {}, styles: {}, children: [] };
+          out.push(body);
+        }
+        body.children.push(c);
+      } else {
+        body = null;
+        out.push(c);
+      }
+    }
+    children = out;
+  }
+  const same = tag === node.tag && children.length === node.children.length && children.every((c, i) => c === node.children[i]);
+  return same ? node : { ...node, tag, children };
+}
+
 function branchEl(branch: Branch, b: Build, inSvg: boolean, asTag?: string): El {
-  const tag = asTag ?? safeTag(branch.tag);
+  const safe = safeTag(branch.tag);
+  const tag = asTag ?? (FRAMEWORK_TAGS.has(safe.toLowerCase()) ? 'div' : safe);
   const svg = inSvg || tag === 'svg';
   const childSvg = childrenInSvg(branch, inSvg);
   const classes = branch.classes.filter(Boolean);
@@ -313,11 +407,11 @@ function branchEl(branch: Branch, b: Build, inSvg: boolean, asTag?: string): El 
       if (isPropName(prop)) cond = { prop, negate: value.trim().startsWith('!') };
       continue;
     }
-    if (name === 'class' || name === 'style' || !isSafeAttr(name, value)) continue;
+    if (name === 'class' || name === 'style' || !isExportAttr(name, value, b.defaults)) continue;
     attrs.push([name, value]);
   }
   if (tag === 'svg' && !inSvg && !branch.attrs.xmlns) attrs.push(['xmlns', 'http://www.w3.org/2000/svg']);
-  const children = branch.children.map((c: TreeNode) => (isBranch(c) ? branchEl(c, b, childSvg) : leafEl(c, childSvg)));
+  const children = branch.children.map((c: TreeNode) => (isBranch(c) ? branchEl(c, b, childSvg) : leafEl(c, childSvg, b.defaults)));
   return cond ? { kind: 'el', tag, attrs, children, svg, cond } : { kind: 'el', tag, attrs, children, svg };
 }
 
@@ -351,10 +445,28 @@ const variantSuffix = `\${${VARIANT_CALL}}`;
 
 /* ------------------------------------------------------------- writers */
 
-const INLINE = new Set(['a', 'abbr', 'b', 'br', 'code', 'em', 'i', 'img', 'kbd', 'mark', 'q', 's', 'small', 'span', 'strong', 'sub', 'sup', 'time', 'u', 'tspan']);
+const INLINE = new Set([
+  'a', 'abbr', 'audio', 'b', 'bdi', 'bdo', 'br', 'button', 'canvas', 'cite', 'code', 'data', 'dfn', 'em', 'i', 'iframe', 'img', 'input', 'kbd', 'label',
+  'mark', 'output', 'picture', 'q', 's', 'samp', 'select', 'small', 'span', 'strong', 'sub', 'sup', 'svg', 'textarea', 'time', 'u', 'var', 'video', 'wbr', 'tspan',
+]);
 const isInlineEl = (el: El): boolean => el.kind === 'text' || INLINE.has(el.tag);
 /** Keep children on one line when line breaks could change the text: any text, or only inline elements. */
 const oneLine = (children: El[]): boolean => children.some((c) => c.kind === 'text') || children.every(isInlineEl);
+/**
+ * Children on separate lines for HTML, Vue and Svelte. HTML keeps the line break between two
+ * inline elements as a space, so runs of inline siblings stay together on one line.
+ */
+function childLines(children: El[], pad: string, write: (c: El) => string): string {
+  const lines: string[] = [];
+  let prevInline = false;
+  for (const c of children) {
+    const inline = isInlineEl(c);
+    if (inline && prevInline) lines[lines.length - 1] += write(c);
+    else lines.push(pad + write(c));
+    prevInline = inline;
+  }
+  return lines.join('\n');
+}
 
 /** HTML (also Vue and Svelte templates). */
 function writeHtml(el: El, depth: number, mode: 'html' | 'vue' | 'svelte', props = false): string {
@@ -371,17 +483,19 @@ function writeHtml(el: El, depth: number, mode: 'html' | 'vue' | 'svelte', props
   }
   if (el.kind === 'text') {
     const text = escapeHtml(el.value);
-    // `{` starts an expression in Svelte, `{{` in Vue.
-    if (mode === 'svelte') return text.replace(/[{}]/g, (c) => (c === '{' ? '&#123;' : '&#125;'));
-    if (mode === 'vue') return text.replace(/\{\{/g, '{<!-- -->{');
+    // `{` starts an expression in Svelte, `{{` in Vue. Every brace is escaped, so neither a run of
+    // braces nor two text leaves side by side can form one.
+    if (mode !== 'html') return text.replace(/[{}]/g, (c) => (c === '{' ? '&#123;' : '&#125;'));
     return text;
   }
-  const attrs = el.attrs.map(([n, v]) => (v === '' && !el.svg ? ` ${n}` : ` ${n}="${escapeAttr(mode === 'svelte' ? v.replace(/[{}]/g, (c) => (c === '{' ? '&#123;' : '&#125;')) : v)}"`)).join('');
+  // Escape for HTML first, then Svelte's braces, so the &#123; entities are not escaped again.
+  const esc = (v: string) => (mode === 'svelte' ? escapeAttr(v).replace(/[{}]/g, (c) => (c === '{' ? '&#123;' : '&#125;')) : escapeAttr(v));
+  const attrs = el.attrs.map(([n, v]) => (v === '' && !el.svg ? ` ${n}` : ` ${n}="${esc(v)}"`)).join('');
   if (!el.svg && VOID_TAGS.has(el.tag)) return `<${el.tag}${attrs}>`;
   if (!el.children.length) return el.svg ? `<${el.tag}${attrs} />` : `<${el.tag}${attrs}></${el.tag}>`;
   if (oneLine(el.children)) return `<${el.tag}${attrs}>${el.children.map((c) => writeHtml(c, depth + 1, mode)).join('')}</${el.tag}>`;
   const pad = '  '.repeat(depth + 1);
-  return `<${el.tag}${attrs}>\n${el.children.map((c) => pad + writeHtml(c, depth + 1, mode)).join('\n')}\n${'  '.repeat(depth)}</${el.tag}>`;
+  return `<${el.tag}${attrs}>\n${childLines(el.children, pad, (c) => writeHtml(c, depth + 1, mode))}\n${'  '.repeat(depth)}</${el.tag}>`;
 }
 
 const JSX_ATTRS: Record<string, string> = {
@@ -412,17 +526,57 @@ const JSX_ATTRS: Record<string, string> = {
   formaction: 'formAction',
   hreflang: 'hrefLang',
   inputmode: 'inputMode',
+  itemscope: 'itemScope',
+  itemtype: 'itemType',
+  itemid: 'itemID',
+  itemprop: 'itemProp',
+  itemref: 'itemRef',
+  formnovalidate: 'formNoValidate',
+  formmethod: 'formMethod',
+  formtarget: 'formTarget',
+  formenctype: 'formEncType',
+  nomodule: 'noModule',
+  enterkeyhint: 'enterKeyHint',
+  popovertarget: 'popoverTarget',
+  popovertargetaction: 'popoverTargetAction',
+  fetchpriority: 'fetchPriority',
+  srclang: 'srcLang',
+  srcdoc: 'srcDoc',
+  cellpadding: 'cellPadding',
+  cellspacing: 'cellSpacing',
+  frameborder: 'frameBorder',
+  marginheight: 'marginHeight',
+  marginwidth: 'marginWidth',
+  'accept-charset': 'acceptCharset',
+  'http-equiv': 'httpEquiv',
   'xlink:href': 'xlinkHref',
   'xml:space': 'xmlSpace',
   'xml:lang': 'xmlLang',
 };
 
+/** HTML attributes that are on when present; any other empty attribute is written as `=""` in JSX. */
+const BOOLEAN_ATTRS = new Set([
+  'allowfullscreen', 'async', 'autofocus', 'autoplay', 'checked', 'controls', 'default', 'defer', 'disabled', 'formnovalidate', 'hidden', 'inert',
+  'ismap', 'itemscope', 'loop', 'multiple', 'muted', 'nomodule', 'novalidate', 'open', 'playsinline', 'readonly', 'required', 'reversed', 'selected',
+]);
+
+/** HTML attributes React's types take as numbers. */
+const NUMERIC_ATTRS = new Set(['tabindex', 'colspan', 'rowspan', 'rows', 'cols', 'size', 'maxlength', 'minlength', 'start', 'span']);
+
+/** SVG presentation attributes, which React takes in camel case (`strokeWidth`). */
+const SVG_DASHED = new Set(
+  'alignment-baseline baseline-shift clip-path clip-rule color-interpolation color-interpolation-filters color-profile color-rendering dominant-baseline enable-background fill-opacity fill-rule flood-color flood-opacity font-family font-size font-size-adjust font-stretch font-style font-variant font-weight glyph-name glyph-orientation-horizontal glyph-orientation-vertical horiz-adv-x image-rendering letter-spacing lighting-color marker-end marker-mid marker-start overline-position overline-thickness paint-order panose-1 pointer-events rendering-intent shape-rendering stop-color stop-opacity strikethrough-position strikethrough-thickness stroke-dasharray stroke-dashoffset stroke-linecap stroke-linejoin stroke-miterlimit stroke-opacity stroke-width text-anchor text-decoration text-rendering underline-position underline-thickness unicode-bidi unicode-range units-per-em v-alphabetic v-hanging v-ideographic v-mathematical vector-effect vert-adv-y vert-origin-x vert-origin-y word-spacing writing-mode x-height'.split(' '),
+);
+
 /** An attribute name as React expects it. */
 export function jsxAttrName(name: string): string {
   const lower = name.toLowerCase();
-  if (JSX_ATTRS[lower]) return JSX_ATTRS[lower];
+  if (Object.hasOwn(JSX_ATTRS, lower)) return JSX_ATTRS[lower];
   if (lower.startsWith('data-') || lower.startsWith('aria-')) return lower;
-  return name.replace(/[-:]([a-z])/g, (_m, c: string) => c.toUpperCase());
+  // Only names React knows in camel case are converted (SVG presentation attributes, `xlink:*`);
+  // React passes any other name through as written (`hx-post`, a custom element's `some-attr`).
+  if (SVG_DASHED.has(lower) || /^(xlink|xml|xmlns):/.test(lower)) return lower.replace(/[-:]([a-z])/g, (_m, c: string) => c.toUpperCase());
+  return name;
 }
 
 /** An element of a Vue or Svelte component template, with prop bindings. */
@@ -446,7 +600,7 @@ function writePropsEl(el: El & { kind: 'el' }, depth: number, mode: 'vue' | 'sve
   if (!el.children.length) return el.svg ? `<${el.tag}${cond}${attrs} />` : `<${el.tag}${cond}${attrs}></${el.tag}>`;
   if (oneLine(el.children)) return `<${el.tag}${cond}${attrs}>${el.children.map((c) => writeHtml(c, depth + 1, mode, true)).join('')}</${el.tag}>`;
   const pad = '  '.repeat(depth + 1);
-  return `<${el.tag}${cond}${attrs}>\n${el.children.map((c) => pad + writeHtml(c, depth + 1, mode, true)).join('\n')}\n${'  '.repeat(depth)}</${el.tag}>`;
+  return `<${el.tag}${cond}${attrs}>\n${childLines(el.children, pad, (c) => writeHtml(c, depth + 1, mode, true))}\n${'  '.repeat(depth)}</${el.tag}>`;
 }
 
 const jsxString = (value: string): string => JSON.stringify(value);
@@ -458,18 +612,31 @@ function writeJsx(el: El, depth: number, props = false): string {
         .map((s) => (s.lit ? writeJsx({ kind: 'text', value: s.lit }, depth) : '') + (s.prop ? `{${s.prop}}` : ''))
         .join('');
     // Plain text is fine unless it holds JSX syntax characters; then use a string expression.
-    return /[{}<>]/.test(el.value) || /^\s|\s$/.test(el.value) ? `{${jsxString(el.value)}}` : el.value.replace(/&/g, '&amp;');
+    // Line breaks too: JSX text collapses them (and the indentation around them).
+    return /[{}<>\n\r]/.test(el.value) || /^\s|\s$/.test(el.value) ? `{${jsxString(el.value)}}` : el.value.replace(/&/g, '&amp;');
   }
   if (props && el.cond) {
     const { cond, ...rest } = el;
     return `{${cond.negate ? '!' : ''}${cond.prop} && (${writeJsx(rest, depth, props)})}`;
   }
   const attrs = el.attrs
+    // A `.` in a name is fine in HTML but not in JSX, and of the `xmlns:` names React knows only `xmlnsXlink`.
+    .filter(([n]) => !n.includes('.') && !(/^xmlns:/i.test(n) && n.toLowerCase() !== 'xmlns:xlink'))
     .map(([n, v]) => {
-      const name = jsxAttrName(n);
+      // Without onChange, React makes `value`/`checked` read-only; the default* props keep fields editable.
+      const formField = (el.tag === 'input' || el.tag === 'textarea' || el.tag === 'select') && (n === 'value' || n === 'checked');
+      const name = formField ? (n === 'value' ? 'defaultValue' : 'defaultChecked') : jsxAttrName(n);
       if (props && n === 'class' && el.variantClass) return ` ${name}={${templateLiteral(v, variantSuffix)}}`;
-      if (props && hasProps(v)) return ` ${name}={${propExpr(v)}}`;
-      if (v === '' && !el.svg && n !== 'alt' && n !== 'class') return ` ${name}`;
+      const numeric = !el.svg && NUMERIC_ATTRS.has(n.toLowerCase());
+      if (props && hasProps(v)) {
+        const expr = propExpr(v);
+        // An empty prop leaves the attribute off, as the string form does, rather than giving 0.
+        return numeric ? ` ${name}={${expr} === '' ? undefined : Number(${expr})}` : ` ${name}={${expr}}`;
+      }
+      // HTML turns a boolean attribute on whatever its value, and React (and its types) take `true`.
+      if (!el.svg && BOOLEAN_ATTRS.has(n.toLowerCase()) && !(n.toLowerCase() === 'hidden' && v.toLowerCase() === 'until-found')) return ` ${name}`;
+      // React's types take numbers for these.
+      if (numeric && /^-?\d{1,15}$/.test(v.trim())) return ` ${name}={${Number(v.trim())}}`;
       return /["\\{}<>\n]/.test(v) ? ` ${name}={${jsxString(v)}}` : ` ${name}="${v.replace(/&/g, '&amp;')}"`;
     })
     .join('');
@@ -481,12 +648,33 @@ function writeJsx(el: El, depth: number, props = false): string {
 
 /* --------------------------------------------------------------- files */
 
-function kitsCss(kits: DesignKit[]): string {
-  const enabled = kits.filter((k) => k.enabled && k.source !== 'env');
-  if (!enabled.length) return '';
-  const imports = enabled.filter((k) => k.href).map((k) => `@import url("${k.href!.replace(/["\\]/g, '')}");`);
-  const inline = enabled.filter((k) => !k.href && k.css.trim()).map((k) => `/* ${k.name.replace(/\*\//g, '')} */\n${k.css.trim()}`);
-  return `/* Design kits from Tree Weaver, in load order. */\n${[...imports, ...inline].join('\n\n')}\n`;
+/**
+ * The design kit files: `kits.css`, in kit order. CSS takes `@import` only before any rule, so
+ * when a linked kit follows an inline one, or a later inline kit has its own `@import`, each
+ * inline kit gets its own file under `kits/` and `kits.css` imports them all in order.
+ */
+function kitFiles(kits: DesignKit[]): ComponentFile[] {
+  const enabled = kits.filter((k) => k.enabled && k.source !== 'env' && (k.href || k.css.trim()));
+  if (!enabled.length) return [];
+  const link = (href: string) => `@import url("${href.replace(/["\\\n\r]/g, '')}");`;
+  const inlineCss = (k: DesignKit) => `/* ${commentText(k.name)} */\n${k.css.trim()}`;
+  const firstInline = enabled.findIndex((k) => !k.href);
+  const together =
+    firstInline < 0 || enabled.slice(firstInline).every((k, i) => !k.href && (i === 0 || !/@import/i.test(k.css)));
+  const head = '/* Design kits from Tree Weaver, in load order. */\n';
+  if (together) return [{ path: 'kits.css', contents: `${head}${enabled.map((k) => (k.href ? link(k.href) : inlineCss(k))).join('\n\n')}\n` }];
+  const used = new Set<string>();
+  const files: ComponentFile[] = [];
+  const lines = enabled.map((k) => {
+    if (k.href) return link(k.href);
+    const base = slugify(k.name, 'kit');
+    let slug = base;
+    for (let n = 2; used.has(slug); n++) slug = `${base}-${n}`;
+    used.add(slug);
+    files.push({ path: `kits/${slug}.css`, contents: `${inlineCss(k)}\n` });
+    return link(`./kits/${slug}.css`);
+  });
+  return [{ path: 'kits.css', contents: `${head}${lines.join('\n')}\n` }, ...files];
 }
 
 /** Export a tree as a component (or a plain HTML page) with its styles. */
@@ -513,16 +701,17 @@ export function exportComponent(tree: Tree, opts: ComponentOptions): ComponentEx
 
   // A page root is a <body>; in a component it becomes a wrapper <div>.
   const rootTag = svgTree ? undefined : framework === 'html' ? 'body' : 'div';
-  const root = branchEl(tree.root, build, false, rootTag);
+  const root = branchEl(repairNesting(tree.root), build, false, rootTag);
   if (root.kind === 'el' && !svgTree && framework !== 'html' && !root.attrs.some(([n]) => n === 'class')) {
     // Name the wrapper so it can be styled from outside.
     root.attrs.unshift(['class', cssIdent(slugify(tree.name, 'layout'))]);
   }
 
   const css = styling === 'css' ? renderDisplayCss(build.rules) : '';
-  const kitCss = kitsCss(opts.kits ?? []);
+  const kitFileList = kitFiles(opts.kits ?? []);
+  const kitCss = kitFileList.length > 0;
   const files: ComponentFile[] = [];
-  const header = (comment: (s: string) => string) => comment(`Generated by Tree Weaver from the tree "${tree.name.replace(/\*\/|-->/g, '')}".`);
+  const header = (comment: (s: string) => string) => comment(`Generated by Tree Weaver from the tree "${commentText(tree.name)}".`);
   const cssFile = `${name}.css`;
   const tailwindNote = styling === 'tailwind' ? ' Needs Tailwind CSS v3.4+ or v4 (it uses arbitrary values and max-* variants).' : '';
   let entry: string;
@@ -572,7 +761,7 @@ export function exportComponent(tree: Tree, opts: ComponentOptions): ComponentEx
       throw new Error(`Unknown framework "${String(framework)}"`);
   }
   if (css && framework !== 'vue' && framework !== 'svelte') files.push({ path: cssFile, contents: `/* ${header((s) => s)} */\n${css}\n` });
-  if (kitCss) files.push({ path: 'kits.css', contents: kitCss });
+  files.push(...kitFileList);
   if (tokens.length) {
     files.push({ path: 'tokens.json', contents: `${JSON.stringify(tokensToDtcg(tokens), null, 2)}\n` });
     if (styling === 'tailwind') {
@@ -680,8 +869,20 @@ function variantRules(def: ComponentDef, variants: ComponentVariant[], slugs: Ma
 }
 
 
+/** Words a prop can't be named in a JS, Vue or Svelte component (a variable of that name is a syntax error). */
+const RESERVED_WORDS = new Set(
+  'key ref variantClasses VARIANT_DISPLAYS arguments await break case catch class const continue debugger default delete do else enum eval export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield'.split(' '),
+);
+
 /** A prop's default as a JS literal. */
-const jsDefault = (p: ComponentProp): string => (p.type === 'boolean' ? String(!!p.default && p.default !== 'false') : JSON.stringify(p.default));
+const jsDefault = (p: ComponentProp): string =>
+  p.type === 'boolean'
+    ? // The editor's rule (see `truthy` in core's components.ts): '', 'false' and '0' are off.
+      String(!!p.default && p.default !== 'false' && p.default !== '0')
+    : p.default === undefined
+      ? 'undefined'
+      : // Escaped so a default cannot close the <script> block it sits in (Vue and Svelte).
+        JSON.stringify(p.default).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
 
 /**
  * Export a reusable component (see `components.ts` in core) as a React, Vue or Svelte component
@@ -702,6 +903,8 @@ export function exportComponentDef(def: ComponentDef, opts: ComponentOptions): C
     return exportComponent(tree, { ...opts, name });
   }
   const props = componentProps(def);
+  const reserved = props.filter((p) => RESERVED_WORDS.has(p.name));
+  if (reserved.length) throw new Error(`Rename the prop${reserved.length > 1 ? 's' : ''} ${reserved.map((p) => `"${p.name}"`).join(', ')} before exporting "${def.name}": ${reserved.length > 1 ? 'those names are' : 'that name is'} reserved in JavaScript or by the generated code`);
   const variants = styling === 'css' ? def.variants : [];
   const tokens = themeTokens((opts.kits ?? []).filter((k) => k.enabled));
   const prefix = `${cssIdent(slugify(def.name, 'component'))}__`;
@@ -711,22 +914,27 @@ export function exportComponentDef(def: ComponentDef, opts: ComponentOptions): C
     rules: [],
     tokenKinds: new Map(tokens.map((t) => [t.name, t.kind])),
     props: true,
+    defaults: Object.fromEntries(props.map((p) => [p.name, p.default ?? ''])),
     forceClass: new Set([def.root.id, ...variants.flatMap((v) => Object.keys(v.styles))]),
     classes: new Map(),
   };
-  const root = branchEl(def.root, build, false);
+  const root = branchEl(repairNesting(def.root), build, false);
+  // The editor ignores `data-show-if` on a component's root (see expandComponent), and so does the export.
+  if (root.kind === 'el') delete root.cond;
   const rootCls = build.classes!.get(def.root.id)!;
   const slugs = variantSlugs(variants);
   if (root.kind === 'el' && variants.length && rootCls) root.variantClass = true;
   build.rules.push(...variantRules(def, variants, slugs, rootCls, build.classes!));
   const options = variants.map((v) => slugs.get(v)!);
-  const allProps = variants.length ? [...props, { name: 'variant', type: 'enum' as const, default: '', options }] : props;
+  // With variants, `variant` is the generated variant prop; a prop of the same name would be declared twice.
+  const allProps = variants.length ? [...props.filter((p) => p.name !== 'variant'), { name: 'variant', type: 'enum' as const, default: '', options }] : props;
   const helper = variants.length ? variantHelper(rootCls, opts.typescript && framework === 'react' ? name : undefined) : '';
 
   const css = styling === 'css' ? renderDisplayCss(build.rules) : '';
-  const kitCss = kitsCss(opts.kits ?? []);
+  const kitFileList = kitFiles(opts.kits ?? []);
+  const kitCss = kitFileList.length > 0;
   const files: ComponentFile[] = [];
-  const header = `Generated by Tree Weaver from the component "${def.name.replace(/\*\/|-->/g, '')}".${variants.length ? ` Variants: ${options.join(', ')}.` : ''}`;
+  const header = commentText(`Generated by Tree Weaver from the component "${def.name}".${variants.length ? ` Variants: ${options.join(', ')}.` : ''}`);
   const cssFile = `${name}.css`;
   const docs = allProps.map((p) => `${p.name}${p.name === 'variant' && !p.description ? `: ${VARIANT_DOC}` : p.description ? `: ${p.description}` : ''}`);
   let entry: string;
@@ -776,9 +984,9 @@ export function exportComponentDef(def: ComponentDef, opts: ComponentOptions): C
     default:
       throw new Error(`Unknown framework "${String(framework)}"`);
   }
-  if (docs.length) files[0].contents = files[0].contents.replace(header, `${header} Props: ${docs.join('; ')}.`);
+  if (docs.length) files[0].contents = files[0].contents.replace(header, () => commentText(`${header} Props: ${docs.join('; ')}.`));
   if (css && framework === 'react') files.push({ path: cssFile, contents: `/* ${header} */\n${css}\n` });
-  if (kitCss) files.push({ path: 'kits.css', contents: kitCss });
+  files.push(...kitFileList);
   if (tokens.length) files.push({ path: 'tokens.json', contents: `${JSON.stringify(tokensToDtcg(tokens), null, 2)}\n` });
   return { name, framework, styling, entry, files };
 }

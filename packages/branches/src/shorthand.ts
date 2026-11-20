@@ -60,7 +60,33 @@ const KNOWN_TAGS = new Set([...HTML_TAGS, ...SVG_BRANCH_TAGS.map((t) => t.toLowe
 
 const SELECTOR = /^([A-Za-z][A-Za-z0-9-]*)((?:\.[A-Za-z_][\w-]*)*)(?:#([A-Za-z][\w-]*))?((?:\[[A-Za-z_:][\w:.-]*(?:=(?:"[^"]*"|'[^']*'|[^\]]*))?\])*)$/;
 const ATTR = /\[([A-Za-z_:][\w:.-]*)(?:=("[^"]*"|'[^']*'|[^\]]*))?\]/g;
-const STRING_FORM = /^([^\s:]+):(?:\s+([\s\S]*))?$/;
+
+/**
+ * Split `selector: content` at the first `:` outside `[...]` (attribute values may hold `:` and
+ * spaces, as in `a[href=https://x.y]` or `a[title="Hi there"]`). The `:` must end the string or
+ * be followed by whitespace. Returns [selector, content] or null.
+ */
+function splitStringForm(value: string): [string, string | undefined] | null {
+  let depth = 0;
+  let quote = '';
+  for (let i = 0; i < value.length; i++) {
+    const c = value[i];
+    if (quote) {
+      if (c === quote) quote = '';
+    } else if (depth && (c === '"' || c === "'") && value[i - 1] === '=') quote = c; // quoted values only: `it's` is plain
+    else if (c === '[') depth++;
+    else if (c === ']') depth = Math.max(0, depth - 1);
+    else if (!depth && /\s/.test(c)) return null;
+    else if (!depth && c === ':') {
+      if (i === 0) return null;
+      const rest = value.slice(i + 1);
+      if (rest === '') return [value.slice(0, i), undefined];
+      const m = /^\s+([\s\S]*)$/.exec(rest);
+      return m ? [value.slice(0, i), m[1]] : null;
+    }
+  }
+  return null;
+}
 
 /** Keys that change a node in any object form. */
 const MODIFIERS = new Set(['id', 'name', 'type', 'class', 'classes', 'attrs', 'styles', 'children', 'header', 'href', 'alt']);
@@ -75,7 +101,9 @@ interface Selector {
 /** Parse `tag.class#id[attr=value]`, or null when it isn't one or names an unknown element. */
 export function parseSelector(value: string): Selector | null {
   const m = SELECTOR.exec(value);
-  if (!m || !KNOWN_TAGS.has(m[1].toLowerCase())) return null;
+  // Case matters, so a capitalised label ("Address: 1 Main St", "Q: …") stays text: HTML names
+  // in lowercase, SVG names in lowercase or their own case (`linearGradient`).
+  if (!m || !(m[1] === m[1].toLowerCase() ? KNOWN_TAGS.has(m[1]) : SVG_BRANCH_TAGS.includes(m[1]))) return null;
   const attrs: Record<string, string> = {};
   if (m[3]) attrs.id = m[3];
   for (const a of m[4].matchAll(ATTR)) attrs[a[1]] = (a[2] ?? '').replace(/^(["'])([\s\S]*)\1$/, '$2');
@@ -99,14 +127,14 @@ function imageLeaf(src: string, alt: string | undefined): TreeNode {
 function expandString(value: string, path: string): TreeNode {
   if (value.startsWith('\\')) return text(value.slice(1));
   if (/^@[\w-]+$/.test(value)) return blueprint(value.slice(1), path);
-  const m = STRING_FORM.exec(value);
+  const m = splitStringForm(value);
   if (!m) return text(value);
-  const content = m[2] ?? '';
-  if (m[1].toLowerCase() === 'img') {
+  const content = m[1] ?? '';
+  if (m[0].toLowerCase() === 'img') {
     const [src, ...alt] = content.split(' | ');
     return imageLeaf(src, alt.length ? alt.join(' | ') : '');
   }
-  const sel = parseSelector(m[1]);
+  const sel = parseSelector(m[0]);
   if (!sel) return text(value);
   return createBranch({ tag: sel.tag, classes: sel.classes, attrs: sel.attrs, children: content ? [text(content)] : [] });
 }

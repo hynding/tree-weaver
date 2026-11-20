@@ -276,6 +276,11 @@ describe('Tree Weaver MCP server', () => {
     expect((await call('outline', { path: '/etc/hostname' })).text).toContain('outside the workspace');
     symlinkSync(tmpdir(), join(root, 'escape'));
     expect((await call('create_tree', { path: 'escape/x.tree.json' })).text).toContain('outside the workspace');
+    // A broken symlink would be followed by the write, wherever it points.
+    const target = join(mkdtempSync(join(tmpdir(), 'tw-out-')), 'pwned.json');
+    symlinkSync(target, join(root, 'link.tree.json'));
+    expect((await call('create_tree', { path: 'link.tree.json' })).text).toContain('broken symlink');
+    expect(existsSync(target)).toBe(false);
   });
 
   it('writes nothing in read-only mode', async () => {
@@ -284,6 +289,18 @@ describe('Tree Weaver MCP server', () => {
     expect(r.isError).toBe(true);
     expect(r.text).toContain('read-only');
     expect((await call('create_tree', { template: 'blank' })).text).toContain('"format": "tree-weaver"');
+  });
+
+  it('returns edited documents instead of writing them in read-only mode', async () => {
+    writeFileSync(join(root, 't.tree.json'), example('landing-page.tree.json'));
+    const before = readFileSync(join(root, 't.tree.json'), 'utf8');
+    const { call } = await connect(true);
+    const r = await call('patch_tree', { path: 't.tree.json', ops: [{ op: 'insert', parent: '/', node: 'section' }] });
+    expect(r.isError).toBeFalsy();
+    expect(r.text).toContain('"format": "tree-weaver"');
+    const t = await call('set_tokens', { path: 't.tree.json', tokens: [{ name: 'brand', value: '#f00' }] });
+    expect(t.isError).toBeFalsy();
+    expect(readFileSync(join(root, 't.tree.json'), 'utf8')).toBe(before);
   });
 
   // Screenshots need Playwright and a Chromium build; skip where the machine has neither.
@@ -336,6 +353,20 @@ describe('Tree Weaver MCP server', () => {
     expect(bad.isError).toBe(true);
     const both = await call('diff', { before: { path: 'home.json' }, after: { path: 'home.json' } });
     expect(both.text).toBe('No changes.');
+  });
+
+  it('keeps both of two parallel edits to one file', async () => {
+    const { call } = await connect();
+    await call('create_tree', { path: 'par.json', template: 'blank', name: 'Par' });
+    const [a, b] = await Promise.all([
+      call('patch_tree', { path: 'par.json', ops: [{ op: 'insert', parent: '/', node: 'p: from-a' }] }),
+      call('patch_tree', { path: 'par.json', ops: [{ op: 'insert', parent: '/', node: 'p: from-b' }] }),
+    ]);
+    expect(a.isError).toBeFalsy();
+    expect(b.isError).toBeFalsy();
+    const text = readFileSync(join(root, 'par.json'), 'utf8');
+    expect(text).toContain('from-a');
+    expect(text).toContain('from-b');
   });
 });
 

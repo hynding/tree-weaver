@@ -2,6 +2,7 @@ import { cloneNode, createId } from './create';
 import { DISPLAY_IDS, getDisplay, resolveStyles } from './displays';
 import type { Branch, DisplayId, DisplayStyles, Forest, StyleMap, Tree, TreeNode } from './model';
 import { isBranch } from './model';
+import { isSvgOnly } from './svg';
 
 /**
  * Reusable components: a branch saved once in the forest, with props and variants, and used
@@ -113,7 +114,7 @@ export function componentProps(def: ComponentDef): ComponentProp[] {
 
 /** Fill `{{name}}` placeholders. Unknown names become empty. */
 export function fillPlaceholders(value: string, values: Record<string, string>): string {
-  return value.replace(PLACEHOLDER, (_m, name: string) => values[name] ?? '');
+  return value.replace(PLACEHOLDER, (_m, name: string) => (Object.hasOwn(values, name) ? values[name] : '') ?? '');
 }
 
 const truthy = (v: string | undefined) => !!v && v !== 'false' && v !== '0';
@@ -181,7 +182,8 @@ export function expandComponent(def: ComponentDef, instance: ComponentInstance, 
     const cond = node.attrs[IF_ATTR]?.trim();
     if (cond && !isRoot) {
       const negate = cond.startsWith('!');
-      const on = truthy(values[cond.replace(/^!/, '')]);
+      const prop = cond.replace(/^!/, '');
+      const on = Object.hasOwn(values, prop) && truthy(values[prop]);
       if (negate ? on : !on) return null;
     }
     const attrs: Record<string, string> = {};
@@ -293,7 +295,14 @@ export function saveComponent(forest: Forest, treeId: string, branchId: string, 
   };
   replace(tree.root, (b) => ((found = b), b));
   if (!found) return null;
-  const component = createComponent(name, found, init);
+  let component = createComponent(name, found, init);
+  if (found.id !== tree.root.id) {
+    // The instance keeps the branch's id, so the template's root takes a new one: ids stay unique
+    // across the forest. Variant styles keyed by the old id follow it.
+    const rootId = createId('b');
+    const rekey = (styles: ComponentVariant['styles']) => Object.fromEntries(Object.entries(styles).map(([id, st]) => [id === found!.id ? rootId : id, st]));
+    component = { ...component, root: { ...component.root, id: rootId }, variants: component.variants.map((v) => ({ ...v, styles: rekey(v.styles) })) };
+  }
   let next: Forest = { ...forest, components: [...(forest.components ?? []), component] };
   if (found.id !== tree.root.id) {
     const root = replace(tree.root, () => ({ ...instantiateComponent(component), id: branchId })) as Branch;
@@ -325,16 +334,44 @@ function withVariant(def: ComponentDef, variantName: string | null | undefined):
   return visit(def.root) as Branch;
 }
 
+/** A template that only works inside an SVG: SVG-only itself, or (an `<a>`, a `<title>`) holding SVG-only content. */
+function drawsInSvg(root: Branch): boolean {
+  let svg = false;
+  const visit = (n: TreeNode): void => {
+    if (svg) return;
+    if (isSvgOnly(n)) svg = true;
+    else if (isBranch(n) && n.tag !== 'foreignObject') n.children.forEach(visit);
+  };
+  visit(root);
+  return svg;
+}
+
+/** Whether an instance of the component sits inside an SVG, in a tree or in an SVG component's template. */
+function usedInSvg(forest: Forest, componentId: string): boolean {
+  const visit = (node: TreeNode, inSvg: boolean): boolean => {
+    if (!isBranch(node)) return false;
+    if (node.instance?.component === componentId && inSvg) return true;
+    const inner = node.tag === 'foreignObject' ? false : inSvg || node.tag === 'svg';
+    return node.children.some((c) => visit(c, inner));
+  };
+  return (
+    forest.trees.some((t) => visit(t.root, false)) ||
+    (forest.components ?? []).some((c) => c.id !== componentId && drawsInSvg(c.root) && visit(c.root, true))
+  );
+}
+
 /**
  * A component's template as a tree, so the editor can open it like any other: a `<body>`
  * holding the template, with `variant`'s styles laid over when one is given.
  */
-export function componentAsTree(def: ComponentDef, variant?: string | null): Tree {
+export function componentAsTree(def: ComponentDef, variant?: string | null, forest?: Forest): Tree {
   const ts = new Date(0).toISOString();
   return {
     id: componentTreeId(def.id),
     name: def.name,
-    root: { kind: 'branch', id: `${BODY_PREFIX}${def.id}`, tag: 'body', type: 'root', name: def.name, classes: [], attrs: {}, styles: {}, children: [withVariant(def, variant)] },
+    // An SVG-only template (a `<g>`, a shape group), or one with an instance inside an SVG, is
+    // edited inside an `<svg>`, so it is drawn and the SVG placement rules apply to it.
+    root: { kind: 'branch', id: `${BODY_PREFIX}${def.id}`, tag: drawsInSvg(def.root) || (forest && usedInSvg(forest, def.id)) ? 'svg' : 'body', type: 'root', name: def.name, classes: [], attrs: {}, styles: {}, children: [withVariant(def, variant)] },
     createdAt: ts,
     updatedAt: ts,
   };
@@ -344,7 +381,7 @@ export function componentAsTree(def: ComponentDef, variant?: string | null): Tre
 export function findTree(forest: Forest, treeId: string, variant?: string | null): Tree | undefined {
   if (isComponentTreeId(treeId)) {
     const def = forest.components?.find((c) => componentTreeId(c.id) === treeId);
-    return def ? componentAsTree(def, variant) : undefined;
+    return def ? componentAsTree(def, variant, forest) : undefined;
   }
   return forest.trees.find((t) => t.id === treeId);
 }
@@ -370,14 +407,19 @@ function stylesDiff(before: DisplayStyles, after: DisplayStyles): DisplayStyles 
 export function updateComponentTree(forest: Forest, treeId: string, fn: (root: Branch) => Branch, variant?: string | null): Forest {
   const def = forest.components?.find((c) => componentTreeId(c.id) === treeId);
   if (!def) return forest;
-  const tree = componentAsTree(def, variant);
+  const tree = componentAsTree(def, variant, forest);
   const nextBody = fn(tree.root);
   if (nextBody === tree.root) return forest;
   const kids = nextBody.children;
   // The body must hold exactly the template; anything else is wrapped into it.
   let nextRoot: Branch;
+  const rootAt = kids.findIndex((k) => isBranch(k) && k.id === def.root.id);
   if (kids.length === 1 && isBranch(kids[0])) nextRoot = kids[0];
-  else nextRoot = { ...def.root, children: kids };
+  else if (rootAt >= 0) {
+    // Something added beside the template root goes inside it, before or after what it holds.
+    const r = kids[rootAt] as Branch;
+    nextRoot = { ...r, children: [...kids.slice(0, rootAt), ...r.children, ...kids.slice(rootAt + 1)] };
+  } else nextRoot = { ...def.root, children: kids };
   const v = variant ? def.variants.find((x) => x.name === variant) : undefined;
   let next: ComponentDef;
   if (v) {
@@ -436,7 +478,7 @@ function capturePropDefaults(before: ComponentDef, after: ComponentDef): Compone
     if (old === undefined || placeholdersIn(old).length) return;
     const names = placeholdersIn(value);
     // Only a whole-value placeholder can take the old value as its default.
-    if (names.length !== 1 || value.trim() !== `{{${names[0]}}}` || known.has(names[0]) || props.some((p) => p.name === names[0])) return;
+    if (names.length !== 1 || !new RegExp(`^\\{\\{\\s*${names[0]}\\s*\\}\\}$`).test(value.trim()) || known.has(names[0]) || props.some((p) => p.name === names[0])) return;
     const inferred = templateProps(after.root).find((p) => p.name === names[0]);
     props.push({ name: names[0], type: inferred?.type ?? 'text', default: old });
   };

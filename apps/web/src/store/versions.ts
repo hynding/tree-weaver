@@ -48,6 +48,11 @@ export function initVersions(): void {
 export async function saveVersion(name: string, opts: { source?: ChangeSource; auto?: boolean } = {}): Promise<ForestVersion | null> {
   const forest = state.forest;
   if (!forest) return null;
+  return saveForestVersion(forest, name, opts);
+}
+
+/** Save a forest (open or not) as a version of itself. */
+export async function saveForestVersion(forest: Forest, name: string, opts: { source?: ChangeSource; auto?: boolean } = {}): Promise<ForestVersion | null> {
   const version: ForestVersion = {
     id: createId('v'),
     forestId: forest.id,

@@ -3,7 +3,8 @@ import { createRecordStore, type RecordStore } from '@tree-weaver/storage';
 import { WebrtcProvider } from 'y-webrtc';
 import { COLLAB_ENABLED, COLLAB_ICE_SERVERS, COLLAB_SIGNALING } from '../config';
 import { diffForests, isEditableKit, type Forest } from '@tree-weaver/core';
-import { commit, openDocument, setHistoryOverride, toast, withCurrentBreakpoints } from './actions';
+import { commit, loadStoredForest, openDocument, saveNow, setHistoryOverride, toast, withCurrentBreakpoints } from './actions';
+import { saveForestVersion } from './versions';
 import { onChange, state, type CollabPeer } from './editor';
 import { isEmbedded } from './embed-flags';
 
@@ -32,6 +33,8 @@ interface Session {
   /** The forest the document showed when this editor last read or wrote it. */
   synced: Forest | null;
   stop: (() => void)[];
+  /** True while joining opens the room's forest. */
+  opening?: boolean;
 }
 
 let session: Session | null = null;
@@ -129,7 +132,7 @@ function readPeers(): void {
     const color = Math.trunc(Number(u.color));
     peers.push({
       id,
-      name: String(u.name ?? 'Someone').slice(0, 40),
+      name: (typeof u.name === 'string' ? u.name : 'Someone').slice(0, 40),
       color: Number.isFinite(color) ? ((color % COLORS) + COLORS) % COLORS : 0,
       selectedId: typeof u.selectedId === 'string' ? u.selectedId : null,
       treeId: typeof u.treeId === 'string' ? u.treeId : '',
@@ -148,8 +151,15 @@ function syncFlags(): void {
 function pull(origin: unknown): void {
   const s = session;
   if (!s) return;
-  pruneStrays(s.doc, PRUNE_ORIGIN);
-  const read = readForest(s.doc);
+  let read: Forest | null;
+  try {
+    pruneStrays(s.doc, PRUNE_ORIGIN);
+    read = readForest(s.doc);
+  } catch (err) {
+    // A peer's change this can't read: keep what is open rather than fail on every update.
+    console.warn('Could not read the shared forest', err);
+    return;
+  }
   if (!read) return;
   // Kit CSS generated from rules follows this browser's breakpoints; it is never shared (see `sharable`).
   const next = withCurrentBreakpoints(read);
@@ -239,12 +249,44 @@ function connect(room: CollabRoom, doc: Y.Doc, synced: Forest | null): Session {
 }
 
 async function openShared(s: Session): Promise<void> {
-  const read = readForest(s.doc);
-  if (!read) return;
-  const forest = withCurrentBreakpoints(read);
-  s.synced = forest;
-  state.collabStatus = 'live';
-  await openDocument({ kind: 'forest', forest });
+  if (s.opening) return;
+  s.opening = true;
+  try {
+    // Save local edits first, while still joining (remote updates wait meanwhile), so that what
+    // the room holds is read and opened in one go, after the last await.
+    while (state.saveState !== 'saved' && state.forest) {
+      if (!(await saveNow())) {
+        // The open forest couldn't be saved, so it stays open; sharing it would mix the two forests.
+        if (session === s) stopSharing('Could not join: the open forest’s changes could not be saved');
+        return;
+      }
+    }
+    if (session !== s) return;
+    const read = readForest(s.doc);
+    if (!read) return;
+    const forest = withCurrentBreakpoints(read);
+    // This device may already hold the forest (an earlier join, edits made after leaving, or the
+    // same file imported): keep that copy as a version before the room's replaces it.
+    const local = state.forest?.id === forest.id ? state.forest : await loadStoredForest(forest.id);
+    if (session !== s) return;
+    if (local && !diffForests(local, forest).empty) await saveForestVersion(local, 'Before joining the shared forest', { source: 'collab', auto: true });
+    if (session !== s) return;
+    const latest = readForest(s.doc);
+    if (!latest) return;
+    const current = withCurrentBreakpoints(latest);
+    s.synced = current;
+    state.collabStatus = 'live';
+    // Everything is saved, so this opens the forest without waiting.
+    await openDocument({ kind: 'forest', forest: current });
+    finishJoin(s, current);
+  } catch (err) {
+    if (session === s) stopSharing(`Could not join: ${(err as Error).message}`);
+  } finally {
+    s.opening = false;
+  }
+}
+
+function finishJoin(s: Session, forest: Forest): void {
   installHistory(s);
   // The "waiting" dialog has done its job.
   if (state.dialog === 'share') state.dialog = null;
