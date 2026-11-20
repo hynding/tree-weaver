@@ -1226,10 +1226,16 @@ async function cmdLink(cli: Cli, args: string[]): Promise<number> {
 const when = (iso: string) => iso.replace('T', ' ').replace(/\.\d+Z$/, 'Z');
 
 async function cmdVersions(cli: Cli, args: string[]): Promise<number> {
-  const { values, positionals } = parse(args, {
-    name: { type: 'string', short: 'n' },
-    from: { type: 'string', short: 'F' },
-  });
+  // `-1`, `-2`… name versions from the newest; keep them from being read as options.
+  const NEG = '\u0000';
+  const { values, positionals: raw } = parse(
+    args.map((a) => (/^-\d+$/.test(a) ? `${NEG}${a}` : a)),
+    {
+      name: { type: 'string', short: 'n' },
+      from: { type: 'string', short: 'F' },
+    },
+  );
+  const positionals = raw.map((p) => (p.startsWith(NEG) ? p.slice(1) : p));
   const [file, action = 'list', ref, ref2, ...rest] = positionals;
   if (!file || file === '-') throw new UsageError('versions needs a file');
   if (rest.length) throw new UsageError(`Unexpected "${rest[0]}"`);

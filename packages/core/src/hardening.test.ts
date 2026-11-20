@@ -132,3 +132,23 @@ describe('pass 3 fixes', () => {
     expect(forest.components![0].props).toEqual([{ name: 'message', type: 'text', default: 'Hello' }]);
   });
 });
+
+describe('pass 4 fixes', () => {
+  it('drops CSS values with unclosed brackets', async () => {
+    const { sanitizeTokenValue } = await import('./index');
+    expect(sanitizeCssValue('calc(100% - 10px')).toBe('');
+    expect(sanitizeCssValue('calc(100% - 10px)')).toBe('calc(100% - 10px)');
+    expect(sanitizeCssValue('[full-start] 1fr [full-end]')).toBe('[full-start] 1fr [full-end]');
+    expect(sanitizeCssValue('"(" no-repeat')).toBe('"(" no-repeat');
+    expect(sanitizeTokenValue('var(--x')).toBe('');
+  });
+
+  it('checks a tag change against the parent and the whole subtree', async () => {
+    const { createShape } = await import('./index');
+    const g = createBranch({ tag: 'g' });
+    const svg = createBranch({ tag: 'svg', children: [g, createBranch({ tag: 'a', children: [createShape('rect')] })] });
+    const root = createBranch({ tag: 'body', children: [svg] });
+    expect(() => applyPatch(root, [{ op: 'update', target: g.id, tag: 'p' }])).toThrow(/can't be drawn inside an SVG/);
+    expect(() => applyPatch(root, [{ op: 'update', target: svg.id, tag: 'div' }])).toThrow(/needs an SVG/);
+  });
+});

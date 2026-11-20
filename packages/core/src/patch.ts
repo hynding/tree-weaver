@@ -353,12 +353,20 @@ export function applyPatch(root: Branch, ops: unknown, options: PatchOptions = {
             throw new Error(`<${next.tag}> can't hold children, and this branch has ${node.children.length}`);
           check(isBranch(next) ? { ...next, children: [] } : next, `ops[${i}]`, findParent(current, node.id)?.parent.id ?? null);
           const updated = updateNode(current, node.id, () => next);
-          // A new tag must still suit the children it holds (SVG shapes need an SVG around them, HTML can't go in one).
+          // A new tag must suit its parent and everything it holds (SVG shapes need an SVG around
+          // them, HTML can't go in one), checked again for the whole subtree in its new context.
           if (isBranch(next) && isBranch(node) && next.tag !== node.tag) {
-            for (const child of node.children) {
-              const problem = placementProblem(updated, node.id, child);
-              if (problem) throw new Error(`Can't change the tag to <${next.tag}>: ${problem}`);
-            }
+            const parentId = findParent(current, node.id)?.parent.id;
+            const own = parentId ? placementProblem(updated, parentId, next) : null;
+            if (own) throw new Error(`Can't change the tag to <${next.tag}>: ${own}`);
+            const visit = (b: Branch) => {
+              for (const child of b.children) {
+                const problem = placementProblem(updated, b.id, child);
+                if (problem) throw new Error(`Can't change the tag to <${next.tag}>: ${problem}`);
+                if (isBranch(child)) visit(child);
+              }
+            };
+            visit(next);
           }
           current = updated;
           changed.push({ op: i, kind, id: node.id });

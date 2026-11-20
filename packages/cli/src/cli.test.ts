@@ -623,3 +623,13 @@ describe('stdout output and argument checks', () => {
     expect(root.children.at(-1).id).toBe(JSON.parse(end.out).id);
   });
 });
+
+describe('versions counted from the newest', () => {
+  it('accepts -1 as a version', async () => {
+    const made = await cli(['new', 'home.tree.json', '--template', 'landing']);
+    const added = await cli(['add', 'home.tree.json', 'section'], made.files);
+    const r = await cli(['versions', 'home.tree.json', 'diff', '-1'], added.files);
+    expect(r.err).not.toContain('Unknown option');
+    expect(r.code).toBe(0);
+  });
+});

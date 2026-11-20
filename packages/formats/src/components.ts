@@ -431,6 +431,12 @@ const JSX_ATTRS: Record<string, string> = {
   'xml:lang': 'xmlLang',
 };
 
+/** HTML attributes that are on when present; any other empty attribute is written as `=""` in JSX. */
+const BOOLEAN_ATTRS = new Set([
+  'allowfullscreen', 'async', 'autofocus', 'autoplay', 'checked', 'controls', 'default', 'defer', 'disabled', 'formnovalidate', 'hidden', 'inert',
+  'ismap', 'itemscope', 'loop', 'multiple', 'muted', 'nomodule', 'novalidate', 'open', 'playsinline', 'readonly', 'required', 'reversed', 'selected',
+]);
+
 /** An attribute name as React expects it. */
 export function jsxAttrName(name: string): string {
   const lower = name.toLowerCase();
@@ -472,18 +478,24 @@ function writeJsx(el: El, depth: number, props = false): string {
         .map((s) => (s.lit ? writeJsx({ kind: 'text', value: s.lit }, depth) : '') + (s.prop ? `{${s.prop}}` : ''))
         .join('');
     // Plain text is fine unless it holds JSX syntax characters; then use a string expression.
-    return /[{}<>]/.test(el.value) || /^\s|\s$/.test(el.value) ? `{${jsxString(el.value)}}` : el.value.replace(/&/g, '&amp;');
+    // Line breaks too: JSX text collapses them (and the indentation around them).
+    return /[{}<>\n\r]/.test(el.value) || /^\s|\s$/.test(el.value) ? `{${jsxString(el.value)}}` : el.value.replace(/&/g, '&amp;');
   }
   if (props && el.cond) {
     const { cond, ...rest } = el;
     return `{${cond.negate ? '!' : ''}${cond.prop} && (${writeJsx(rest, depth, props)})}`;
   }
   const attrs = el.attrs
+    // A `.` in a name is fine in HTML but not in JSX.
+    .filter(([n]) => !n.includes('.'))
     .map(([n, v]) => {
-      const name = jsxAttrName(n);
+      // Without onChange, React makes `value`/`checked` read-only; the default* props keep fields editable.
+      const formField = (el.tag === 'input' || el.tag === 'textarea' || el.tag === 'select') && (n === 'value' || n === 'checked');
+      const name = formField ? (n === 'value' ? 'defaultValue' : 'defaultChecked') : jsxAttrName(n);
       if (props && n === 'class' && el.variantClass) return ` ${name}={${templateLiteral(v, variantSuffix)}}`;
       if (props && hasProps(v)) return ` ${name}={${propExpr(v)}}`;
-      if (v === '' && !el.svg && n !== 'alt' && n !== 'class') return ` ${name}`;
+      // A bare JSX attribute means `true`, which only a boolean attribute should get.
+      if (v === '' && !el.svg && BOOLEAN_ATTRS.has(n.toLowerCase())) return ` ${name}`;
       return /["\\{}<>\n]/.test(v) ? ` ${name}={${jsxString(v)}}` : ` ${name}="${v.replace(/&/g, '&amp;')}"`;
     })
     .join('');

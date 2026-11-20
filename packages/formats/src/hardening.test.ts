@@ -106,3 +106,32 @@ describe('pass 3 fixes', () => {
     expect((p.children[0] as { value: string }).value).toBe('mail me at foo@bar.com today');
   });
 });
+
+describe('pass 4 fixes', () => {
+  const jsxOf = (children: Branch['children']) => exportComponent(page(children), { framework: 'react' }).files[0].contents;
+
+  it('writes empty non-boolean attributes as "" in JSX', () => {
+    const jsx = jsxOf([createBranch({ tag: 'div', attrs: { 'data-state': '', 'aria-label': '' }, children: [createBranch({ tag: 'input', attrs: { disabled: '' } })] })]);
+    expect(jsx).toContain('data-state=""');
+    expect(jsx).toContain('aria-label=""');
+    expect(jsx).toMatch(/<input disabled \/>/);
+  });
+
+  it('keeps line breaks in JSX text', () => {
+    const jsx = jsxOf([createBranch({ tag: 'pre', children: [text('a\n  b')] })]);
+    expect(jsx).toContain('{"a\\n  b"}');
+  });
+
+  it('drops attribute names JSX cannot hold and keeps form fields editable', () => {
+    const jsx = jsxOf([createBranch({ tag: 'input', attrs: { 'data-foo.bar': '1', value: 'x', type: 'checkbox', checked: '' } })]);
+    expect(jsx).not.toContain('data-foo.bar');
+    expect(jsx).toContain('defaultValue="x"');
+    expect(jsx).toContain('defaultChecked');
+  });
+
+  it('keeps SVG tree names through a round trip', () => {
+    const back = importDocument(exportTree(createTree('Header /* draft */', createBranch({ tag: 'svg', type: 'root' })), 'svg'), 'svg');
+    if (back.kind !== 'tree') throw new Error('expected a tree');
+    expect(back.tree.name).toBe('Header /* draft */');
+  });
+});

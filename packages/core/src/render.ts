@@ -56,10 +56,33 @@ export function untilStable(value: string, fn: (v: string) => string): string {
   return out;
 }
 
+/**
+ * Whether brackets balance outside quoted strings. An unclosed `(` or `[` in CSS keeps reading
+ * to the end of the stylesheet, swallowing every rule after it.
+ */
+export function bracketsBalance(value: string): boolean {
+  const stack: string[] = [];
+  let quote = '';
+  for (let i = 0; i < value.length; i++) {
+    const c = value[i];
+    if (quote) {
+      if (c === '\\') i++;
+      else if (c === quote) quote = '';
+    } else if (c === '"' || c === "'") quote = c;
+    else if (c === '(' || c === '[') stack.push(c === '(' ? ')' : ']');
+    else if (c === ')' || c === ']') {
+      if (stack.pop() !== c) return false;
+    }
+  }
+  return !stack.length && !quote;
+}
+
 /** Strip characters that could break out of a declaration or the style element. */
 export function sanitizeCssValue(value: string): string {
-  // Comment markers too: an unclosed `/*` would swallow every rule after it.
-  return untilStable(value.replace(/[{}]/g, '').replace(/;/g, ','), (v) => v.replace(/<\/?(style|script)/gi, '').replace(/\/\*|\*\//g, '')).trim();
+  // Comment markers too: an unclosed `/*` would swallow every rule after it. So would an
+  // unclosed bracket, so a value whose brackets don't balance is dropped.
+  const out = untilStable(value.replace(/[{}]/g, '').replace(/;/g, ','), (v) => v.replace(/<\/?(style|script)/gi, '').replace(/\/\*|\*\//g, '')).trim();
+  return bracketsBalance(out) ? out : '';
 }
 
 export const isSafeCssProp = (prop: string): boolean => SAFE_PROP.test(prop);
