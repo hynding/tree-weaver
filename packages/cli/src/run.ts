@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs, type ParseArgsConfig } from 'node:util';
 import {
   applyPatch,
+  idsOutside,
   saveComponent,
   findComponent,
   instantiateComponent,
@@ -852,7 +853,7 @@ async function cmdAdd(cli: Cli, args: string[]): Promise<number> {
   // The same checks as a patch: valid node, unique ids, SVG placement.
   let updated: Tree;
   try {
-    const result = applyPatch(tree.root, [{ op: 'insert', parent: parent.id, index, node }], { expandNode: (n) => n as TreeNode });
+    const result = applyPatch(tree.root, [{ op: 'insert', parent: parent.id, index, node }], { expandNode: (n) => n as TreeNode, takenIds: idsOutside(treesOf(loaded.doc), tree.id) });
     if (result.warnings.length) cli.note(formatIssues({ errors: [], warnings: result.warnings }).replace(/ops\[0\]\.node/g, 'node'));
     updated = { ...tree, root: result.root };
     node = resolveRef(result.root, result.changes[0].id).node;
@@ -893,7 +894,7 @@ async function cmdPatch(cli: Cli, args: string[]): Promise<number> {
   const tree = pickTree(cli, loaded.doc, values.tree, 'a patch edits one tree');
   let result;
   try {
-    result = applyPatch(tree.root, ops, { expandNode: (value, path) => expandShorthand(value, path) });
+    result = applyPatch(tree.root, ops, { expandNode: (value, path) => expandShorthand(value, path), takenIds: idsOutside(treesOf(loaded.doc), tree.id) });
   } catch (err) {
     if (err instanceof PatchError) throw new Error(`${err.message}\nNothing was changed.`);
     throw err;

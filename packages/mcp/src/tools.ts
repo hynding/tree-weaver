@@ -16,6 +16,7 @@ import {
   themeTokens,
   type DesignToken,
   applyPatch,
+  idsOutside,
   findVersion,
   formatDiff,
   parseVersionLog,
@@ -260,7 +261,7 @@ export class Tools {
     }
     let result;
     try {
-      result = applyPatch(tree.root, ops, { expandNode: (value, path) => expandShorthand(value, path) });
+      result = applyPatch(tree.root, ops, { expandNode: (value, path) => expandShorthand(value, path), takenIds: idsOutside(treesOf(loaded.doc), tree.id) });
     } catch (err) {
       if (err instanceof PatchError || err instanceof TreeDataError) throw new ToolError(`${err.message}\nNothing was changed.`);
       throw err;

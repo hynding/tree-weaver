@@ -65,7 +65,7 @@ export function escapeMarkdown(text: string, atLineStart = false): string {
 }
 
 // Parentheses are backslash-escaped (they come back exactly); spaces and angle brackets are percent-encoded.
-const escapeUrl = (url: string): string => url.replace(/[ <>]/g, (c) => encodeURIComponent(c)).replace(/[()]/g, '\\$&');
+const escapeUrl = (url: string): string => url.replace(/[ <>]/g, (c) => encodeURIComponent(c)).replace(/[\\()]/g, '\\$&');
 
 function inline(node: TreeNode, first: boolean): string {
   if (!isBranch(node)) {

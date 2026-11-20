@@ -179,3 +179,21 @@ describe('pass 6 fixes', () => {
     expect(branchSelector('a"b\\c')).toBe('[data-tw="a\\"b\\\\c"]');
   });
 });
+
+describe('pass 7 fixes', () => {
+  it('gives an inserted node fresh ids when another tree already uses them', async () => {
+    const { idsOutside } = await import('./index');
+    const t1 = createTree('One', createBranch({ tag: 'body', type: 'root', children: [{ ...createBranch({ tag: 'p', children: [text('hello')] }), id: 'dup' }] }));
+    const t2 = createTree('Two', createBranch({ tag: 'body', type: 'root' }));
+    const result = applyPatch(t2.root, [{ op: 'insert', node: { tag: 'h1', id: 'dup', children: ['x'] } }], { takenIds: idsOutside([t1, t2], t2.id) });
+    expect(result.root.children[0].id).not.toBe('dup');
+  });
+
+  it('checks a wrapped node again inside its new wrapper', async () => {
+    const { createShape } = await import('./index');
+    const rect = createShape('rect');
+    const root = createBranch({ tag: 'body', children: [createBranch({ tag: 'svg', children: [rect] })] });
+    expect(() => applyPatch(root, [{ op: 'wrap', target: rect.id, node: { tag: 'foreignObject' } }])).toThrow(/wrap/);
+    expect(applyPatch(root, [{ op: 'wrap', target: rect.id, node: { tag: 'g' } }]).changes).toHaveLength(1);
+  });
+});

@@ -1,4 +1,4 @@
-import { applyPatch, formatDiff, diffLines, isDisplayId, replaceTree, type Tree } from '@tree-weaver/core';
+import { applyPatch, idsOutside, formatDiff, diffLines, isDisplayId, replaceTree, type Tree } from '@tree-weaver/core';
 import { expandShorthand } from '@tree-weaver/branches';
 import { exportForest, exportTree, FORMATS, importDocument, type FormatId } from '@tree-weaver/formats';
 import type { EditorMessage, HostMessage } from '@tree-weaver/embed';
@@ -120,7 +120,7 @@ async function handle(msg: HostMessage): Promise<unknown> {
       const forest = state.forest;
       if (!forest) throw new Error('Nothing is open');
       const tree = pickTree(msg.tree);
-      const result = applyPatch(tree.root, msg.ops, { expandNode: (value, path) => expandShorthand(value, path) });
+      const result = applyPatch(tree.root, msg.ops, { expandNode: (value, path) => expandShorthand(value, path), takenIds: idsOutside(forest.trees, tree.id) });
       if (!result.changes.length) return { changes: [], warnings: result.warnings };
       await versionBefore('agent', msg.label ? `Before ${msg.label}` : 'Before an agent patch');
       const updated: Tree = { ...tree, root: result.root, updatedAt: new Date().toISOString() };

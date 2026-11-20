@@ -1,9 +1,9 @@
 import { cloneNode, createLeaf } from './create';
 import { isDisplayId } from './displays';
-import type { Branch, DisplayId, Leaf, TreeNode } from './model';
+import type { Branch, DisplayId, Leaf, Tree, TreeNode } from './model';
 import { isBranch } from './model';
 import { normalizeNode, TreeDataError } from './normalize';
-import { canHaveChildren, findNode, VOID_TAGS, findParent, insertNode, isDescendant, removeNode, setStyles, updateNode } from './ops';
+import { canHaveChildren, findNode, walk, VOID_TAGS, findParent, insertNode, isDescendant, removeNode, setStyles, updateNode } from './ops';
 import { canonicalTag, inSvgContext, placementProblem } from './svg';
 import { formatIssues, validateDocument, type ValidationIssue } from './validate';
 
@@ -70,6 +70,18 @@ export interface PatchOptions {
    * the compact shorthand and blueprints.
    */
   expandNode?: (value: unknown, path: string) => TreeNode;
+  /**
+   * Ids already used elsewhere in the forest (its other trees). Node ids are unique across
+   * a forest, so an inserted node reusing one gets fresh ids. See `idsOutside`.
+   */
+  takenIds?: ReadonlySet<string>;
+}
+
+/** Every node id in the forest's trees other than `treeId`, for `PatchOptions.takenIds`. */
+export function idsOutside(trees: readonly Tree[], treeId: string): Set<string> {
+  const ids = new Set<string>();
+  for (const tree of trees) if (tree.id !== treeId) walk(tree.root, (n) => void ids.add(n.id));
+  return ids;
 }
 
 export interface PatchChange {
@@ -208,7 +220,7 @@ export function applyPatch(root: Branch, ops: unknown, options: PatchOptions = {
     // Ids must stay unique: a node that reuses an id already in the tree gets fresh ones.
     let clash = false;
     const walkIds = (n: TreeNode) => {
-      if (findNode(current, n.id)) clash = true;
+      if (findNode(current, n.id) || options.takenIds?.has(n.id)) clash = true;
       if (isBranch(n)) n.children.forEach(walkIds);
     };
     walkIds(node);
@@ -303,11 +315,20 @@ export function applyPatch(root: Branch, ops: unknown, options: PatchOptions = {
           if (!canHaveChildren(wrapper)) throw new Error('"node" must be a branch that can hold children');
           placeable(hit.parent, wrapper);
           const wrapped: Branch = { ...wrapper, children: [...wrapper.children, node] };
-          current = updateNode(current, hit.parent.id, (p) => {
+          const next = updateNode(current, hit.parent.id, (p) => {
             const children = [...(p as Branch).children];
             children[hit.index] = wrapped;
             return { ...(p as Branch), children };
           });
+          // The wrapped node and everything in it now sit in the wrapper's context (an SVG shape
+          // wrapped in <foreignObject> would no longer be drawn), so check them there.
+          const recheck = (parent: Branch, child: TreeNode) => {
+            const problem = placementProblem(next, parent.id, child);
+            if (problem) throw new Error(`Can't wrap it in <${wrapper.tag}>: ${problem}`);
+            if (isBranch(child)) child.children.forEach((c) => recheck(child, c));
+          };
+          recheck(wrapped, node);
+          current = next;
           changed.push({ op: i, kind, id: wrapper.id });
           break;
         }

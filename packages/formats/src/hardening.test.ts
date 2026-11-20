@@ -188,3 +188,25 @@ describe('pass 6 fixes', () => {
     expect(swift).toContain('Text(verbatim: "[Reset](https://evil.example) *now*")');
   });
 });
+
+describe('pass 7 fixes', () => {
+  it('keeps backslashes before parentheses in Markdown link targets', () => {
+    const tree = page([createBranch({ tag: 'p', children: [createBranch({ tag: 'a', attrs: { href: 'C:\\dir\\(x)' }, children: [text('go')] })] })]);
+    const back = importDocument(exportTree(tree, 'markdown'), 'markdown');
+    if (back.kind !== 'tree') throw new Error('expected a tree');
+    expect(((back.tree.root.children[0] as Branch).children[0] as Branch).attrs.href).toBe('C:%5Cdir%5C(x)'); // the Markdown parser percent-encodes backslashes
+  });
+
+  it('round-trips an SVG tree name, the root without xmlns, and an unnamed root', () => {
+    const tree = createTree('My -- drawing', createBranch({ tag: 'svg', type: 'root', attrs: { viewBox: '0 0 10 10' } }));
+    const back = importDocument(exportTree(tree, 'svg'), 'svg');
+    if (back.kind !== 'tree') throw new Error('expected a tree');
+    expect(back.tree.name).toBe('My -- drawing');
+    expect(back.tree.root.attrs.xmlns).toBeUndefined();
+    expect(back.tree.root.name).toBeUndefined();
+    const withNs = createTree('N', createBranch({ tag: 'svg', type: 'root', attrs: { xmlns: 'http://www.w3.org/2000/svg' } }));
+    const back2 = importDocument(exportTree(withNs, 'svg'), 'svg');
+    if (back2.kind !== 'tree') throw new Error('expected a tree');
+    expect(back2.tree.root.attrs.xmlns).toBe('http://www.w3.org/2000/svg');
+  });
+});
