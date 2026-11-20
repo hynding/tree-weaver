@@ -23,6 +23,10 @@ const TABLE_CHILDREN: Record<string, Set<string>> = {
   colgroup: new Set(['col', 'template']),
 };
 const HEADING = /^h[1-6]$/;
+/** Elements whose content is read as text, not markup. */
+const RAW_TEXT = new Set(['textarea', 'title', 'noscript', 'template']);
+/** Obsolete raw-text elements, which also show entities as written: nothing the editor writes in them reads back. */
+const OBSOLETE_RAW = new Set(['xmp', 'plaintext', 'noembed', 'noframes']);
 
 /** Whether a start tag ends an open `<p>` (the parser closes the paragraph before it). */
 export const closesParagraph = (tag: string): boolean => CLOSES_P.has(tag.toLowerCase());
@@ -35,6 +39,9 @@ export function nestingProblem(ancestors: readonly Branch[], node: TreeNode): st
   const parent = ancestors[ancestors.length - 1];
   if (!parent) return null;
   const parentTag = parent.tag.toLowerCase();
+  // The parser reads these elements' content as text, so a branch inside shows as its markup.
+  if (OBSOLETE_RAW.has(parentTag)) return `A <${parentTag}> shows its content as raw text; use a <pre> instead`;
+  if (RAW_TEXT.has(parentTag) && isBranch(node)) return `A <${parentTag}> can only hold text; the browser would show <${node.tag}> as its markup`;
   const table = Object.hasOwn(TABLE_CHILDREN, parentTag) ? TABLE_CHILDREN[parentTag] : undefined;
   if (table) {
     if (!isBranch(node)) return node.type === 'text' && !node.value.trim() ? null : `A <${parentTag}> can only hold ${[...table].filter((t) => !['script', 'template', 'style'].includes(t)).map((t) => `<${t}>`).join(', ')}; the browser would move this out in front of the table`;

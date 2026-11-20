@@ -2,6 +2,7 @@ import { getBlueprint, getStarter, getTemplate } from '@tree-weaver/branches';
 import {
   addTableColumn,
   BASE_DISPLAY,
+  cssOverlaps,
   applyDisplaySettings,
   changedDisplaySettings,
   cleanDisplaySettings,
@@ -1036,7 +1037,7 @@ function withLastCustomKit(forest: Forest, styles: StyleRule['styles'] = {}): { 
   // these properties for a narrower display would now come after the moved base styles.
   const props = new Set(Object.values(styles).flatMap((map) => Object.keys(map ?? {})));
   const clashes = (kit: DesignKit) =>
-    (kit.rules ?? []).some((r) => Object.entries(r.styles).some(([d, map]) => d !== BASE_DISPLAY && Object.keys(map ?? {}).some((p) => [...props].some((q) => p === q || p.startsWith(`${q}-`) || q.startsWith(`${p}-`)))));
+    (kit.rules ?? []).some((r) => Object.entries(r.styles).some(([d, map]) => d !== BASE_DISPLAY && Object.keys(map ?? {}).some((p) => [...props].some((q) => p === q || cssOverlaps(p, q)))));
   for (let i = kits.length - 1; i >= 0; i--) {
     // A kit that is turned off neither shows the rule nor overrides it.
     if (!kits[i].enabled) continue;

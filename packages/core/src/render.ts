@@ -24,6 +24,17 @@ export const INLINE_TAGS = new Set([
   'kbd', 'label', 'mark', 'q', 's', 'samp', 'select', 'small', 'span', 'strong', 'sub', 'sup', 'textarea', 'time', 'u', 'var', 'wbr',
 ]);
 
+/** Elements that sit in a line of text by default, beyond the phrasing tags above. */
+const MORE_INLINE = new Set([
+  'audio', 'canvas', 'iframe', 'math', 'meter', 'object', 'output', 'picture', 'progress', 'ruby', 'slot', 'svg', 'tspan', 'textpath', 'video',
+]);
+
+/** Whether an element is inline by default: a phrasing tag, one like `<svg>` or `<progress>`, or a custom element (`my-badge`). */
+export const isInlineByDefault = (tag: string): boolean => {
+  const t = tag.toLowerCase();
+  return INLINE_TAGS.has(t) || MORE_INLINE.has(t) || t.includes('-');
+};
+
 export function escapeHtml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
@@ -252,7 +263,7 @@ export function hasInlineDisplay(node: Branch): boolean {
 }
 
 /** Whether a child keeps its parent's content on one line when pretty printed. */
-const isInline = (node: TreeNode): boolean => (isBranch(node) ? INLINE_TAGS.has(node.tag) : node.type !== 'shape');
+const isInline = (node: TreeNode): boolean => (isBranch(node) ? isInlineByDefault(node.tag) : node.type !== 'shape');
 
 export function renderNodeHtml(node: TreeNode, opts: HtmlOptions = {}, depth = 0): string {
   if (!isBranch(node)) return renderLeaf(node, opts);

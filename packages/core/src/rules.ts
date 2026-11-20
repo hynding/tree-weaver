@@ -1,3 +1,4 @@
+import { cssOverlaps } from './longhands';
 import { createId } from './create';
 import { declarationList, parseCss, type CssNode } from './css';
 import { DISPLAY_IDS, displayForMedia } from './displays';
@@ -111,7 +112,8 @@ export function parseRulesCss(css: string, previous: StyleRule[] = []): ParsedRu
     const list = entries.map(([prop]) => prop);
     const props = new Set(list);
     if (props.size < list.length) note(`a property given twice in ${sel}`);
-    const overlaps = (other: Set<string>) => [...props].some((p) => other.has(p));
+    // A shorthand and its longhands clash too (`padding` and `padding-left`).
+    const overlaps = (other: Set<string>) => [...props].some((p) => other.has(p) || [...other].some((o) => cssOverlaps(p, o)));
     let last = -1;
     seen.forEach((r, i) => {
       if (r.selector === sel && r.display === display) last = i;

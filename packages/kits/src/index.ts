@@ -1,4 +1,4 @@
-import { createKit, isStylesheetUrl, parseCss, type CssNode, type DesignKit } from '@tree-weaver/core';
+import { createKit, isStylesheetUrl, parseCss, rootTokens, type CssNode, type DesignKit } from '@tree-weaver/core';
 
 export interface KitToken {
   name: string;
@@ -24,7 +24,6 @@ const IMPORT_URL = /^(?:url\(\s*)?["']?([^"')\s]+)["']?\s*\)?/;
 /** List what a design kit offers: classes, tokens, imports and breakpoints. */
 export function analyzeKit(css: string): KitAnalysis {
   const classes = new Set<string>();
-  const tokens = new Map<string, string>();
   const imports: string[] = [];
   const media = new Set<string>();
   let ruleCount = 0;
@@ -36,7 +35,6 @@ export function analyzeKit(css: string): KitAnalysis {
         // Ignore attribute selectors and strings so `[href$=".pdf"]` doesn't yield a class.
         const selector = node.selector.replace(/\[[^\]]*\]/g, '').replace(/(["'])(?:\\.|(?!\1).)*\1/g, '');
         for (const m of selector.matchAll(CLASS)) classes.add(m[1].replace(/\\/g, ''));
-        for (const [prop, value] of Object.entries(node.declarations)) if (prop.startsWith('--')) tokens.set(prop, value);
       } else {
         if (node.name === 'import') {
           const m = IMPORT_URL.exec(node.prelude);
@@ -51,7 +49,9 @@ export function analyzeKit(css: string): KitAnalysis {
 
   return {
     classes: [...classes].sort((a, b) => a.localeCompare(b)),
-    tokens: [...tokens].map(([name, value]) => ({ name, value })),
+    // The kit's tokens as the exports read them: set on :root or html, outside media queries (a
+    // dark-mode override or a component's own custom property isn't the token's value).
+    tokens: rootTokens(css),
     imports,
     media: [...media],
     ruleCount,

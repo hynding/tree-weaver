@@ -1177,3 +1177,27 @@ describe('pass 33 fixes', () => {
     expect(cls({ padding: '1rem', 'padding-top': '2rem' })).not.toContain('[&&]');
   });
 });
+
+describe('pass 34 fixes', () => {
+  it('keeps inline svg, custom elements and tspans on one line when pretty printing', () => {
+    const icon = () => createBranch({ tag: 'svg', attrs: { width: '16', height: '16' } });
+    const tree = page([createBranch({ tag: 'div', children: [icon(), icon()] }), createBranch({ tag: 'div', children: [createBranch({ tag: 'my-a', children: [text('A')] }), createBranch({ tag: 'my-a', children: [text('B')] })] })]);
+    const html = exportTree(tree, 'html');
+    expect(html).toMatch(/<\/svg><svg/);
+    expect(html).toMatch(/A<\/my-a><my-a/);
+  });
+
+  it('keeps the spaces around an inline svg in a Markdown paragraph', () => {
+    const tree = page([createBranch({ tag: 'p', children: [createBranch({ tag: 'my-stars', children: [text('5')] }), text(' stars')] })]);
+    const back = importDocument(exportTree(tree, 'markdown'), 'markdown');
+    const root = back.kind === 'tree' ? back.tree.root : back.forest.trees[0].root;
+    expect(JSON.stringify(root)).toContain('" stars"');
+  });
+
+  it('lists only :root tokens outside media queries in the kit manifest', async () => {
+    const { kitManifest } = await import('@tree-weaver/kits');
+    const { createKit: kit } = await import('@tree-weaver/core');
+    const m = kitManifest([kit('K', ':root{--text:#111} @media (prefers-color-scheme: dark){:root{--text:#eee}} .card{--pad:8px}')]);
+    expect(m.tokens).toEqual([{ name: '--text', value: '#111' }]);
+  });
+});

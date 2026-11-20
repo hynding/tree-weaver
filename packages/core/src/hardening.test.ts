@@ -563,3 +563,19 @@ describe('pass 32 fixes', () => {
     expect((out.children.find((c) => 'tag' in c && c.tag === 'button') as Branch).attrs.disabled).toBeUndefined();
   });
 });
+
+describe('pass 34 fixes', () => {
+  it('notes a longhand rule that a converted kit would move past a media query', async () => {
+    const { parseRulesCss } = await import('./index');
+    const parsed = parseRulesCss('.btn { padding: 8px; }\n@media (max-width: 1024px) { .btn { padding: 4px; } }\n.btn-wide { padding-left: 24px; }');
+    expect(parsed.reordered.join(' ')).toContain('.btn-wide');
+  });
+
+  it('refuses branches inside raw-text elements', async () => {
+    const { insertionProblem } = await import('./index');
+    const area = createBranch({ tag: 'textarea' });
+    const root = createBranch({ tag: 'body', type: 'root', children: [area] });
+    expect(insertionProblem(root, area.id, createBranch({ tag: 'b' }))).toMatch(/only hold text/);
+    expect(insertionProblem(root, area.id, text('ok'))).toBeNull();
+  });
+});

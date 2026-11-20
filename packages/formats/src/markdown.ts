@@ -1,5 +1,5 @@
+import { isInlineTag } from './inline';
 import {
-  INLINE_TAGS,
   isBranch,
   isSafeAttr,
   isSvgRoot,
@@ -55,7 +55,8 @@ function metaOf(b: Branch, allowedAttrs: Set<string> = new Set()): Record<string
 }
 
 // A shape leaf is drawn inside an SVG, never inline text.
-const isInlineNode = (n: TreeNode): boolean => (isBranch(n) ? INLINE_TAGS.has(n.tag) : n.type !== 'shape');
+// So is `<svg>`, `<progress>` or a custom element: they sit in the line, spaces around them kept.
+const isInlineNode = (n: TreeNode): boolean => (isBranch(n) ? isInlineTag(n.tag) : n.type !== 'shape');
 
 export function escapeMarkdown(text: string, atLineStart = false): string {
   // Brackets and angle brackets as entities: a backslash escape can be taken apart (a link that
