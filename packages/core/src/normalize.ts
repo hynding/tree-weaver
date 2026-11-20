@@ -46,7 +46,8 @@ function normalizeStyles(value: unknown): DisplayStyles {
 }
 
 function normalizeClasses(value: unknown): string[] {
-  const list = Array.isArray(value) ? value.map((v) => str(v)) : typeof value === 'string' ? value.split(/\s+/) : [];
+  // A class can't hold whitespace (`class="a b"` is two classes), so entries are split on it.
+  const list = Array.isArray(value) ? value.flatMap((v) => str(v).split(/\s+/)) : typeof value === 'string' ? value.split(/\s+/) : [];
   return [...new Set(list.map((c) => c.trim()).filter(Boolean))];
 }
 

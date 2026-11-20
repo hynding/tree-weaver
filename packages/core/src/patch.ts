@@ -209,7 +209,7 @@ export function applyPatch(root: Branch, ops: unknown, options: PatchOptions = {
     if (!result.valid) throw new Error(`the node has errors:\n${formatIssues({ errors: result.errors.map(rename), warnings: [] })}`);
     warnings.push(...result.warnings.map(rename));
   };
-  const makeNode = (value: unknown, at: string, parentId: string | null): TreeNode => {
+  const makeNode = (value: unknown, at: string, parentId: string | null, asRoot = false): TreeNode => {
     if (value === undefined) throw new Error('"node" is missing');
     let node: TreeNode;
     try {
@@ -217,14 +217,28 @@ export function applyPatch(root: Branch, ops: unknown, options: PatchOptions = {
     } catch (err) {
       throw new Error(err instanceof TreeDataError ? err.message : (err as Error).message);
     }
-    // Ids must stay unique: a node that reuses an id already in the tree gets fresh ones.
+    // A new root keeps the tree's root id, tag and type, so its children are checked where they will live.
+    if (asRoot) {
+      if (!isBranch(node)) throw new Error('The root must stay a branch');
+      node = { ...node, id: current.id, tag: current.tag, type: current.type ?? node.type };
+    }
+    // Ids must stay unique: a node that reuses an id already in the tree (or the forest) gets fresh ones.
     let clash = false;
     const walkIds = (n: TreeNode) => {
       if (findNode(current, n.id) || options.takenIds?.has(n.id)) clash = true;
       if (isBranch(n)) n.children.forEach(walkIds);
     };
-    walkIds(node);
-    if (clash) node = cloneNode(node, true);
+    if (asRoot && isBranch(node)) {
+      const children = node.children.map((c) => {
+        clash = false;
+        walkIds(c);
+        return clash ? cloneNode(c, true) : c;
+      });
+      node = { ...node, children };
+    } else {
+      walkIds(node);
+      if (clash) node = cloneNode(node, true);
+    }
     check(node, at, parentId);
     return node;
   };
@@ -236,6 +250,38 @@ export function applyPatch(root: Branch, ops: unknown, options: PatchOptions = {
   const placeable = (parent: Branch, node: TreeNode) => {
     const problem = placementProblem(current, parent.id, node);
     if (problem) throw new Error(problem);
+  };
+  /** Check everything inside `node` where it now sits in `tree` (an <a> or <title> works in HTML and SVG alike, so what it holds must be checked too). */
+  const placedInside = (tree: Branch, node: TreeNode, prefix = '') => {
+    const visit = (parent: Branch) => {
+      for (const child of parent.children) {
+        const problem = placementProblem(tree, parent.id, child);
+        if (problem) throw new Error(`${prefix}${problem}`);
+        if (isBranch(child)) visit(child);
+      }
+    };
+    if (isBranch(node)) visit(node);
+  };
+  /**
+   * An instance's children (and its own tag, classes, styles and attributes) are its component's
+   * template, expanded again on every load, so an edit there would be silently undone.
+   */
+  const instanceRole = (id: string): 'root' | 'inside' | null => {
+    let role: 'root' | 'inside' | null = null;
+    const visit = (n: TreeNode, inInstance: boolean): boolean => {
+      if (n.id === id) {
+        role = inInstance ? 'inside' : isBranch(n) && n.instance ? 'root' : null;
+        return true;
+      }
+      return isBranch(n) && n.children.some((c) => visit(c, inInstance || !!n.instance));
+    };
+    visit(current, false);
+    return role;
+  };
+  const INSTANCE_EDIT = 'is part of a component instance, whose content comes from the component; edit the component, or detach the instance first';
+  const notInInstance = (id: string, path: string, allowRoot: boolean) => {
+    const role = instanceRole(id);
+    if (role === 'inside' || (role === 'root' && !allowRoot)) throw new Error(`${path} ${INSTANCE_EDIT}`);
   };
   const position = (parent: Branch, index: unknown, extra = 0): number | undefined => {
     if (index === undefined) return undefined;
@@ -255,31 +301,34 @@ export function applyPatch(root: Branch, ops: unknown, options: PatchOptions = {
       switch (kind) {
         case 'insert': {
           const parent = branchAt(op.parent as string | undefined, 'parent');
+          notInInstance(parent.id, '"parent"', false);
           const node = makeNode(op.node, at, parent.id);
           placeable(parent, node);
           current = insertNode(current, parent.id, node, position(parent, op.index));
+          placedInside(current, node);
           changed.push({ op: i, kind, id: node.id });
           break;
         }
         case 'replace': {
           const { node: target } = resolveRef(current, op.target as string);
           const hit = findParent(current, target.id);
-          let node = makeNode(op.node, at, hit?.parent.id ?? null);
+          if (hit) notInInstance(target.id, '"target"', true);
+          // Replacing the root keeps it the tree's root: same id, same tag.
+          const node = makeNode(op.node, at, hit?.parent.id ?? null, !hit);
           if (!hit) {
-            // Replacing the root keeps it the tree's root: same id, same tag.
-            if (!isBranch(node)) throw new Error('The root must stay a branch');
-            node = { ...node, id: current.id, tag: current.tag, type: current.type ?? node.type };
-            current = node;
+            current = node as Branch;
           } else {
             placeable(hit.parent, node);
             current = insertNode(removeNode(current, target.id), hit.parent.id, node, hit.index);
           }
+          placedInside(current, node);
           changed.push({ op: i, kind, id: node.id });
           break;
         }
         case 'remove': {
           const { node } = resolveRef(current, op.target as string);
           notRoot(node, 'removed');
+          notInInstance(node.id, '"target"', true);
           current = removeNode(current, node.id);
           changed.push({ op: i, kind, id: node.id });
           break;
@@ -287,7 +336,9 @@ export function applyPatch(root: Branch, ops: unknown, options: PatchOptions = {
         case 'move': {
           const { node } = resolveRef(current, op.target as string);
           notRoot(node, 'moved');
+          notInInstance(node.id, '"target"', true);
           const parent = branchAt(op.parent as string, 'parent');
+          notInInstance(parent.id, '"parent"', false);
           if (node.id === parent.id || isDescendant(current, node.id, parent.id)) throw new Error('A branch can’t be moved inside itself');
           placeable(parent, node);
           // `index` is where the node ends up, so take it out first.
@@ -295,12 +346,14 @@ export function applyPatch(root: Branch, ops: unknown, options: PatchOptions = {
           const target = findNode(without, parent.id) as Branch;
           const index = position(target, op.index);
           current = insertNode(without, parent.id, node, index);
+          placedInside(current, node);
           changed.push({ op: i, kind, id: node.id });
           break;
         }
         case 'duplicate': {
           const { node } = resolveRef(current, op.target as string);
           notRoot(node, 'duplicated');
+          notInInstance(node.id, '"target"', true);
           const hit = findParent(current, node.id)!;
           const copy = cloneNode(node, true);
           current = insertNode(current, hit.parent.id, copy, hit.index + 1);
@@ -310,6 +363,7 @@ export function applyPatch(root: Branch, ops: unknown, options: PatchOptions = {
         case 'wrap': {
           const { node } = resolveRef(current, op.target as string);
           notRoot(node, 'wrapped');
+          notInInstance(node.id, '"target"', true);
           const hit = findParent(current, node.id)!;
           const wrapper = makeNode(op.node, at, hit.parent.id);
           if (!canHaveChildren(wrapper)) throw new Error('"node" must be a branch that can hold children');
@@ -334,6 +388,7 @@ export function applyPatch(root: Branch, ops: unknown, options: PatchOptions = {
         }
         case 'update': {
           const { node } = resolveRef(current, op.target as string);
+          notInInstance(node.id, '"target"', false);
           const known = new Set(['op', 'target', 'tag', 'name', 'type', 'classes', 'addClasses', 'removeClasses', 'attrs', 'value']);
           const unknown = Object.keys(op).filter((k) => !known.has(k));
           if (unknown.length) throw new Error(`Unknown field${unknown.length > 1 ? 's' : ''} ${unknown.map((k) => `"${k}"`).join(', ')}; use setStyles for styles and setText for text`);
@@ -395,6 +450,7 @@ export function applyPatch(root: Branch, ops: unknown, options: PatchOptions = {
         }
         case 'setStyles': {
           const { node } = resolveRef(current, op.target as string);
+          notInInstance(node.id, '"target"', false);
           if (!isBranch(node)) throw new Error('Only branches have styles');
           if (op.display !== undefined && !isDisplayId(String(op.display))) throw new Error(`Unknown display "${String(op.display)}"`);
           const byDisplay = stylePatchByDisplay(op.styles, (op.display as DisplayId | undefined) ?? 'lg');
@@ -408,6 +464,7 @@ export function applyPatch(root: Branch, ops: unknown, options: PatchOptions = {
         }
         case 'setText': {
           const { node } = resolveRef(current, op.target as string);
+          notInInstance(node.id, '"target"', false);
           if (typeof op.value !== 'string') throw new Error('"value" must be a string');
           if (isBranch(node)) {
             if (!canHaveChildren(node)) throw new Error(`A <${(node as Branch).tag}> can’t hold text`);

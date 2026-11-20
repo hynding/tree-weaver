@@ -1,4 +1,4 @@
-import { createBranch, createComponent, createForest, createLeaf, createTree, instantiateComponent, text, type Branch } from '@tree-weaver/core';
+import { createBranch, createComponent, createForest, createLeaf, createTree, instantiateComponent, text, type Branch, type TreeNode } from '@tree-weaver/core';
 import { describe, expect, it } from 'vitest';
 import { exportComponent, exportComponentDef, exportForest, exportTree, importDocument } from './index';
 
@@ -208,5 +208,71 @@ describe('pass 7 fixes', () => {
     const back2 = importDocument(exportTree(withNs, 'svg'), 'svg');
     if (back2.kind !== 'tree') throw new Error('expected a tree');
     expect(back2.tree.root.attrs.xmlns).toBe('http://www.w3.org/2000/svg');
+  });
+});
+
+describe('pass 8 fixes', () => {
+  const md = (tree: ReturnType<typeof page>) => exportTree(tree, 'markdown');
+  const reimport = (tree: ReturnType<typeof page>) => {
+    const back = importDocument(md(tree), 'markdown');
+    if (back.kind !== 'tree') throw new Error('expected a tree');
+    return back.tree;
+  };
+
+  it('keeps image alt text inside the image syntax', () => {
+    const img = createLeaf('cat.png', 'image', { alt: 'a\\](javascript:alert(1)) <img src=x onerror=alert(2)>' });
+    const tree = page([createBranch({ tag: 'p', children: [img] })]);
+    const p = reimport(tree).root.children[0] as Branch;
+    expect(p.children).toHaveLength(1);
+    expect(p.children[0]).toMatchObject({ type: 'image', value: 'cat.png', attrs: { alt: 'a\\](javascript:alert(1)) <img src=x onerror=alert(2)>' } });
+  });
+
+  it('keeps line breaks in code spans, titles, links and inline HTML from ending the paragraph', () => {
+    const code = createBranch({ tag: 'code', children: [text('x\n\n<img src=x onerror=alert(1)>\n\ny')] });
+    const link = createBranch({ tag: 'a', attrs: { href: '/a\n\n# b', title: 't\n\n<img src=y>\\' }, children: [text('L')] });
+    const span = createBranch({ tag: 'span', classes: ['k'], children: [text('x\n\n# Injected heading\n\ny')] });
+    const tree = page([createBranch({ tag: 'p', children: [code, text(' '), link, text(' '), span] })]);
+    const back = reimport(tree);
+    expect(back.root.children).toHaveLength(1);
+    expect(JSON.stringify(back.root)).not.toContain('"type":"image"');
+  });
+
+  it('fences code with more backticks than it holds', () => {
+    const body = 'a ``` b\n~~~~\n<img src=x onerror=alert(2)>\n~~~~';
+    const tree = page([createBranch({ tag: 'pre', children: [createBranch({ tag: 'code', children: [text(body)] })] })]);
+    const back = reimport(tree).root.children;
+    expect(back).toHaveLength(1);
+    expect((((back[0] as Branch).children[0] as Branch).children[0] as { value: string }).value.trimEnd()).toBe(body);
+  });
+
+  it('keeps a | in a code span or link inside one table cell', () => {
+    const row = (tag: 'th' | 'td', a: TreeNode, b: TreeNode) => createBranch({ tag: 'tr', children: [createBranch({ tag, children: [a] }), createBranch({ tag, children: [b] })] });
+    const table = createBranch({
+      tag: 'table',
+      children: [
+        createBranch({ tag: 'thead', children: [row('th', text('A'), text('B'))] }),
+        createBranch({ tag: 'tbody', children: [row('td', createBranch({ tag: 'code', children: [text('a|b')] }), createBranch({ tag: 'a', attrs: { href: '/x|y' }, children: [text('L')] }))] }),
+      ],
+    });
+    const out = JSON.stringify(reimport(page([table])).root);
+    expect(out).toContain('"a|b"');
+    expect(out).toMatch(/x(\||%7C)y/);
+  });
+
+  it('keeps ; inside url() and strings in CSS values', async () => {
+    const { sanitizeCssValue } = await import('@tree-weaver/core');
+    expect(sanitizeCssValue('url(data:image/png;base64,iVBOR)')).toBe('url(data:image/png;base64,iVBOR)');
+    expect(sanitizeCssValue('url("data:image/svg+xml;utf8,<x>")')).toBe('url("data:image/svg+xml;utf8,<x>")');
+    expect(sanitizeCssValue('red; color: blue')).toBe('red, color: blue');
+  });
+
+  it('round-trips empty attribute names in XML, and splits whitespace in class names everywhere', () => {
+    const b = createBranch({ tag: 'div', attrs: { '': 'v' } });
+    const tree = page([{ ...b, classes: ['a b'] }]);
+    const back = importDocument(exportTree(tree, 'xml'), 'xml');
+    if (back.kind !== 'tree') throw new Error('expected a tree');
+    const div = back.tree.root.children[0] as Branch;
+    expect(div.attrs).toEqual({ '': 'v' });
+    expect(div.classes).toEqual(['a', 'b']);
   });
 });

@@ -197,3 +197,42 @@ describe('pass 7 fixes', () => {
     expect(applyPatch(root, [{ op: 'wrap', target: rect.id, node: { tag: 'g' } }]).changes).toHaveLength(1);
   });
 });
+
+describe('pass 8 fixes', () => {
+  it('checks the children of a new root where they will live', async () => {
+    const { createShape } = await import('./index');
+    const page = createBranch({ tag: 'body', type: 'root' });
+    expect(() => applyPatch(page, [{ op: 'replace', target: '/', node: { tag: 'svg', children: [createShape('circle')] } }])).toThrow(/needs an SVG/);
+    const svg = createBranch({ tag: 'svg', type: 'root' });
+    expect(() => applyPatch(svg, [{ op: 'replace', target: '/', node: { tag: 'div', children: [{ tag: 'p' }] } }])).toThrow(/inside an SVG/);
+    expect(applyPatch(page, [{ op: 'replace', target: '/', node: { tag: 'div', children: [{ tag: 'p', children: ['hi'] }] } }]).root.tag).toBe('body');
+  });
+
+  it('checks what an inserted, replacing or moved node holds, not just the node', async () => {
+    const { createShape } = await import('./index');
+    const p = createBranch({ tag: 'p' });
+    const page = createBranch({ tag: 'body', children: [p] });
+    expect(() => applyPatch(page, [{ op: 'insert', node: { tag: 'a', children: [createShape('circle')] } }])).toThrow(/needs an SVG/);
+    expect(() => applyPatch(page, [{ op: 'replace', target: p.id, node: { tag: 'a', children: [createShape('circle')] } }])).toThrow(/needs an SVG/);
+    const svgRoot = createBranch({ tag: 'svg', type: 'root' });
+    expect(() => applyPatch(svgRoot, [{ op: 'insert', node: { tag: 'a', children: [{ tag: 'p' }] } }])).toThrow(/inside an SVG/);
+    const link = createBranch({ tag: 'a', children: [createShape('circle')] });
+    const inline = createBranch({ tag: 'body', children: [createBranch({ tag: 'svg', children: [link] })] });
+    expect(() => applyPatch(inline, [{ op: 'move', target: link.id, parent: '/' }])).toThrow(/needs an SVG/);
+  });
+
+  it('refuses edits inside a component instance, which the next load would undo', async () => {
+    const { createComponent, instantiateComponent } = await import('./index');
+    const card = createComponent('Card', createBranch({ tag: 'div', children: [text('Hello')] }));
+    const inst = instantiateComponent(card);
+    const leaf = inst.children[0];
+    const root = createBranch({ tag: 'body', children: [inst] });
+    expect(() => applyPatch(root, [{ op: 'setText', target: leaf.id, value: 'EDITED' }])).toThrow(/component instance/);
+    expect(() => applyPatch(root, [{ op: 'insert', parent: inst.id, node: 'more' }])).toThrow(/component instance/);
+    expect(() => applyPatch(root, [{ op: 'setStyles', target: inst.id, styles: { color: 'red' } }])).toThrow(/component instance/);
+    expect(() => applyPatch(root, [{ op: 'remove', target: leaf.id }])).toThrow(/component instance/);
+    // The instance as a whole can still be moved, copied, wrapped and removed.
+    expect(applyPatch(root, [{ op: 'duplicate', target: inst.id }]).changes).toHaveLength(1);
+    expect(applyPatch(root, [{ op: 'remove', target: inst.id }]).root.children).toHaveLength(0);
+  });
+});

@@ -81,12 +81,46 @@ export function bracketsBalance(value: string): boolean {
   return !stack.length && !quote;
 }
 
+/**
+ * `;` would end the declaration, so it becomes `,`, except inside a quoted string or `url(…)`,
+ * where it can't (`url(data:image/png;base64,…)` must keep it).
+ */
+function semicolonsOutsideStrings(value: string): string {
+  let out = '';
+  let quote = '';
+  let url = false;
+  for (let i = 0; i < value.length; i++) {
+    const ch = value[i];
+    if (ch === '\\') {
+      out += value.slice(i, i + 2);
+      i++;
+      continue;
+    }
+    if (quote) {
+      if (ch === quote) quote = '';
+    } else if (ch === '"' || ch === "'") quote = ch;
+    else if (url) {
+      if (ch === ')') url = false;
+    } else if (/^url\($/i.test(value.slice(i, i + 4))) {
+      out += value.slice(i, i + 4);
+      i += 3;
+      url = true;
+      continue;
+    } else if (ch === ';') {
+      out += ',';
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
 /** Strip characters that could break out of a declaration or the style element. */
 export function sanitizeCssValue(value: string): string {
   // Comment markers too: an unclosed `/*` would swallow every rule after it. So would an
   // unclosed bracket, so a value whose brackets don't balance is dropped.
   // Line breaks become spaces: a CSS string ends at one, so a quote can't hide a `(` on the next line.
-  const out = untilStable(value.replace(/[{}]/g, '').replace(/;/g, ',').replace(/[\n\r\f]+/g, ' '), (v) => v.replace(/<\/?(style|script)/gi, '').replace(/\/\*|\*\//g, '')).trim();
+  const out = untilStable(semicolonsOutsideStrings(value.replace(/[{}]/g, '').replace(/[\n\r\f]+/g, ' ')), (v) => v.replace(/<\/?(style|script)/gi, '').replace(/\/\*|\*\//g, '')).trim();
   return bracketsBalance(out) ? out : '';
 }
 

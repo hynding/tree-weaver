@@ -77,6 +77,8 @@ function pickTree(ref: string | undefined): Tree {
   if (ref === undefined) {
     const tree = currentTree();
     if (!tree) throw new Error('No tree is open');
+    // A component's template is open on the canvas, which isn't one of the forest's trees.
+    if (!forest.trees.some((t) => t.id === tree.id)) throw new Error('A component is open, not a tree; name the tree to patch with "tree"');
     return tree;
   }
   const lower = String(ref).toLowerCase();

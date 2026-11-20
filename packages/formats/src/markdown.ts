@@ -64,8 +64,20 @@ export function escapeMarkdown(text: string, atLineStart = false): string {
   return out;
 }
 
-// Parentheses are backslash-escaped (they come back exactly); spaces and angle brackets are percent-encoded.
-const escapeUrl = (url: string): string => url.replace(/[ <>]/g, (c) => encodeURIComponent(c)).replace(/[\\()]/g, '\\$&');
+/** Set while a table row is written: a `|` there would split the cell, even inside code or a link. */
+let inTable = false;
+
+// Parentheses are backslash-escaped (they come back exactly); spaces, angle brackets and line breaks are percent-encoded.
+const escapeUrl = (url: string): string =>
+  url.replace(inTable ? /[ <>\t\n\r|]/g : /[ <>\t\n\r]/g, (c) => encodeURIComponent(c)).replace(/[\\()]/g, '\\$&');
+/** A one-line title, quoted: a line break would end the paragraph, and a backslash could escape the closing quote. */
+const titleOf = (title: string | undefined): string => (title ? ` "${oneLine(title).replace(inTable ? /[\\"|]/g : /[\\"]/g, '\\$&')}"` : '');
+const oneLine = (text: string): string => text.replace(/\s*[\n\r]\s*/g, ' ');
+/** Inline HTML on one line: a blank line inside it would end the paragraph and start a new block. */
+const inlineHtml = (html: string): string => {
+  const out = html.replace(/\r/g, '&#13;').replace(/\n/g, '&#10;');
+  return inTable ? out.replace(/\|/g, '&#124;') : out;
+};
 
 function inline(node: TreeNode, first: boolean): string {
   if (!isBranch(node)) {
@@ -76,18 +88,19 @@ function inline(node: TreeNode, first: boolean): string {
   const content = () => node.children.map((c) => inline(c, false)).join('');
   if (MARK_INLINE[tag] && !needsMeta(node) && node.children.length) return wrapTrimmed(content(), MARK_INLINE[tag]);
   if (tag === 'code' && !needsMeta(node) && node.children.every((c) => !isBranch(c) && c.type === 'text')) {
-    const code = node.children.map((c) => (c as Leaf).value).join('');
+    // Markdown turns line breaks in a code span into spaces anyway; a blank line would end the paragraph.
+    let code = oneLine(node.children.map((c) => (c as Leaf).value).join(''));
+    if (inTable) code = code.replace(/\|/g, '\\|');
     // A fence longer than any run of backticks in the code, padded with spaces when the code has any.
     const longest = Math.max(0, ...(code.match(/`+/g) ?? []).map((r) => r.length));
     const ticks = '`'.repeat(longest + 1);
     return longest ? `${ticks} ${code} ${ticks}` : `${ticks}${code}${ticks}`;
   }
   if (tag === 'a' && !needsMeta(node, LINK_ATTRS) && node.attrs.href !== undefined) {
-    const title = node.attrs.title ? ` "${node.attrs.title.replace(/"/g, '\\"')}"` : '';
-    return `[${content()}](${escapeUrl(node.attrs.href)}${title})`;
+    return `[${content()}](${escapeUrl(node.attrs.href)}${titleOf(node.attrs.title)})`;
   }
   if (tag === 'br' && !needsMeta(node)) return '<br>';
-  return renderNodeHtml(node);
+  return inlineHtml(renderNodeHtml(node));
 }
 
 function wrapTrimmed(text: string, mark: string): string {
@@ -96,11 +109,10 @@ function wrapTrimmed(text: string, mark: string): string {
 }
 
 function image(leaf: Leaf): string {
-  const alt = (leaf.attrs?.alt ?? '').replace(/[[\]]/g, '\\$&');
+  const alt = escapeMarkdown(oneLine(leaf.attrs?.alt ?? ''));
   const extra = Object.keys(leaf.attrs ?? {}).filter((k) => k !== 'alt' && k !== 'title');
-  if (extra.length) return renderNodeHtml(leaf);
-  const title = leaf.attrs?.title ? ` "${leaf.attrs.title.replace(/"/g, '\\"')}"` : '';
-  return `![${alt}](${escapeUrl(leaf.value)}${title})`;
+  if (extra.length) return inlineHtml(renderNodeHtml(leaf));
+  return `![${alt}](${escapeUrl(leaf.value)}${titleOf(leaf.attrs?.title)})`;
 }
 
 const inlineRun = (nodes: TreeNode[]): string => nodes.map((n, i) => inline(n, i === 0)).join('');
@@ -183,8 +195,16 @@ function table(b: Branch): string | null {
       if (!isBranch(cell) || (cell.tag !== 'td' && cell.tag !== 'th') || needsMeta(cell) || !cell.children.every(isInlineNode)) return null;
     }
   }
-  const line = (row: TreeNode[]) =>
-    `| ${Array.from({ length: width }, (_, i) => (row[i] ? inlineRun((row[i] as Branch).children).trim() : '')).join(' | ')} |`;
+  const cell = (c: TreeNode | undefined): string => {
+    if (!c) return '';
+    inTable = true;
+    try {
+      return inlineRun((c as Branch).children).trim();
+    } finally {
+      inTable = false;
+    }
+  };
+  const line = (row: TreeNode[]) => `| ${Array.from({ length: width }, (_, i) => cell(row[i])).join(' | ')} |`;
   const header = headerRows ? cells[0] : [];
   const body = headerRows ? cells.slice(1) : cells;
   return [line(header), `| ${Array.from({ length: width }, () => '---').join(' | ')} |`, ...body.map(line)].join('\n');
@@ -216,7 +236,9 @@ function block(b: Branch): string {
     const code = b.children[0];
     if (isBranch(code) && code.tag === 'code' && !needsMeta(code) && code.children.every((c) => !isBranch(c) && c.type === 'text')) {
       const text = code.children.map((c) => (c as Leaf).value).join('').replace(/\n$/, '');
-      const fence = text.includes('```') ? '~~~~' : '```';
+      // Backticks, more than the longest run in the code, so no line of it can close the fence.
+      const longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((r) => r.length));
+      const fence = '`'.repeat(Math.max(3, longest + 1));
       return `${fence}\n${text}\n${fence}`;
     }
   }

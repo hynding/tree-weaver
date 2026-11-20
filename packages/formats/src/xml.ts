@@ -45,7 +45,7 @@ function attrs(pairs: Record<string, string | undefined | boolean>): string {
 function nodeXml(node: TreeNode, pad: string): string[] {
   if (node.kind === 'leaf') {
     const head = `<leaf${attrs({ id: node.id, type: node.type, value: node.type === 'text' ? undefined : node.value })}`;
-    const extra = Object.entries(node.attrs ?? {}).map(([n, v]) => `<attr${attrs({ name: n })} value="${esc(v)}"/>`);
+    const extra = Object.entries(node.attrs ?? {}).map(([n, v]) => `<attr name="${esc(n)}" value="${esc(v)}"/>`);
     if (node.type === 'text') return [`${pad}${head}>${extra.join('')}${escText(node.value)}</leaf>`];
     return extra.length ? [`${pad}${head}>${extra.join('')}</leaf>`] : [`${pad}${head}/>`];
   }
@@ -53,13 +53,13 @@ function nodeXml(node: TreeNode, pad: string): string[] {
   const lines: string[] = [];
   // A linked component instance: its link, as JSON (the expanded children follow as usual).
   if (node.instance) lines.push(`${inner}<instance>${escText(JSON.stringify(node.instance))}</instance>`);
-  for (const [name, value] of Object.entries(node.attrs)) lines.push(`${inner}<attr${attrs({ name })} value="${esc(value)}"/>`);
+  for (const [name, value] of Object.entries(node.attrs)) lines.push(`${inner}<attr name="${esc(name)}" value="${esc(value)}"/>`);
   for (const display of DISPLAY_IDS) {
     const styles = node.styles[display];
     if (!styles) continue;
     lines.push(`${inner}<style display="${display}">`);
     for (const [property, value] of Object.entries(styles)) {
-      lines.push(`${inner}  <declaration${attrs({ property })} value="${esc(value)}"/>`);
+      lines.push(`${inner}  <declaration property="${esc(property)}" value="${esc(value)}"/>`);
     }
     lines.push(`${inner}</style>`);
   }
@@ -127,13 +127,13 @@ function readNode(el: Element): Record<string, unknown> {
   const a = el.attribs;
   if (localName(el) === 'leaf') {
     // Text leaves hold their attrs as <attr> children before the text, which has no element children.
-    const leafAttrs = Object.fromEntries(elements(el, 'attr').map((x) => [x.attribs.name, x.attribs.value ?? '']));
+    const leafAttrs = Object.fromEntries(elements(el, 'attr').map((x) => [x.attribs.name ?? '', x.attribs.value ?? '']));
     return { kind: 'leaf', id: a.id, type: a.type, value: a.type === 'image' || a.type === 'shape' ? a.value : (a.value ?? textOf(el)), attrs: leafAttrs };
   }
   const styles: Record<string, Record<string, string>> = {};
   for (const style of elements(el, 'style')) {
     const map = (styles[style.attribs.display] ??= {});
-    for (const decl of elements(style, 'declaration')) map[decl.attribs.property] = decl.attribs.value ?? '';
+    for (const decl of elements(style, 'declaration')) map[decl.attribs.property ?? ''] = decl.attribs.value ?? '';
   }
   return {
     kind: 'branch',
@@ -142,7 +142,7 @@ function readNode(el: Element): Record<string, unknown> {
     type: a.type,
     name: a.name,
     classes: a.class ?? '',
-    attrs: Object.fromEntries(elements(el, 'attr').map((x) => [x.attribs.name, x.attribs.value ?? ''])),
+    attrs: Object.fromEntries(elements(el, 'attr').map((x) => [x.attribs.name ?? '', x.attribs.value ?? ''])),
     styles,
     ...(elements(el, 'instance')[0] ? { instance: json(textOf(elements(el, 'instance')[0]), 'instance') } : {}),
     children: el.children
