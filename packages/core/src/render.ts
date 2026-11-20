@@ -321,7 +321,9 @@ export function renderNodeHtml(node: TreeNode, opts: HtmlOptions = {}, depth = 0
   // In a standalone .svg, HTML in a <foreignObject> would otherwise take the SVG namespace and draw nothing.
   const svgRoot = tag === 'svg' && !opts.inSvg && opts.xml && node.attrs.xmlns === undefined ? ` xmlns="${SVG_NAMESPACE}"` : opts.inForeign && !opts.inSvg && node.attrs.xmlns === undefined ? XHTML : '';
   const open = `<${tag}${svgRoot} ${renderAttrs(node, opts.xml)}>`;
-  if (VOID_TAGS.has(tag) && !opts.inSvg) return opts.xml ? `${open.slice(0, -1)}/>` : open;
+  // In MathML (outside its text points) an <input> or <wbr> isn't void, so it gets an end tag, as in
+  // SVG. (A <br>, <img> … there breaks out of the formula and stays void; `</br>` would add another.)
+  if (VOID_TAGS.has(tag) && !opts.inSvg && (!opts.inMath || /^(br|embed|hr|img|meta)$/.test(tag))) return opts.xml ? `${open.slice(0, -1)}/>` : open;
   if (!node.children.length) return `${open}</${tag}>`;
   const keep = keepsWhitespace(node, opts.keepClasses);
   // Text in a <textarea> or <title> isn't markup, so the designer's leaf spans would show as text.

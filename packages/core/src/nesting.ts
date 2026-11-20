@@ -36,6 +36,9 @@ const PART_PARENTS: Record<string, string[]> = {
   col: ['colgroup', 'table'],
 };
 /** HTML start tags that end MathML content (the parser's "breakout" list). */
+/** Elements the parser ends implicitly ("generate implied end tags", <rtc> aside). */
+const IMPLIED_END = new Set(['dd', 'dt', 'li', 'optgroup', 'option', 'p', 'rb', 'rp', 'rt']);
+
 const MATH_BREAKOUT = new Set(
   'b big blockquote body br center code dd div dl dt em embed h1 h2 h3 h4 h5 h6 head hr i img li listing menu meta nobr ol p pre ruby s small span strong strike sub sup table tt u ul var'.split(' '),
 );
@@ -100,8 +103,15 @@ export function nestingProblem(ancestors: readonly Branch[], node: TreeNode): st
   if (/^(input|select|textarea|keygen)$/.test(tag) && inScope((t) => t === 'select', new Set(['template']))) return `A <${tag}> can't go inside a <select>; the browser would end the select there`;
   if (tag === 'nobr' && inScope((t) => t === 'nobr')) return 'A <nobr> can\'t go inside another <nobr>; the browser would end the outer one';
   // In a <ruby>, these end the open annotation parts (an <rt> or <rp> leaves an <rtc> open).
-  const rubyParts = tag === 'rt' || tag === 'rp' ? ['rt', 'rp', 'rb'] : tag === 'rb' || tag === 'rtc' ? ['rt', 'rp', 'rb', 'rtc'] : null;
-  if (rubyParts && rubyParts.includes(parentTag) && inScope((t) => t === 'ruby')) return `A <${tag}> can't go inside an <${parentTag}>; the browser would end the <${parentTag}> there`;
+  // The parser ends every element with an implied end tag (<p>, <li>, <option> …) between it and the <ruby>.
+  const rubyEnds = tag === 'rt' || tag === 'rp' ? IMPLIED_END : tag === 'rb' || tag === 'rtc' ? new Set([...IMPLIED_END, 'rtc']) : null;
+  if (rubyEnds && inScope((t) => t === 'ruby')) {
+    for (let i = ancestors.length - 1; i >= 0; i--) {
+      const t = ancestors[i].tag.toLowerCase();
+      if (t === 'ruby') break;
+      if (rubyEnds.has(t)) return `A <${tag}> can't go inside an <${t}> in a <ruby>; the browser would end the <${t}> there`;
+    }
+  }
   // HTML in MathML (outside <mtext> and the like) breaks out of the formula.
   if (MATH_BREAKOUT.has(tag)) {
     for (let i = ancestors.length - 1; i >= 0; i--) {

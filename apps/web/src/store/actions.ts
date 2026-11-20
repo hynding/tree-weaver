@@ -1053,8 +1053,12 @@ function withLastCustomKit(forest: Forest, styles: StyleRule['styles'] = {}): { 
     }
     if (!isTokenKit(kits[i])) break;
   }
+  // Right after the last kit it competes with: before the tokens kits that follow it, but never
+  // before a kit that comes after a tokens kit (the user may have moved the tokens kit up).
   const kit = createCustomKit();
-  return { forest: { ...forest, kits: addKitsBeforeTokens(kits, [kit]) }, kitId: kit.id };
+  let at = kits.length;
+  while (at > 0 && isTokenKit(kits[at - 1])) at--;
+  return { forest: { ...forest, kits: [...kits.slice(0, at), kit, ...kits.slice(at)] }, kitId: kit.id };
 }
 
 function withCustomKit(forest: Forest): { forest: Forest; kitId: string } {

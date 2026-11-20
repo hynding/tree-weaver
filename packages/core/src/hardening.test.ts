@@ -702,3 +702,14 @@ describe('pass 45 fixes', async () => {
     expect(core.keepsWhitespace({ tag: 'div', styles: {}, classes: ['mono'] }, new Set(['mono']))).toBe(true);
   });
 });
+
+describe('pass 46 fixes', async () => {
+  const core = await import('./index');
+  it('closes void HTML tags inside MathML, and refuses ruby parts that would end a parent', () => {
+    const math = core.createBranch({ tag: 'math', children: [core.createBranch({ tag: 'input' }), core.createBranch({ tag: 'mi', children: [core.text('x')] })] });
+    expect(core.renderNodeHtml(math)).toContain('></input>');
+    const ruby = core.createBranch({ tag: 'ruby', children: [core.createBranch({ tag: 'p' })] });
+    const p = ruby.children[0] as import('./model').Branch;
+    expect(core.nestingProblem([ruby, p], core.createBranch({ tag: 'rt' }))).toMatch(/end the <p>/);
+  });
+});

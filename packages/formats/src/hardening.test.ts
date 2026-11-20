@@ -1504,3 +1504,33 @@ describe('pass 45 fixes', () => {
     expect(jsx).toContain("'a__b'");
   });
 });
+
+describe('pass 46 fixes', () => {
+  const back = (tree: ReturnType<typeof page>, kits: ReturnType<typeof createKit>[] = []) => {
+    const doc = importDocument(exportTree(tree, 'markdown', kits), 'markdown');
+    return JSON.stringify(doc.kind === 'tree' ? doc.tree.root : doc.forest.trees[0].root);
+  };
+
+  it('escapes a URL glued to the word before it in Markdown', () => {
+    const out = back(page([createBranch({ tag: 'p', children: [text('see_http://evil.example/x and foo_www.evil.example')] })]));
+    expect(out).not.toContain('"tag":"a"');
+    expect(out).toContain('see_http://evil.example/x and foo_www.evil.example');
+  });
+
+  it('keeps whitespace a root or a non-block container keeps, in Markdown', () => {
+    const tree = page([createBranch({ tag: 'p', children: [text('a\n   b  c')] }), text(' d\n  e ')]);
+    tree.root.styles = { lg: { 'white-space': 'pre-wrap' } };
+    const out = back(tree);
+    expect(out).toContain('a\\n   b  c');
+    expect(out).toContain(' d\\n  e ');
+    const kitted = page([createBranch({ tag: 'p', children: [text('f\n   g')] })]);
+    kitted.root.classes = ['mono'];
+    expect(back(kitted, [createKit('M', '.mono { white-space: pre-wrap }')])).toContain('f\\n   g');
+    for (const tag of ['hgroup', 'search']) {
+      const t = page([createBranch({ tag, styles: { lg: { 'white-space': 'pre-wrap' } }, children: [createBranch({ tag: 'p', children: [text('h\n   i')] })] })]);
+      const o = back(t);
+      expect(o, tag).toContain('h\\n   i');
+      expect(o, tag).not.toMatch(/"tag":"p","[^]*"tag":"hgroup"/);
+    }
+  });
+});

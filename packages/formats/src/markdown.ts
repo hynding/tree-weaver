@@ -72,8 +72,8 @@ export function escapeMarkdown(text: string, atLineStart = false): string {
   out = out.replace(/!$/, '\\!');
   // A closing `#` run would be read as the end of a heading.
   out = out.replace(/(^|\s)(#+)(\s*)$/, '$1\\$2$3');
-  // Bare URLs would become links (GFM autolinks).
-  out = out.replace(/\b(https?|ftp|mailto):/gi, '$1\\:').replace(/\bwww\./gi, 'www\\.').replace(/([\w.+-])@(?=[\w-]+\.)/g, '$1\\@');
+  // Bare URLs would become links (GFM autolinks), even straight after a word (`see_http://…`).
+  out = out.replace(/(https?|ftp|mailto):/gi, '$1\\:').replace(/www\./gi, 'www\\.').replace(/([\w.+-])@(?=[\w-]+\.)/g, '$1\\@');
   return lineSeparators(out);
 }
 
@@ -243,7 +243,11 @@ function blocks(nodes: TreeNode[]): string[] {
     if (!run.length) return;
     let text = inlineLine(run);
     // A leading <textarea> would leave the rest raw (an HTML block): write the whole run as HTML.
-    if (/^<textarea(\s|>|$)/i.test(text)) text = inlineHtml(run.map((n) => renderNodeHtml(n)).join('').replace(/^[ \t\n\r\f]+|[ \t\n\r\f]+$/g, ''));
+    // Inside a root or container that keeps whitespace, a run with line breaks or space runs goes in as HTML,
+    // its edge spaces as references (a paragraph's edges are trimmed).
+    if (keepInside && run.some((n) => (isBranch(n) ? hasLineBreakOrRun(n) : n.type === 'text' && /\n|\r|[ \t]{2}|\t|^[ \t]|[ \t]$/.test(n.value))))
+      text = inlineHtml(run.map((n) => renderNodeHtml(n)).join('')).replace(/^[ \t]+|[ \t]+$/g, (m) => m.replace(/./g, (c) => `&#${c.charCodeAt(0)};`));
+    else if (/^<textarea(\s|>|$)/i.test(text)) text = inlineHtml(run.map((n) => renderNodeHtml(n)).join('').replace(/^[ \t\n\r\f]+|[ \t\n\r\f]+$/g, ''));
     if (text) out.push(`${directive('inline')}\n${text}`);
     run = [];
   };
@@ -286,7 +290,14 @@ const opensHtmlBlock = (line: string): boolean =>
   /^ {0,3}<(script|pre|style|textarea)(\s|>|$)/i.test(line) || /^ {0,3}<\/?[A-Za-z][A-Za-z0-9-]*(\s+[^\s"'=<>`/]+(\s*=\s*("[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*\s*\/?>\s*$/.test(line);
 
 function container(b: Branch): string {
-  const inner = blocks(b.children);
+  const outer = keepInside;
+  keepInside ||= keepsWhitespace(b, keepClasses);
+  let inner: string[];
+  try {
+    inner = blocks(b.children);
+  } finally {
+    keepInside = outer;
+  }
   const open = directive('branch', { tag: b.tag, ...metaOf(b) });
   return inner.length ? `${open}\n\n${inner.join('\n\n')}\n\n<!-- /tw:branch -->` : `${open}\n<!-- /tw:branch -->`;
 }
@@ -367,7 +378,7 @@ const fencedCode = (b: Branch): boolean => {
 
 /** Tags that open a CommonMark HTML block with content on the same line (kinds 1 and 6). */
 const HTML_BLOCK_TAGS = new Set(
-  'pre textarea address article aside blockquote caption center dd details dialog dir div dl dt fieldset figcaption figure footer form h1 h2 h3 h4 h5 h6 header hgroup legend li main menu nav ol p section summary table tbody td tfoot th thead tr ul'.split(' '),
+  'pre textarea address article aside blockquote caption center dd details dialog dir div dl dt fieldset figcaption figure footer form h1 h2 h3 h4 h5 h6 header legend li main menu nav ol p search section summary table tbody td tfoot th thead tr ul'.split(' '),
 );
 
 function block(b: Branch): string {
@@ -377,7 +388,7 @@ function block(b: Branch): string {
   // Text whose whitespace shows (`<pre>`, `white-space: pre*`) as one line of HTML, its line breaks
   // as references: Markdown would join its lines and collapse its spaces. (A fenced code block
   // covers `pre > code` holding only text.) Only tags that start an HTML block mid-line qualify.
-  if (keepsWhitespace(b, keepClasses) && HTML_BLOCK_TAGS.has(b.tag) && !fencedCode(b)) return inlineHtml(renderNodeHtml(b));
+  if ((keepInside || keepsWhitespace(b, keepClasses)) && HTML_BLOCK_TAGS.has(b.tag) && !fencedCode(b)) return inlineHtml(renderNodeHtml(b));
   const allInline = b.children.every(isInlineNode);
   const heading = HEADING.exec(b.tag);
   // A heading's text is trimmed of every kind of space when read, so edge non-breaking spaces are written as references.
@@ -419,6 +430,8 @@ function block(b: Branch): string {
 
 /** Classes the kits being exported make keep their whitespace; set while `exportMarkdown` runs. */
 let keepClasses: ReadonlySet<string> | undefined;
+/** Whether the branch being written (the root or a directive container) keeps its whitespace, so every block in it does. */
+let keepInside = false;
 
 export function exportMarkdown(tree: Tree, opts: MarkdownExportOptions = {}): string {
   const styles: Record<string, DisplayStyles> = {};
@@ -433,11 +446,13 @@ export function exportMarkdown(tree: Tree, opts: MarkdownExportOptions = {}): st
   if (opts.kits?.length) front.kits = opts.kits;
   // Markdown is a page format: an SVG tree's drawing goes in as inline SVG.
   keepClasses = whitespaceClasses(opts.kits);
+  keepInside = !isSvgRoot(tree.root) && keepsWhitespace(tree.root, keepClasses);
   let body: string;
   try {
     body = blocks(isSvgRoot(tree.root) ? [tree.root] : tree.root.children).join('\n\n');
   } finally {
     keepClasses = undefined;
+    keepInside = false;
   }
   // Renderers without front matter show it as text, where HTML in a name or CSS would be live:
   // then every string is double-quoted with `<` escaped (YAML reads `\x3C` back as `<`).
@@ -478,7 +493,11 @@ export function importMarkdown(text: string): TreeDocument {
   if (data.styles && typeof data.styles === 'object') {
     for (const [id, s] of Object.entries(data.styles as Record<string, DisplayStyles>)) styles.set(id, s);
   }
-  const ctx: Ctx = { styles, keepClasses: whitespaceClasses(Array.isArray(data.kits) ? (data.kits as { css?: string }[]) : []) };
+  const keep = whitespaceClasses(Array.isArray(data.kits) ? (data.kits as { css?: string }[]) : []);
+  const meta0 = (data.root ?? {}) as Record<string, unknown>;
+  const rootStyles = typeof meta0.id === 'string' ? styles.get(meta0.id) : undefined;
+  const keepRoot = keepsWhitespace({ tag: 'body', styles: rootStyles ?? {}, classes: Array.isArray(meta0.classes) ? (meta0.classes as string[]).filter((c) => typeof c === 'string') : [] }, keep);
+  const ctx: Ctx = { styles, keepClasses: keep, keepRoot };
   let root = convertParts('body', {}, dom.children, ctx, false);
   // An SVG tree comes back as its drawing: the one root SVG the body holds.
   const kids = root.children as Record<string, unknown>[];

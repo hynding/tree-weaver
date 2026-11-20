@@ -111,6 +111,8 @@ export interface Ctx {
   xml?: boolean;
   /** Classes the document's styles make keep their whitespace (see `whitespaceClasses`). */
   keepClasses?: ReadonlySet<string>;
+  /** Markdown: the root keeps its whitespace, so everything in the body does, though Markdown's own line breaks between blocks don't count. */
+  keepRoot?: boolean;
 }
 
 export type RawNode = Record<string, unknown>;
@@ -169,7 +171,11 @@ function applyMeta(node: RawNode, meta: RawNode, ctx: Ctx): void {
   }
 }
 
-function convertChildren(nodes: ChildNode[], ctx: Ctx, raw: boolean, svg = false, inline = false): RawNode[] {
+/**
+ * `rawBelow`: the elements here keep their whitespace though this level's own text doesn't (a
+ * Markdown body whose root keeps it: Markdown's line breaks between blocks don't count).
+ */
+function convertChildren(nodes: ChildNode[], ctx: Ctx, raw: boolean, svg = false, inline = false, rawBelow = false): RawNode[] {
   // An SVG <title> is the drawing's accessible name, so it stays.
   // Plain comments are dropped here, so the text either side of one still sees its neighbours.
   const kept = nodes.filter(
@@ -221,13 +227,15 @@ function convertChildren(nodes: ChildNode[], ctx: Ctx, raw: boolean, svg = false
       return;
     }
     const el = node as Element;
+    // Inside a `tw:branch` that keeps whitespace, its elements do too.
+    const keepBelow = rawBelow || stack.some((e) => e.branch && keepsWhitespace({ tag: String(e.branch.tag), styles: e.branch.styles as DisplayStyles, classes: e.branch.classes as string[] }, ctx.keepClasses));
     if (unwrapNext && el.name === 'p') {
       unwrapNext = false;
-      items.push(...convertChildren(el.children, ctx, raw, svg));
+      items.push(...convertChildren(el.children, ctx, raw || keepBelow, svg));
       return;
     }
     unwrapNext = false;
-    const converted = convertElement(el, ctx, raw, svg);
+    const converted = convertElement(el, ctx, raw || keepBelow, svg);
     if (meta) applyMeta(converted, meta, ctx);
     meta = null;
     items.push(converted);
@@ -330,7 +338,7 @@ export function convertParts(tag: string, attribs: Record<string, string>, child
     attrs,
     styles,
     // An XML parse (a standalone .svg) keeps the newline after `<pre>`; only the HTML parser drops it.
-    children: (ctx.xml ? (_: string, c: RawNode[]) => c : dropLeadingNewline)(tag, impliedTbody(tag, convertChildren(children, ctx, raw || RAW_TEXT_TAGS.has(tag) || keepsWhitespace({ tag, styles, classes: a.class ?? '' }, ctx.keepClasses) || (inSvg && a['xml:space'] === 'preserve'), childrenInSvg({ tag }, svg), childrenInSvg({ tag }, svg) ? /^(text|tspan|textPath)$/.test(tag) : !svg && isInlineTag(tag)))),
+    children: (ctx.xml ? (_: string, c: RawNode[]) => c : dropLeadingNewline)(tag, impliedTbody(tag, convertChildren(children, ctx, raw || RAW_TEXT_TAGS.has(tag) || keepsWhitespace({ tag, styles, classes: a.class ?? '' }, ctx.keepClasses) || (inSvg && a['xml:space'] === 'preserve'), childrenInSvg({ tag }, svg), childrenInSvg({ tag }, svg) ? /^(text|tspan|textPath)$/.test(tag) : !svg && isInlineTag(tag), tag === 'body' && !!ctx.keepRoot))),
   };
 }
 
