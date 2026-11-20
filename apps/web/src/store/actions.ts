@@ -999,11 +999,11 @@ export function makeKitEditable(kitId: string): string[] {
   const forest = state.forest;
   const kit = forest?.kits.find((k) => k.id === kitId);
   if (!forest || !kit || kit.href || isEditableKit(kit)) return [];
-  const { rules, skipped } = parseRulesCss(kit.css);
-  // Only convert when nothing would be lost.
-  if (skipped.length) return skipped;
+  const { rules, skipped, reordered } = parseRulesCss(kit.css);
+  // Only convert when nothing would be lost or would render differently.
+  if (skipped.length || reordered.length) return [...skipped, ...reordered];
   commit({ ...forest, kits: forest.kits.map((k) => (k.id === kitId ? withRules(k, rules) : k)) });
-  return skipped;
+  return [];
 }
 
 /**

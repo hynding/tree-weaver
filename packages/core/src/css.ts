@@ -61,6 +61,13 @@ function matchBrace(css: string, open: number): number {
 /** Split `a: b; c: d` into a style map. Later declarations win. */
 export function parseDeclarations(body: string): StyleMap {
   const out: StyleMap = {};
+  for (const [prop, value] of declarationList(body)) out[prop] = value;
+  return out;
+}
+
+/** The declarations of a block in order, repeats included. */
+export function declarationList(body: string): [string, string][] {
+  const out: [string, string][] = [];
   let current = '';
   let paren = 0;
   const flush = () => {
@@ -68,7 +75,7 @@ export function parseDeclarations(body: string): StyleMap {
     if (idx > 0) {
       const prop = current.slice(0, idx).trim();
       const value = current.slice(idx + 1).trim();
-      if (prop && value) out[prop.startsWith('--') ? prop : prop.toLowerCase()] = value;
+      if (prop && value) out.push([prop.startsWith('--') ? prop : prop.toLowerCase(), value]);
     }
     current = '';
   };

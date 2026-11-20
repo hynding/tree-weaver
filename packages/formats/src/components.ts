@@ -285,8 +285,8 @@ interface Build {
  */
 const PLAIN_ATTR = /^(?:(?:xlink|xml|xmlns):)?[a-zA-Z_][\w.-]*$/;
 // `is` too: Vue renders `<component is="script">` and `is="vue:script"` as the element it names.
-/** Attribute names the frameworks take for themselves: `is` (Vue), `ref` and `key` (React, Vue), `slot` (Svelte, Vue). */
-const FRAMEWORK_ATTRS = new Set(['is', 'ref', 'key', 'slot']);
+/** Attribute names the frameworks take for themselves: `is` (Vue), `ref` and `key` (React, Vue), `slot` (Svelte, Vue), `children` and `dangerouslySetInnerHTML` (React). */
+const FRAMEWORK_ATTRS = new Set(['is', 'ref', 'key', 'slot', 'children', 'dangerouslysetinnerhtml']);
 const isExportAttr = (name: string, value: string, defaults?: Record<string, string>) =>
   PLAIN_ATTR.test(name) && !/^v-/i.test(name) && !FRAMEWORK_ATTRS.has(name.toLowerCase()) && !isDomPropName(name) && landsAs(name).every((n) => isSafeFilled(n, value, defaults));
 /**
@@ -446,10 +446,11 @@ const variantSuffix = `\${${VARIANT_CALL}}`;
 /* ------------------------------------------------------------- writers */
 
 const INLINE = new Set([
-  'a', 'abbr', 'audio', 'b', 'bdi', 'bdo', 'br', 'button', 'canvas', 'cite', 'code', 'data', 'dfn', 'em', 'i', 'iframe', 'img', 'input', 'kbd', 'label',
-  'mark', 'output', 'picture', 'q', 's', 'samp', 'select', 'small', 'span', 'strong', 'sub', 'sup', 'svg', 'textarea', 'time', 'u', 'var', 'video', 'wbr', 'tspan',
+  ...INLINE_TAGS,
+  'audio', 'canvas', 'iframe', 'math', 'meter', 'object', 'output', 'picture', 'progress', 'ruby', 'slot', 'svg', 'tspan', 'video',
 ]);
-const isInlineEl = (el: El): boolean => el.kind === 'text' || INLINE.has(el.tag);
+// A custom element (`my-badge`) is inline until styled otherwise.
+const isInlineEl = (el: El): boolean => el.kind === 'text' || INLINE.has(el.tag) || el.tag.includes('-');
 /** Keep children on one line when line breaks could change the text: any text, or only inline elements. */
 const oneLine = (children: El[]): boolean => children.some((c) => c.kind === 'text') || children.every(isInlineEl);
 /**
@@ -466,6 +467,20 @@ function childLines(children: El[], pad: string, write: (c: El) => string): stri
     prevInline = inline;
   }
   return lines.join('\n');
+}
+
+/**
+ * Children written on one line. Svelte drops whitespace at the start and end of an element,
+ * which shows inside inline elements (`<strong>Note: </strong>`), so it is written as `{' '}`.
+ */
+function inlineChildren(children: El[], mode: 'html' | 'vue' | 'svelte', write: (c: El) => string): string {
+  const parts = children.map(write);
+  if (mode === 'svelte' && parts.length) {
+    if (children[0].kind === 'text' && /^\s/.test(parts[0])) parts[0] = `{' '}${parts[0].replace(/^\s+/, '')}`;
+    const last = parts.length - 1;
+    if (children[last].kind === 'text' && /\s$/.test(parts[last])) parts[last] = `${parts[last].replace(/\s+$/, '')}{' '}`;
+  }
+  return parts.join('');
 }
 
 /** HTML (also Vue and Svelte templates). */
@@ -493,7 +508,7 @@ function writeHtml(el: El, depth: number, mode: 'html' | 'vue' | 'svelte', props
   const attrs = el.attrs.map(([n, v]) => (v === '' && !el.svg ? ` ${n}` : ` ${n}="${esc(v)}"`)).join('');
   if (!el.svg && VOID_TAGS.has(el.tag)) return `<${el.tag}${attrs}>`;
   if (!el.children.length) return el.svg ? `<${el.tag}${attrs} />` : `<${el.tag}${attrs}></${el.tag}>`;
-  if (oneLine(el.children)) return `<${el.tag}${attrs}>${el.children.map((c) => writeHtml(c, depth + 1, mode)).join('')}</${el.tag}>`;
+  if (oneLine(el.children)) return `<${el.tag}${attrs}>${inlineChildren(el.children, mode, (c) => writeHtml(c, depth + 1, mode))}</${el.tag}>`;
   const pad = '  '.repeat(depth + 1);
   return `<${el.tag}${attrs}>\n${childLines(el.children, pad, (c) => writeHtml(c, depth + 1, mode))}\n${'  '.repeat(depth)}</${el.tag}>`;
 }
@@ -598,18 +613,20 @@ function writePropsEl(el: El & { kind: 'el' }, depth: number, mode: 'vue' | 'sve
   const cond = mode === 'vue' && el.cond ? ` v-if="${el.cond.negate ? '!' : ''}${el.cond.prop}"` : '';
   if (!el.svg && VOID_TAGS.has(el.tag)) return `<${el.tag}${cond}${attrs}>`;
   if (!el.children.length) return el.svg ? `<${el.tag}${cond}${attrs} />` : `<${el.tag}${cond}${attrs}></${el.tag}>`;
-  if (oneLine(el.children)) return `<${el.tag}${cond}${attrs}>${el.children.map((c) => writeHtml(c, depth + 1, mode, true)).join('')}</${el.tag}>`;
+  if (oneLine(el.children)) return `<${el.tag}${cond}${attrs}>${inlineChildren(el.children, mode, (c) => writeHtml(c, depth + 1, mode, true))}</${el.tag}>`;
   const pad = '  '.repeat(depth + 1);
   return `<${el.tag}${cond}${attrs}>\n${childLines(el.children, pad, (c) => writeHtml(c, depth + 1, mode, true))}\n${'  '.repeat(depth)}</${el.tag}>`;
 }
 
 const jsxString = (value: string): string => JSON.stringify(value);
 
-function writeJsx(el: El, depth: number, props = false): string {
+/** `props` is false outside a component; in one, the names of its boolean props. */
+function writeJsx(el: El, depth: number, props: false | ReadonlySet<string> = false): string {
   if (el.kind === 'text') {
     if (props && hasProps(el.value))
       return segments(el.value)
-        .map((s) => (s.lit ? writeJsx({ kind: 'text', value: s.lit }, depth) : '') + (s.prop ? `{${s.prop}}` : ''))
+        // React renders nothing for `true` and `false`, so a boolean prop is written as text.
+        .map((s) => (s.lit ? writeJsx({ kind: 'text', value: s.lit }, depth) : '') + (s.prop ? (props.has(s.prop) ? `{String(${s.prop})}` : `{${s.prop}}`) : ''))
         .join('');
     // Plain text is fine unless it holds JSX syntax characters; then use a string expression.
     // Line breaks too: JSX text collapses them (and the indentation around them).
@@ -628,13 +645,18 @@ function writeJsx(el: El, depth: number, props = false): string {
       const name = formField ? (n === 'value' ? 'defaultValue' : 'defaultChecked') : jsxAttrName(n);
       if (props && n === 'class' && el.variantClass) return ` ${name}={${templateLiteral(v, variantSuffix)}}`;
       const numeric = !el.svg && NUMERIC_ATTRS.has(n.toLowerCase());
+      const boolAttr = !el.svg && BOOLEAN_ATTRS.has(n.toLowerCase()) && !(n.toLowerCase() === 'hidden' && v.toLowerCase() === 'until-found');
       if (props && hasProps(v)) {
         const expr = propExpr(v);
+        // `globalThis.Number`: a component or prop may itself be called Number.
+        if (props.has(expr)) return ` ${name}={${boolAttr ? expr : numeric ? `globalThis.Number(${expr})` : `String(${expr})`}}`;
+        // A text prop turns a boolean attribute on as HTML does (any value), unless it is "false".
+        if (boolAttr) return ` ${name}={${expr} !== 'false'}`;
         // An empty prop leaves the attribute off, as the string form does, rather than giving 0.
-        return numeric ? ` ${name}={${expr} === '' ? undefined : Number(${expr})}` : ` ${name}={${expr}}`;
+        return numeric ? ` ${name}={${expr} === '' ? undefined : globalThis.Number(${expr})}` : ` ${name}={${expr}}`;
       }
       // HTML turns a boolean attribute on whatever its value, and React (and its types) take `true`.
-      if (!el.svg && BOOLEAN_ATTRS.has(n.toLowerCase()) && !(n.toLowerCase() === 'hidden' && v.toLowerCase() === 'until-found')) return ` ${name}`;
+      if (boolAttr) return ` ${name}`;
       // React's types take numbers for these.
       if (numeric && /^-?\d{1,15}$/.test(v.trim())) return ` ${name}={${Number(v.trim())}}`;
       return /["\\{}<>\n]/.test(v) ? ` ${name}={${jsxString(v)}}` : ` ${name}="${v.replace(/&/g, '&amp;')}"`;
@@ -949,7 +971,7 @@ export function exportComponentDef(def: ComponentDef, opts: ComponentOptions): C
           : p.type === 'boolean'
             ? 'boolean'
             : p.type === 'enum' && p.options?.length
-              ? p.options.map((o) => JSON.stringify(o)).join(' | ') + " | ''"
+              ? [...new Set([...p.options, p.default ?? ''])].map((o) => JSON.stringify(o)).join(' | ') + " | ''"
               : 'string';
       const types =
         opts.typescript && variants.length
@@ -959,7 +981,7 @@ export function exportComponentDef(def: ComponentDef, opts: ComponentOptions): C
       const params = allProps.length ? `{ ${allProps.map((p) => `${p.name} = ${jsDefault(p)}`).join(', ')} }${opts.typescript ? `: ${name}Props` : ''}` : '';
       files.push({
         path: entry,
-        contents: `// ${header}\n${imports ? `${imports}\n` : ''}${iface}${helper ? `\n${helper}\n` : ''}\nexport default function ${name}(${params}) {\n  return (\n    ${writeJsx(root, 2, true)}\n  );\n}\n`,
+        contents: `// ${header}\n${imports ? `${imports}\n` : ''}${iface}${helper ? `\n${helper}\n` : ''}\nexport default function ${name}(${params}) {\n  return (\n    ${writeJsx(root, 2, new Set(allProps.filter((p) => p.type === 'boolean').map((p) => p.name)))}\n  );\n}\n`,
       });
       break;
     }

@@ -145,7 +145,7 @@ function applyMeta(node: RawNode, meta: RawNode, ctx: Ctx): void {
   }
 }
 
-function convertChildren(nodes: ChildNode[], ctx: Ctx, raw: boolean, svg = false): RawNode[] {
+function convertChildren(nodes: ChildNode[], ctx: Ctx, raw: boolean, svg = false, inline = false): RawNode[] {
   // An SVG <title> is the drawing's accessible name, so it stays.
   const kept = nodes.filter((n) => n.type === 'text' || n.type === 'comment' || (isElement(n) && (!SKIP_TAGS.has(n.name) || (svg && n.name === 'title'))));
   // Stack of open `tw:branch` directives; the bottom entry collects this level's output.
@@ -179,8 +179,10 @@ function convertChildren(nodes: ChildNode[], ctx: Ctx, raw: boolean, svg = false
       let value = node.data;
       if (!raw) {
         value = value.replace(/\s+/g, ' ');
-        if (i === 0) value = value.trimStart();
-        if (i === kept.length - 1) value = value.trimEnd();
+        // A space at the edge of an inline element (`<strong>Note: </strong>`) shows, so only a
+        // block's edges are trimmed.
+        if (i === 0 && !inline) value = value.trimStart();
+        if (i === kept.length - 1 && !inline) value = value.trimEnd();
         // Whitespace only matters between two pieces of inline content.
         if (value.trim() === '') value = !svg && inlineish(kept[i - 1]) && inlineish(kept[i + 1]) ? ' ' : '';
       }
@@ -277,7 +279,7 @@ export function convertParts(tag: string, attribs: Record<string, string>, child
     classes: a.class ?? '',
     attrs,
     styles,
-    children: impliedTbody(tag, convertChildren(children, ctx, raw || RAW_TEXT_TAGS.has(tag), childrenInSvg({ tag }, svg))),
+    children: impliedTbody(tag, convertChildren(children, ctx, raw || RAW_TEXT_TAGS.has(tag), childrenInSvg({ tag }, svg), !svg && INLINE_TAGS.has(tag))),
   };
 }
 

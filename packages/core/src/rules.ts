@@ -1,5 +1,5 @@
 import { createId } from './create';
-import { parseCss, type CssNode } from './css';
+import { declarationList, parseCss, type CssNode } from './css';
 import { displayForMedia } from './displays';
 import type { DesignKit, DisplayId, StyleMap, StyleRule } from './model';
 import { bracketsBalance, renderDisplayCss, untilStable } from './render';
@@ -63,6 +63,12 @@ export interface ParsedRules {
   rules: StyleRule[];
   /** At-rules and media queries that don't map to a display, which editable kits can't hold. */
   skipped: string[];
+  /**
+   * Rules whose effect depends on where they sit, which merging by selector would change: a
+   * property given twice in one rule (a fallback), a selector repeated after a rule that sets the
+   * same property, or a plain rule after a media query that sets the same property.
+   */
+  reordered: string[];
 }
 
 /**
@@ -74,9 +80,25 @@ export function parseRulesCss(css: string, previous: StyleRule[] = []): ParsedRu
   const bySelector = new Map<string, StyleRule>();
   const skipped: string[] = [];
   const known = new Map(previous.map((r) => [r.selector, r.id]));
-  const add = (selector: string, display: DisplayId, declarations: StyleMap) => {
+  const reordered: string[] = [];
+  const seen: { selector: string; display: DisplayId; props: Set<string> }[] = [];
+  const note = (text: string) => {
+    if (!reordered.includes(text)) reordered.push(text);
+  };
+  const add = (selector: string, display: DisplayId, declarations: StyleMap, body: string) => {
     const sel = sanitizeSelector(selector);
     if (!sel || !Object.keys(declarations).length) return;
+    const list = declarationList(body).map(([prop]) => prop);
+    const props = new Set(list);
+    if (props.size < list.length) note(`a property given twice in ${sel}`);
+    const overlaps = (other: Set<string>) => [...props].some((p) => other.has(p));
+    let last = -1;
+    seen.forEach((r, i) => {
+      if (r.selector === sel && r.display === display) last = i;
+    });
+    if (last >= 0 && seen.slice(last + 1).some((r) => overlaps(r.props))) note(`${sel} set again after other rules`);
+    if (display === 'lg' && seen.some((r) => r.display !== 'lg' && overlaps(r.props))) note(`${sel} after a media query`);
+    seen.push({ selector: sel, display, props });
     let rule = bySelector.get(sel);
     if (!rule) {
       rule = { id: known.get(sel) ?? createId('r'), selector: sel, styles: {} };
@@ -87,7 +109,7 @@ export function parseRulesCss(css: string, previous: StyleRule[] = []): ParsedRu
   const visit = (nodes: CssNode[], display: DisplayId | null) => {
     for (const node of nodes) {
       if (node.type === 'rule') {
-        if (display) add(node.selector, display, node.declarations);
+        if (display) add(node.selector, display, node.declarations, node.body);
       } else if (!display || node.name !== 'media' || !node.children) {
         skipped.push(`@${node.name}${node.prelude ? ` ${node.prelude}` : ''}`);
       } else {
@@ -98,7 +120,7 @@ export function parseRulesCss(css: string, previous: StyleRule[] = []): ParsedRu
     }
   };
   visit(parseCss(css), 'lg');
-  return { rules: [...bySelector.values()], skipped };
+  return { rules: [...bySelector.values()], skipped, reordered };
 }
 
 /** Set or clear one declaration of a rule on a display. */

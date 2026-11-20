@@ -302,6 +302,17 @@ export function saveComponent(forest: Forest, treeId: string, branchId: string, 
     const rootId = createId('b');
     const rekey = (styles: ComponentVariant['styles']) => Object.fromEntries(Object.entries(styles).map(([id, st]) => [id === found!.id ? rootId : id, st]));
     component = { ...component, root: { ...component.root, id: rootId }, variants: component.variants.map((v) => ({ ...v, styles: rekey(v.styles) })) };
+  } else {
+    // The tree's root stays in the tree with all its branches, so the template gets new ids throughout.
+    const ids = new Map<string, string>();
+    const fresh = (node: TreeNode): TreeNode => {
+      const id = createId(isBranch(node) ? 'b' : 'l');
+      ids.set(node.id, id);
+      return isBranch(node) ? { ...node, id, children: node.children.map(fresh) } : { ...node, id };
+    };
+    const root = fresh(component.root) as Branch;
+    const rekey = (styles: ComponentVariant['styles']) => Object.fromEntries(Object.entries(styles).map(([id, st]) => [ids.get(id) ?? id, st]));
+    component = { ...component, root, variants: component.variants.map((v) => ({ ...v, styles: rekey(v.styles) })) };
   }
   let next: Forest = { ...forest, components: [...(forest.components ?? []), component] };
   if (found.id !== tree.root.id) {

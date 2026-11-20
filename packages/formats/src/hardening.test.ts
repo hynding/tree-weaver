@@ -1,6 +1,6 @@
 import { createBranch, createComponent, createForest, createLeaf, createTree, instantiateComponent, text, type Branch, type TreeNode } from '@tree-weaver/core';
 import { describe, expect, it } from 'vitest';
-import { exportComponent, exportComponentDef, exportForest, exportTree, importDocument } from './index';
+import { exportComponent, exportComponentDef, exportForest, exportStorybook, exportTree, importDocument } from './index';
 
 const page = (children: Branch['children']) => createTree('Home', createBranch({ tag: 'body', type: 'root', children }));
 
@@ -507,7 +507,7 @@ describe('pass 14 fixes', () => {
   it('turns a numeric prop into a number', () => {
     const def = createComponent('Box', createBranch({ tag: 'div', attrs: { tabindex: '{{tab}}' } }));
     const out = exportComponentDef(def, { framework: 'react' }).files[0].contents;
-    expect(out).toContain("tabIndex={tab === '' ? undefined : Number(tab)}");
+    expect(out).toContain("tabIndex={tab === '' ? undefined : globalThis.Number(tab)}");
   });
 
   it('writes xmlns:xlink as xmlnsXlink and drops other xmlns: names', () => {
@@ -543,5 +543,61 @@ describe('pass 14 fixes', () => {
   it('keeps adjacent inline elements together in HTML and Svelte', () => {
     const out = jsx('<div><span>a</span><span>b</span><p>c</p></div>', { framework: 'svelte' });
     expect(out).toContain('<span>a</span><span>b</span>');
+  });
+});
+
+describe('pass 15 fixes', () => {
+  const imported = (html: string) => {
+    const doc = importDocument(`<body>${html}</body>`, 'html');
+    return doc.kind === 'tree' ? doc.tree : doc.forest.trees[0];
+  };
+  const texts = (node: TreeNode): string[] => ('children' in node ? node.children.flatMap(texts) : node.type === 'text' ? [node.value] : []);
+
+  it('keeps spaces at the edges of inline elements on HTML import', () => {
+    const tree = imported('<p><strong>Note: </strong>read this<em> carefully</em></p>');
+    expect(texts(tree.root)).toEqual(['Note: ', 'read this', ' carefully']);
+    const back = importDocument(exportTree(tree, 'html'), 'html');
+    expect(texts(back.kind === 'tree' ? back.tree.root : back.forest.trees[0].root)).toEqual(['Note: ', 'read this', ' carefully']);
+    expect(texts(imported('<p>  Hello  </p>').root)).toEqual(['Hello']);
+  });
+
+  it('keeps edge spaces in Svelte exports', () => {
+    const out = exportComponent(imported('<p><strong>Note: </strong>read this<em> carefully</em></p>'), { framework: 'svelte' }).files[0].contents;
+    expect(out).toContain("Note:{' '}</strong>");
+    expect(out).toContain("{' '}carefully</em>");
+  });
+
+  it('keeps <del> and <ins> together', () => {
+    const out = exportComponent(imported('<div><del>$10</del><ins>$8</ins><p>x</p></div>'), { framework: 'html' }).files[0].contents;
+    expect(out).toMatch(/<\/del><ins/);
+  });
+
+  it('calls the global Number even in a component named Number', () => {
+    const def = createComponent('Number', createBranch({ tag: 'td', attrs: { colspan: '{{span}}' }, children: [text('{{value}}')] }));
+    const out = exportComponentDef(def, { framework: 'react' }).files[0].contents;
+    expect(out).toContain('globalThis.Number(span)');
+    expect(out).not.toMatch(/[^.]Number\(span\)/);
+  });
+
+  it('drops a children attribute from React exports', () => {
+    const out = exportComponent(imported('<div children="Injected text"></div>'), { framework: 'react' }).files[0].contents;
+    expect(out).not.toContain('Injected text');
+  });
+
+  it('types prop bindings the way React expects', () => {
+    const btn = createComponent('Btn', createBranch({ tag: 'button', attrs: { disabled: '{{disabled}}', title: '{{pressed}}', tabindex: '{{pressed}}' } }), {
+      props: [{ name: 'disabled', type: 'text', default: '' }, { name: 'pressed', type: 'boolean', default: '' }],
+    } as never);
+    const out = exportComponentDef(btn, { framework: 'react', typescript: true }).files[0].contents;
+    expect(out).toContain("disabled={disabled !== 'false'}");
+    expect(out).toContain('title={String(pressed)}');
+    expect(out).toContain('tabIndex={globalThis.Number(pressed)}');
+  });
+
+  it('gives Storybook stories distinct ids', async () => {
+    const tree = createTree('Home', createBranch({ tag: 'body', type: 'root', children: [{ ...createBranch({ tag: 'p' }), name: 'Step 1a' }, { ...createBranch({ tag: 'p' }), name: 'Step 1A' }] }));
+    const all = exportStorybook(createForest('Site', [tree])).files.map((f) => f.content).join('\n');
+    expect(all).toContain('export const Step1a ');
+    expect(all).toContain('export const Step1A2 ');
   });
 });

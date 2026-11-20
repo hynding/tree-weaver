@@ -54,6 +54,17 @@ describe('tree-weaver CLI', () => {
     expect((await cli(['validate', 'home.tree.json'], r.files)).code).toBe(0);
   });
 
+  it('refuses to replace an existing file without --force', async () => {
+    const files = { 'home.json': '{"keep":true}' };
+    const r = await cli(['init', 'home.json'], files);
+    expect(r.code).not.toBe(0);
+    expect(r.err).toContain('already exists');
+    expect(r.files['home.json']).toBe('{"keep":true}');
+    const forced = await cli(['new', 'home.json', '--force'], files);
+    expect(forced.code).toBe(0);
+    expect(JSON.parse(forced.files['home.json']).format).toBe('tree-weaver');
+  });
+
   it('creates forests in forest formats and lists templates', async () => {
     const r = await cli(['new', 'site.forest.yaml', '--forest', '--bare', '-n', 'Site']);
     expect(r.files['site.forest.yaml']).toMatch(/^forest:/m);

@@ -372,3 +372,25 @@ describe('pass 14 fixes', () => {
     expect(insertionProblem(opened.root, def.root.id, createBranch({ tag: 'p' }))).toBeTruthy();
   });
 });
+
+describe('pass 15 fixes', () => {
+  it('reports CSS whose meaning depends on rule order', async () => {
+    const { parseRulesCss } = await import('./index');
+    expect(parseRulesCss('.a{color:red} .b{color:blue} .a{color:green}').reordered).toHaveLength(1);
+    expect(parseRulesCss('@media (max-width: 1024px){.c{color:red}} .c{color:blue}').reordered).toHaveLength(1);
+    expect(parseRulesCss('.d{width:300px; width:some-future-keyword}').reordered).toHaveLength(1);
+    expect(parseRulesCss('.a{color:red} .b{margin:0} .a{padding:0}').reordered).toEqual([]);
+    expect(parseRulesCss('.a{color:red} @media (max-width: 1024px){.a{color:blue}}').reordered).toEqual([]);
+  });
+
+  it('gives a component saved from a tree root its own ids', async () => {
+    const { saveComponent } = await import('./index');
+    const tree = createTree('T', createBranch({ tag: 'body', type: 'root', children: [createBranch({ tag: 'p', children: [text('x')] })] }));
+    const saved = saveComponent(createForest('F', [tree]), tree.id, tree.root.id, 'Page')!;
+    const ids = (n: { id: string; children?: unknown[] }): string[] => [n.id, ...((n.children ?? []) as { id: string }[]).flatMap((c) => ids(c as never))];
+    const treeIds = new Set(ids(saved.forest.trees[0].root as never));
+    expect(ids(saved.component.root as never).some((id) => treeIds.has(id))).toBe(false);
+    const result = validateDocument({ format: 'tree-weaver', version: 1, kind: 'forest', forest: saved.forest });
+    expect(result.warnings.filter((i) => /Duplicate id/.test(i.message))).toEqual([]);
+  });
+});

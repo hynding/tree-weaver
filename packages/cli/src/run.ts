@@ -182,6 +182,7 @@ from the template gallery with its own design tokens and components.
   -n, --name <name>     Name of the tree (and the forest)
       --forest          Write a forest holding the tree, instead of a tree
       --bare            Leave out the starter kit
+      --force           Replace the file if it already exists
   -f, --format <fmt>    Output format when there is no file extension (default: json)
       --list            List the templates and starters
 `,
@@ -450,6 +451,16 @@ class Cli {
     }
   }
 
+  async exists(path: string): Promise<boolean> {
+    try {
+      await this.io.readFile(path);
+      return true;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return false;
+      throw err;
+    }
+  }
+
   /** Write to a file, or to stdout when there is no file. */
   async emit(output: string | undefined, data: string): Promise<void> {
     if (output && output !== '-') await this.io.writeFile(output, data);
@@ -569,6 +580,7 @@ async function cmdNew(cli: Cli, args: string[]): Promise<number> {
     format: { type: 'string', short: 'f' },
     output: { type: 'string', short: 'o' },
     list: { type: 'boolean' },
+    force: { type: 'boolean' },
   });
   const json = !!values.json;
   if (values.list) {
@@ -582,6 +594,10 @@ async function cmdNew(cli: Cli, args: string[]): Promise<number> {
   }
   if (positionals.length > 1) throw new UsageError('new takes at most one file');
   const output = values.output ?? positionals[0];
+  // `init` and `create` make it easy to run this over a document by accident, and nothing would be kept.
+  if (output && output !== '-' && !values.force && (await cli.exists(output))) {
+    throw new Error(`${output} already exists; pass --force to replace it`);
+  }
   if (values.starter !== undefined) {
     if (values.template !== undefined) throw new UsageError('Give --template or --starter, not both');
     const starter = getStarter(values.starter);
