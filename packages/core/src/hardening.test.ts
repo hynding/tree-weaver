@@ -271,3 +271,16 @@ describe('pass 9 fixes', () => {
     expect(tmpl.children.map((c) => (c.kind === 'branch' ? c.tag : 'text'))).toEqual(['text', 'hr']);
   });
 });
+
+describe('pass 10 fixes', () => {
+  it('reports why a component instance cannot be inserted somewhere', async () => {
+    const { createComponent, instantiateComponent, insertionProblem } = await import('./index');
+    const card = createComponent('Card', createBranch({ tag: 'div', children: [createBranch({ tag: 'p', children: [text('Hi')] })] }));
+    const inst = instantiateComponent(card);
+    const svg = createBranch({ tag: 'svg' });
+    const root = createBranch({ tag: 'body', children: [inst, svg] });
+    expect(insertionProblem(root, (inst.children[0] as typeof inst).id, instantiateComponent(card))).toMatch(/component instance/);
+    expect(insertionProblem(root, svg.id, instantiateComponent(card))).toMatch(/inside an SVG/);
+    expect(insertionProblem(root, root.id, instantiateComponent(card))).toBeNull();
+  });
+});

@@ -336,3 +336,52 @@ describe('pass 9 fixes', () => {
     }
   });
 });
+
+describe('pass 10 fixes', () => {
+  const back = (tree: ReturnType<typeof page>) => {
+    const doc = importDocument(exportTree(tree, 'markdown'), 'markdown');
+    if (doc.kind !== 'tree') throw new Error('expected a tree');
+    return doc.tree;
+  };
+
+  it('drops script URLs written with character references from Markdown', () => {
+    const a = createBranch({ tag: 'a', attrs: { href: '&#106;avascript:alert(1)' }, children: [text('click')] });
+    const img = createLeaf('java&#115;cript:alert(2)', 'image', { alt: 'x' });
+    const md = exportTree(page([createBranch({ tag: 'p', children: [a, text(' '), img] })]), 'markdown');
+    expect(md).not.toMatch(/avascript|cript:/);
+  });
+
+  it('escapes < in front matter, which reads back unchanged', () => {
+    const tree = createTree('<img src=x onerror=alert(1)>', createBranch({ tag: 'body', type: 'root', children: [createBranch({ tag: 'p', children: [text('hi')] })] }));
+    const md = exportTree(tree, 'markdown');
+    expect(md.split('---')[1]).not.toContain('<');
+    expect(back(tree).name).toBe('<img src=x onerror=alert(1)>');
+  });
+
+  it('keeps a | in an inline HTML attribute inside its table cell', () => {
+    const cell = (tag: 'th' | 'td', c: TreeNode) => createBranch({ tag, children: [c] });
+    const abbr = createBranch({ tag: 'abbr', attrs: { title: 'Pro | Team' }, children: [text('Pro')] });
+    const table = createBranch({ tag: 'table', children: [createBranch({ tag: 'thead', children: [createBranch({ tag: 'tr', children: [cell('th', text('Plan')), cell('th', text('Price'))] })] }), createBranch({ tag: 'tbody', children: [createBranch({ tag: 'tr', children: [cell('td', abbr), cell('td', text('$5'))] })] })] });
+    expect(JSON.stringify(back(page([table])).root)).toContain('"title":"Pro | Team"');
+  });
+
+  it('escapes block syntax that trimming brings to the start of a line', () => {
+    const tree = back(page([createBranch({ tag: 'p', children: [text(' '), text('# looks like text')] }), createBranch({ tag: 'p', children: [createBranch({ tag: 'em' }), text('- also text')] })]));
+    expect(tree.root.children.map((c) => (c as Branch).tag)).toEqual(['p', 'p']);
+  });
+
+  it('keeps lists nested under items numbered 10 and up', () => {
+    const items = Array.from({ length: 10 }, (_, i) => createBranch({ tag: 'li', children: [text(`item ${i + 1}`)] }));
+    items[9] = createBranch({ tag: 'li', children: [text('item 10'), createBranch({ tag: 'ul', children: [createBranch({ tag: 'li', children: [text('nested')] })] })] });
+    const tree = back(page([createBranch({ tag: 'ol', children: items })]));
+    expect(tree.root.children).toHaveLength(1);
+    expect(((tree.root.children[0] as Branch).children[9] as Branch).children.some((c) => c.kind === 'branch' && c.tag === 'ul')).toBe(true);
+  });
+
+  it('drops prefixed SVG attributes whose namespace is not kept', () => {
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:i="urn:x" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1 1"><g i:extraneous="self"><a xlink:href="https://e.com" xlink:title="t"><circle r="1"/></a></g></svg>';
+    const out = exportTree((importDocument(svg, 'svg') as { tree: ReturnType<typeof page> }).tree, 'svg');
+    expect(out).not.toMatch(/\bi:|xlink:/);
+    expect(out).toContain('href="https://e.com"');
+  });
+});

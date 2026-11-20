@@ -77,6 +77,42 @@ export interface PatchOptions {
   takenIds?: ReadonlySet<string>;
 }
 
+/** Whether a node is a component instance (`root`), inside one (`inside`), or neither. */
+export function instanceRoleIn(root: Branch, id: string): 'root' | 'inside' | null {
+  let role: 'root' | 'inside' | null = null;
+  const visit = (n: TreeNode, inInstance: boolean): boolean => {
+    if (n.id === id) {
+      role = inInstance ? 'inside' : isBranch(n) && n.instance ? 'root' : null;
+      return true;
+    }
+    return isBranch(n) && n.children.some((c) => visit(c, inInstance || !!n.instance));
+  };
+  visit(root, false);
+  return role;
+}
+
+const INSTANCE_EDIT = 'is part of a component instance, whose content comes from the component; edit the component, or detach the instance first';
+
+/**
+ * Why `node` can't go into `parentId`, or null: the parent is (or is inside) a component instance,
+ * or the node, or anything it holds, would break the SVG/HTML placement rules there. For callers
+ * that insert outside a patch (a new component instance).
+ */
+export function insertionProblem(root: Branch, parentId: string, node: TreeNode): string | null {
+  if (instanceRoleIn(root, parentId)) return `The parent ${INSTANCE_EDIT}`;
+  const own = placementProblem(root, parentId, node);
+  if (own) return own;
+  const placed = insertNode(root, parentId, node);
+  let problem: string | null = null;
+  const visit = (parent: Branch): boolean =>
+    parent.children.some((child) => {
+      problem = placementProblem(placed, parent.id, child);
+      return problem !== null || (isBranch(child) && visit(child));
+    });
+  if (isBranch(node)) visit(node);
+  return problem;
+}
+
 /** Every node id in the forest's trees other than `treeId`, for `PatchOptions.takenIds`. */
 export function idsOutside(trees: readonly Tree[], treeId: string): Set<string> {
   const ids = new Set<string>();
@@ -274,19 +310,7 @@ export function applyPatch(root: Branch, ops: unknown, options: PatchOptions = {
    * An instance's children (and its own tag, classes, styles and attributes) are its component's
    * template, expanded again on every load, so an edit there would be silently undone.
    */
-  const instanceRole = (id: string): 'root' | 'inside' | null => {
-    let role: 'root' | 'inside' | null = null;
-    const visit = (n: TreeNode, inInstance: boolean): boolean => {
-      if (n.id === id) {
-        role = inInstance ? 'inside' : isBranch(n) && n.instance ? 'root' : null;
-        return true;
-      }
-      return isBranch(n) && n.children.some((c) => visit(c, inInstance || !!n.instance));
-    };
-    visit(current, false);
-    return role;
-  };
-  const INSTANCE_EDIT = 'is part of a component instance, whose content comes from the component; edit the component, or detach the instance first';
+  const instanceRole = (id: string) => instanceRoleIn(current, id);
   const notInInstance = (id: string, path: string, allowRoot: boolean) => {
     const role = instanceRole(id);
     if (role === 'inside' || (role === 'root' && !allowRoot)) throw new Error(`${path} ${INSTANCE_EDIT}`);

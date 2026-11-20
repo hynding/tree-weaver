@@ -136,3 +136,11 @@ describe('unquoted attribute values with quotes inside', () => {
     expect((expandShorthand("a[href=/o'brien]: Bio") as Branch).attrs.href).toBe("/o'brien");
   });
 });
+
+describe('capitalised labels', () => {
+  it('stays text when a label looks like a tag name', async () => {
+    const { expandShorthand } = await import('./shorthand');
+    for (const s of ['Q: How much?', 'Address: 1 Main St', 'Time: 9am']) expect(expandShorthand(s)).toMatchObject({ kind: 'leaf', value: s });
+    expect(expandShorthand('address: 1 Main St')).toMatchObject({ kind: 'branch', tag: 'address' });
+  });
+});

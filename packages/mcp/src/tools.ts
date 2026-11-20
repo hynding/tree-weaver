@@ -17,6 +17,7 @@ import {
   type DesignToken,
   applyPatch,
   idsOutside,
+  insertionProblem,
   findVersion,
   formatDiff,
   parseVersionLog,
@@ -601,6 +602,8 @@ export class Tools {
       if (name) variants[display as DisplayId] = name;
     }
     const inst = instantiateComponent(def, args.props, variants);
+    const problem = insertionProblem(tree.root, parent.id, inst);
+    if (problem) throw new ToolError(problem);
     const root = insertNode(tree.root, parent.id, inst, args.index);
     const next: Forest = { ...forest, trees: forest.trees.map((t) => (t.id === tree.id ? { ...t, root } : t)), updatedAt: new Date().toISOString() };
     const summary = `Inserted "${def.name}" as ${inst.id} into ${parent.name ?? `<${parent.tag}>`} (${parent.id}).`;

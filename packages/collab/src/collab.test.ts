@@ -250,3 +250,17 @@ describe('peer data that is not a string', () => {
     expect(f.name).toBe('Shared forest');
   });
 });
+
+describe('peer kits and components', () => {
+  it('skips a malformed kit instead of throwing', () => {
+    const doc = new Y.Doc();
+    writeForest(doc, null, sample());
+    const kits = doc.getMap<Y.Map<unknown>>('kits');
+    const bad = new Y.Map<unknown>();
+    kits.set('bad', bad);
+    bad.set('order', 'zz');
+    bad.set('data', JSON.stringify({ name: 'Bad', css: '', enabled: true, tokens: [null] }));
+    const f = readForest(doc)!;
+    expect(f.kits.some((k) => k.id === 'bad')).toBe(false);
+  });
+});

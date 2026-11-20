@@ -85,7 +85,7 @@ const oneLine = (text: string): string => text.replace(/\s*[\n\r]\s*/g, ' ');
 const inlineHtml = (html: string): string =>
   html
     .split(/(<[^>]*>)/)
-    .map((part, i) => (i % 2 ? part : part.replace(/[\\`*_[\]~!:|#+\-=.(){}]/g, (c) => `&#${c.charCodeAt(0)};`)))
+    .map((part, i) => (i % 2 ? (inTable ? part.replace(/\|/g, '&#124;') : part) : part.replace(/[\\`*_[\]~!:|#+\-=.(){}]/g, (c) => `&#${c.charCodeAt(0)};`)))
     .join('')
     .replace(/\r/g, '&#13;')
     .replace(/\n/g, '&#10;');
@@ -108,7 +108,7 @@ function inline(node: TreeNode, first: boolean): string {
     return longest ? `${ticks} ${code} ${ticks}` : `${ticks}${code}${ticks}`;
   }
   // A script link is dropped, as in every other export; its text stays.
-  if (tag === 'a' && node.attrs.href !== undefined && !isSafeAttr('href', node.attrs.href)) return content();
+  if (tag === 'a' && node.attrs.href !== undefined && !safeUrl('href', node.attrs.href)) return content();
   if (tag === 'a' && !needsMeta(node, LINK_ATTRS) && node.attrs.href !== undefined) {
     return `[${content()}](${escapeUrl(node.attrs.href)}${titleOf(node.attrs.title)})`;
   }
@@ -123,13 +123,33 @@ function wrapTrimmed(text: string, mark: string): string {
 
 function image(leaf: Leaf): string {
   const alt = escapeMarkdown(oneLine(leaf.attrs?.alt ?? ''));
-  if (!isSafeAttr('src', leaf.value)) return alt;
+  if (!safeUrl('src', leaf.value)) return alt;
   const extra = Object.keys(leaf.attrs ?? {}).filter((k) => k !== 'alt' && k !== 'title');
   if (extra.length) return inlineHtml(renderNodeHtml(leaf));
   return `![${alt}](${escapeUrl(leaf.value)}${titleOf(leaf.attrs?.title)})`;
 }
 
 const inlineRun = (nodes: TreeNode[]): string => nodes.map((n, i) => inline(n, i === 0)).join('');
+/**
+ * An inline run as one trimmed line, with block syntax at its start escaped: trimming can bring
+ * any child (not just the first) to the start, where `#`, `-` or `1.` would start a block.
+ */
+const inlineLine = (nodes: TreeNode[]): string =>
+  inlineRun(nodes)
+    .trim()
+    .replace(/^([#+-])/, '\\$1')
+    .replace(/^(\d+)([.)])/, '$1\\$2');
+
+/**
+ * Whether a link or image URL is safe as Markdown writes it. Markdown decodes character
+ * references in link targets, so `&#106;avascript:` is checked decoded too.
+ */
+function safeUrl(name: string, url: string): boolean {
+  if (!isSafeAttr(name, url)) return false;
+  const el = parseDocument(`<a x="${url.replace(/"/g, '&quot;')}">`, { decodeEntities: true }).children[0];
+  const decoded = el && 'attribs' in el ? ((el.attribs as Record<string, string>).x ?? '') : '';
+  return isSafeAttr(name, decoded);
+}
 
 const directive = (kind: string, data?: unknown): string => `<!-- tw:${kind}${data === undefined ? '' : ` ${directiveJson(data)}`} -->`;
 
@@ -139,8 +159,8 @@ function blocks(nodes: TreeNode[]): string[] {
   let run: TreeNode[] = [];
   const flush = () => {
     if (!run.length) return;
-    const text = inlineRun(run);
-    if (text.trim()) out.push(`${directive('inline')}\n${text.trim()}`);
+    const text = inlineLine(run);
+    if (text) out.push(`${directive('inline')}\n${text}`);
     run = [];
   };
   for (const node of nodes) {
@@ -163,7 +183,7 @@ function container(b: Branch): string {
   return inner.length ? `${open}\n\n${inner.join('\n\n')}\n\n<!-- /tw:branch -->` : `${open}\n<!-- /tw:branch -->`;
 }
 
-function list(b: Branch, depth: number): string | null {
+function list(b: Branch, pad = ''): string | null {
   const ordered = b.tag === 'ol';
   const lines: string[] = [];
   const start = Number.parseInt(b.attrs.start ?? '1', 10);
@@ -175,11 +195,11 @@ function list(b: Branch, depth: number): string | null {
     // Inline content must come first; nested lists after it.
     if (item.children.slice(0, inlineKids.length).some((c) => !isInlineNode(c))) return null;
     const marker = ordered ? `${n++}.` : '-';
-    const pad = '   '.repeat(depth);
-    lines.push(`${pad}${marker} ${inlineRun(inlineKids).trim()}`);
+    lines.push(`${pad}${marker} ${inlineLine(inlineKids)}`);
     for (const sub of nested) {
       if (!isBranch(sub) || (sub.tag !== 'ul' && sub.tag !== 'ol') || needsMeta(sub)) return null;
-      const md = list(sub, depth + 1);
+      // A nested list lines up with its item's text: past the marker (`10.` is wider than `-`).
+      const md = list(sub, pad + ' '.repeat(marker.length + 1));
       if (md === null) return null;
       lines.push(md);
     }
@@ -213,7 +233,7 @@ function table(b: Branch): string | null {
     if (!c) return '';
     inTable = true;
     try {
-      return inlineRun((c as Branch).children).trim();
+      return inlineLine((c as Branch).children);
     } finally {
       inTable = false;
     }
@@ -230,12 +250,12 @@ function block(b: Branch): string {
   if (b.tag === 'svg') return inlineHtml(renderNodeHtml(b)).replace(/^(<svg\b[^>]*>)/, '$1\n');
   const allInline = b.children.every(isInlineNode);
   const heading = HEADING.exec(b.tag);
-  if (heading && allInline && b.children.length) return withMeta(b, `${'#'.repeat(Number(heading[1]))} ${inlineRun(b.children).trim()}`);
-  if (b.tag === 'p' && allInline && b.children.length) return withMeta(b, inlineRun(b.children).trim());
+  if (heading && allInline && b.children.length) return withMeta(b, `${'#'.repeat(Number(heading[1]))} ${inlineLine(b.children)}`);
+  if (b.tag === 'p' && allInline && b.children.length) return withMeta(b, inlineLine(b.children));
   if (b.tag === 'hr' && !needsMeta(b)) return '---';
   if ((b.tag === 'ul' || b.tag === 'ol') && b.children.length) {
     const allowed = new Set(b.tag === 'ol' ? ['start'] : []);
-    const md = list(b, 0);
+    const md = list(b);
     if (md !== null) return withMeta(b, md, allowed);
   }
   if (b.tag === 'table') {
@@ -275,7 +295,11 @@ export function exportMarkdown(tree: Tree, opts: MarkdownExportOptions = {}): st
   if (opts.kits?.length) front.kits = opts.kits;
   // Markdown is a page format: an SVG tree's drawing goes in as inline SVG.
   const body = blocks(isSvgRoot(tree.root) ? [tree.root] : tree.root.children).join('\n\n');
-  return `---\n${stringifyYaml(front, { lineWidth: 0 })}---\n\n${body}\n`;
+  // Renderers without front matter show it as text, where HTML in a name or CSS would be live:
+  // then every string is double-quoted with `<` escaped (YAML reads `\x3C` back as `<`).
+  let yaml = stringifyYaml(front, { lineWidth: 0 });
+  if (yaml.includes('<')) yaml = stringifyYaml(front, { lineWidth: 0, defaultStringType: 'QUOTE_DOUBLE', defaultKeyType: 'QUOTE_DOUBLE' }).replace(/</g, '\\x3C');
+  return `---\n${yaml}---\n\n${body}\n`;
 }
 
 /* ----------------------------------------------------------------- import */

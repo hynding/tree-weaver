@@ -19,7 +19,7 @@ export const FORMATS: readonly FormatInfo[] = [
   { id: 'xml', label: 'XML', extensions: ['xml'], mime: 'application/xml', forest: true, lossless: true },
   { id: 'html', label: 'HTML', extensions: ['html', 'htm'], mime: 'text/html', forest: false, lossless: false },
   { id: 'markdown', label: 'Markdown', extensions: ['md', 'markdown'], mime: 'text/markdown', forest: false, lossless: false },
-  { id: 'svg', label: 'SVG', extensions: ['svg'], mime: 'image/svg+xml', forest: false, lossless: true },
+  { id: 'svg', label: 'SVG', extensions: ['svg'], mime: 'image/svg+xml', forest: false, lossless: false },
 ];
 
 export function getFormat(id: FormatId): FormatInfo {

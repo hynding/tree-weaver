@@ -1,5 +1,5 @@
 import * as Y from 'yjs';
-import { isBranch, isStylesheetUrl, normalizeComponent, type Branch, type ComponentDef, type DesignKit, type DisplayStyles, type Forest, type Leaf, type Tree, type TreeNode } from '@tree-weaver/core';
+import { isBranch, normalizeComponent, normalizeKit, syncInstances, type Branch, type ComponentDef, type DesignKit, type DisplayStyles, type Forest, type Leaf, type Tree, type TreeNode } from '@tree-weaver/core';
 
 /**
  * Live collaboration for Tree Weaver: a forest as a Yjs document, so people editing the same
@@ -417,11 +417,14 @@ export function readForest(doc: Y.Doc): Forest | null {
     .filter((k): k is { id: string; order: string; kit: DesignKit } => !!k.kit)
     .sort(byOrder)
     .filter((k) => isObj(k.kit) && typeof k.kit.css === 'string')
-    .map((k) => {
-      // A peer's kit link must still be a stylesheet URL, as on import.
-      const kit: DesignKit = { ...k.kit, id: k.id, name: String(k.kit.name ?? ''), enabled: k.kit.enabled !== false };
-      if (kit.href !== undefined && (typeof kit.href !== 'string' || !isStylesheetUrl(kit.href))) delete kit.href;
-      return kit;
+    .flatMap((k) => {
+      // A peer's kit goes through the same checks as an imported one (rules, tokens, link);
+      // a malformed one is skipped rather than breaking every client that reads it.
+      try {
+        return [{ ...normalizeKit({ ...k.kit, id: k.id }, `kits.${k.id}`), name: String(k.kit.name ?? '') }];
+      } catch {
+        return [];
+      }
     });
   const components: ComponentDef[] = [];
   const componentEntries = [...m.components.entries()].map(([id, c]) => ({ id, order: (c.get('order') as string) ?? '', data: parse<unknown>(c.get('data'), null) })).sort(byOrder);
@@ -433,7 +436,9 @@ export function readForest(doc: Y.Doc): Forest | null {
     }
   }
   const updatedAt = trees.reduce((latest, t) => (t.updatedAt > latest ? t.updatedAt : latest), strOr(m.forest.get('createdAt'), ''));
-  return {
+  // Instances are expanded again from the shared components: two peers' edits to one component
+  // keep only one definition, and every canvas should show that one now, not on the next load.
+  return syncInstances({
     id: strOr(m.forest.get('id'), ''),
     name: strOr(m.forest.get('name'), 'Shared forest'),
     version: 1,
@@ -442,7 +447,7 @@ export function readForest(doc: Y.Doc): Forest | null {
     ...(components?.length ? { components } : {}),
     createdAt: strOr(m.forest.get('createdAt'), updatedAt),
     updatedAt,
-  };
+  });
 }
 
 /* ------------------------------------------------------------------ share links */

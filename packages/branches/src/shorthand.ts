@@ -101,7 +101,9 @@ interface Selector {
 /** Parse `tag.class#id[attr=value]`, or null when it isn't one or names an unknown element. */
 export function parseSelector(value: string): Selector | null {
   const m = SELECTOR.exec(value);
-  if (!m || !KNOWN_TAGS.has(m[1].toLowerCase())) return null;
+  // Case matters, so a capitalised label ("Address: 1 Main St", "Q: …") stays text: HTML names
+  // in lowercase, SVG names in lowercase or their own case (`linearGradient`).
+  if (!m || !(m[1] === m[1].toLowerCase() ? KNOWN_TAGS.has(m[1]) : SVG_BRANCH_TAGS.includes(m[1]))) return null;
   const attrs: Record<string, string> = {};
   if (m[3]) attrs.id = m[3];
   for (const a of m[4].matchAll(ATTR)) attrs[a[1]] = (a[2] ?? '').replace(/^(["'])([\s\S]*)\1$/, '$2');

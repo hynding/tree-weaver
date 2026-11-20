@@ -81,7 +81,10 @@ function clean(el: Element): Element {
   el.children = el.children.filter((c) => !isElement(c) || (!DROP.has(c.name.replace(/^svg:/, '')) && !/^(?!svg:)\w+:/.test(c.name)));
   el.name = el.name.replace(/^svg:/, '');
   for (const name of Object.keys(el.attribs)) {
-    if (/^(xmlns:|inkscape:|sodipodi:|sketch:|serif:)/.test(name)) delete el.attribs[name];
+    // Namespace declarations are dropped, so any other prefixed attribute (`i:extraneous`,
+    // `xlink:title`) would be unbound in the file written back. `xml:` needs none, and
+    // `xlink:href` is read as `href`.
+    if (/^xmlns:/.test(name) || (/^[\w.-]+:/.test(name) && !/^xml:/.test(name) && name.toLowerCase() !== 'xlink:href')) delete el.attribs[name];
   }
   el.children.forEach((c) => isElement(c) && clean(c));
   return el;

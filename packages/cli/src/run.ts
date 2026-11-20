@@ -6,6 +6,7 @@ import { parseArgs, type ParseArgsConfig } from 'node:util';
 import {
   applyPatch,
   idsOutside,
+  insertionProblem,
   saveComponent,
   findComponent,
   instantiateComponent,
@@ -1103,6 +1104,8 @@ async function cmdComponents(cli: Cli, args: string[]): Promise<number> {
       let index = values.index !== undefined ? Number(values.index) : undefined;
       // Negative counts from the end, as for `add`.
       if (index !== undefined && index < 0) index = Math.max(0, parent.children.length + 1 + index);
+      const problem = insertionProblem(tree.root, parent.id, inst);
+      if (problem) throw new Error(problem);
       const root = insertNode(tree.root, parent.id, inst, index);
       const target = await write(replaceTree(doc.forest, { ...tree, root }), `Before inserting "${def.name}"`);
       cli.reportAfter(target, json, { id: inst.id, component: def.id, output: target }, `Inserted "${def.name}" #${inst.id} into ${parent.name ?? parent.tag}${target ? ` in ${target}` : ''}`);
