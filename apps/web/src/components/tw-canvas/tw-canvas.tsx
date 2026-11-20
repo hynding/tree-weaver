@@ -349,11 +349,14 @@ export class TwCanvas {
     };
     const onBlur = () => finish(true);
     const onKey = (ev: KeyboardEvent) => {
+      // The key ends the edit; it isn't also a shortcut (Escape would select the parent).
       if (ev.key === 'Enter' && !ev.shiftKey) {
         ev.preventDefault();
+        ev.stopPropagation();
         span.blur();
       } else if (ev.key === 'Escape') {
         ev.preventDefault();
+        ev.stopPropagation();
         span.removeEventListener('blur', onBlur);
         finish(false);
       }

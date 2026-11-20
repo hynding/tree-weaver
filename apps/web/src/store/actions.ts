@@ -183,7 +183,9 @@ export async function saveNow(checkOtherTabs = true): Promise<boolean> {
   state.saveState = 'saving';
   try {
     const at = new Date().toISOString();
-    if (checkOtherTabs && baseline?.id === forest.id) {
+    // While the forest is shared, the room keeps this browser's tabs in step, so a save from
+    // another tab in the room is the same edits, not a conflict.
+    if (checkOtherTabs && baseline?.id === forest.id && state.collabStatus !== 'live') {
       const stored = await store.load(forest.id);
       if (stored && stored.updatedAt !== baseline.at) {
         // Another tab saved this forest since: keep both, this tab's version as a copy.
@@ -305,6 +307,8 @@ export async function init(): Promise<void> {
   tabs?.addEventListener('message', (e: MessageEvent<{ id: string; at: string }>) => {
     const { id, at } = e.data ?? {};
     if (!id || id !== state.forest?.id || state.saveState !== 'saved' || baseline?.at === at) return;
+    // While shared, the room already brought that tab's edits here.
+    if (state.collabStatus === 'live') return;
     void store.load(id).then((latest) => {
       if (!latest || state.forest?.id !== id || state.saveState !== 'saved') return;
       openLoaded(latest, state.treeId);

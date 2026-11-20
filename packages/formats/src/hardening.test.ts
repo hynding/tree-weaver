@@ -1258,3 +1258,18 @@ describe('pass 36 fixes', () => {
     expect(out).not.toMatch(/\bjustify-start\b/);
   });
 });
+
+describe('pass 37 fixes', () => {
+  const tw = (styles: Record<string, string>) =>
+    exportComponent(page([createBranch({ tag: 'div', styles: { lg: styles }, children: [text('x')] })]), { framework: 'html', styling: 'tailwind' }).files[0].contents;
+
+  it('writes a quote inside a CSS string as an escape Tailwind can read', () => {
+    expect(tw({ content: '"\\""' })).toContain(`[content:'\\22_']`);
+    expect(tw({ 'font-family': '"Font \\"X\\"", serif' })).toContain(`[font-family:'Font_\\22_X\\22_',serif]`);
+    expect(tw({ 'background-image': `url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg"/>')` })).toContain('xmlns=%22http://www.w3.org/2000/svg%22');
+  });
+
+  it('keeps grid line names in the grid utility', () => {
+    expect(tw({ display: 'grid', 'grid-template-columns': '[a] 1fr [b] 2fr [c]' })).toContain('grid-cols-[[a]_1fr_[b]_2fr_[c]]');
+  });
+});

@@ -232,7 +232,12 @@ const VALUE_UTILITIES: Record<string, string> = {
 const bracket = (value: string): string =>
   value
     .trim()
-    .replace(/"((?:[^"\\]|\\.)*)"/g, (_, inner: string) => `'${inner.replace(/\\"/g, '"').replace(/(^|[^\\])'/g, "$1\\'")}'`)
+    // Strings are read in order, so a `"` inside a single-quoted string stays inside it.
+    // A `"` left inside a string would be escaped in the markup too: it becomes the CSS escape
+    // `\22` (its `_` turns into the space that ends the escape), written in after the spaces below.
+    .replace(/'(?:[^'\\]|\\.)*'|"((?:[^"\\]|\\.)*)"/g, (whole, inner: string | undefined) =>
+      (inner === undefined ? whole : `'${inner.replace(/\\"/g, '"').replace(/(^|[^\\])'/g, "$1\\'")}'`).replace(/\\?"/g, '\u0000'),
+    )
     // Tailwind leaves `url(…)` as written, so spaces there are percent-encoded instead.
     .split(/(url\(\s*(?:"[^"]*"|'[^']*'|[^)]*?)\s*\))/i)
     .map((part, i) =>
@@ -243,12 +248,18 @@ const bracket = (value: string): string =>
             .replace(/\s+\)$/, ')')
             // `<` and `>` too (inline SVG data URIs): markup would escape them, and Tailwind reads the source.
             .replace(/[\s<>]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`)
+            // …and its quotes (`"` in an inline SVG), as `%22`.
+            .replace(/\u0000/g, '%22')
         : part
             .replace(/_/g, '\\_')
             .replace(/\s*,\s*/g, ',')
             .replace(/\s+/g, '_'),
     )
-    .join('');
+    .join('')
+    .replace(/\u0000/g, '\\22_');
+
+/** Whether every `[` in a value is closed by a later `]`, with none nested. */
+const balancedBrackets = (v: string): boolean => /^[^[\]]*(\[[^[\]]*\][^[\]]*)*$/.test(v);
 
 /**
  * One declaration as a Tailwind class (without the display variant). With the forest's token
@@ -266,7 +277,10 @@ export function tailwindClass(prop: string, value: string, tokenKinds?: Readonly
   const utility = Object.hasOwn(VALUE_UTILITIES, prop) ? VALUE_UTILITIES[prop] : undefined;
   // The utility even for `0 auto` (`m-[0_auto]`): Tailwind v3 writes arbitrary properties after
   // every utility, so `[margin:0_auto]` would beat an `mt-[2rem]` meant to override it.
-  if (utility && !/[[\]]/.test(v)) return `${utility}-[${bracket(v)}]`;
+  // Grid line names (`[a] 1fr [b]`) go in the utility too: Tailwind v3 can't read brackets nested
+  // in an arbitrary property, but takes balanced ones in a utility's value.
+  const lineNames = /^grid-template-(columns|rows)$/.test(prop) && balancedBrackets(v);
+  if (utility && (!/[[\]]/.test(v) || lineNames)) return `${utility}-[${bracket(v)}]`;
   return `[${prop}:${bracket(v)}]`;
 }
 

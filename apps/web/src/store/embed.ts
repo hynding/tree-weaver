@@ -23,7 +23,11 @@ const FORMAT_IDS = FORMATS.map((f) => f.id) as string[];
 let hostOrigin: string | null = null;
 
 function post(message: EditorMessage, origin: string): void {
-  window.parent.postMessage(message, origin);
+  try {
+    window.parent.postMessage(message, origin);
+  } catch (err) {
+    console.warn(`Tree Weaver: could not message the host page: ${(err as Error).message}`);
+  }
 }
 
 /** Decode `#doc=` (base64url, UTF-8). */
@@ -200,6 +204,15 @@ function listen(): void {
     if (ev.source !== window.parent || window.parent === window) return;
     const msg = ev.data as HostMessage;
     if (!msg || typeof msg !== 'object' || msg.source !== 'tree-weaver-host') return;
+    // A page with an opaque origin (file://, a sandboxed frame) can't be named as a target, and
+    // answering with '*' would hand documents to whatever the parent frame shows next. Say why.
+    if (ev.origin === 'null') {
+      if (msg.id !== undefined) {
+        const error = 'The editor can only be driven from a page served over http(s), not from file:// or a sandboxed frame';
+        post({ source: 'tree-weaver-editor', type: 'response', id: String(msg.id), ok: false, error } as EditorMessage, '*');
+      }
+      return;
+    }
     if (allowed.length ? !allowed.includes(ev.origin) : hostOrigin !== null && hostOrigin !== ev.origin) {
       console.warn(`Tree Weaver: ignoring a message from ${ev.origin}`);
       return;
