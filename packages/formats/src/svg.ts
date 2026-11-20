@@ -14,6 +14,7 @@ import type { ChildNode, Element } from 'domhandler';
 import { parseDocument } from 'htmlparser2';
 import { fromData } from './data';
 import { convertParts, readTreeCss, type Ctx } from './html';
+import { commentText } from './slug';
 import { FormatError, type TreeDocument } from './types';
 
 /*
@@ -60,7 +61,7 @@ export function exportSvg(tree: Tree, opts: SvgExportOptions = {}): string {
   // Designer markup keeps text leaves' ids on <tspan>s, which a standalone SVG draws the same.
   const markup = renderNodeHtml(svg, { pretty: true, xml: true, designer: true });
   const body = styles.length ? markup.replace(/^(<svg\b[^>]*>)/, `$1\n  ${styles.join('\n  ')}`) : markup;
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<!-- ${tree.name.replace(/--/g, '- -')} · made with Tree Weaver -->\n${body}\n`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<!-- ${commentText(tree.name).replace(/-+/g, '-')} · made with Tree Weaver -->\n${body}\n`;
 }
 
 /* ----------------------------------------------------------------- import */

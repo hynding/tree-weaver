@@ -19,7 +19,9 @@ import { DOCUMENT_VERSION, FormatError, type TreeDocument } from './types';
  *         <leaf id type="image" value="cat.png"><attr name="alt" value="A cat"/></leaf>
  *         <leaf id type="shape" value="circle"><attr name="r" value="40"/></leaf>
  *       </branch>
+ *       <branch id tag><instance>{"component":"c1","props":{}}</instance>…</branch>
  *     </tree>
+ *     <components>[ComponentDef JSON]</components>
  *   </forest>
  * </tree-weaver>
  *
@@ -43,11 +45,13 @@ function nodeXml(node: TreeNode, pad: string): string[] {
   if (node.kind === 'leaf') {
     const head = `<leaf${attrs({ id: node.id, type: node.type, value: node.type === 'text' ? undefined : node.value })}`;
     const extra = Object.entries(node.attrs ?? {}).map(([n, v]) => `<attr${attrs({ name: n })} value="${esc(v)}"/>`);
-    if (node.type === 'text') return [`${pad}${head}>${escText(node.value)}</leaf>`];
+    if (node.type === 'text') return [`${pad}${head}>${extra.join('')}${escText(node.value)}</leaf>`];
     return extra.length ? [`${pad}${head}>${extra.join('')}</leaf>`] : [`${pad}${head}/>`];
   }
   const inner = `${pad}  `;
   const lines: string[] = [];
+  // A linked component instance: its link, as JSON (the expanded children follow as usual).
+  if (node.instance) lines.push(`${inner}<instance>${escText(JSON.stringify(node.instance))}</instance>`);
   for (const [name, value] of Object.entries(node.attrs)) lines.push(`${inner}<attr${attrs({ name })} value="${esc(value)}"/>`);
   for (const display of DISPLAY_IDS) {
     const styles = node.styles[display];
@@ -87,6 +91,7 @@ export function exportXml(doc: TreeDocument): string {
     lines.push(`  <forest${attrs({ id: f.id, name: f.name, 'created-at': f.createdAt, 'updated-at': f.updatedAt })}>`);
     lines.push(...kitsXml(f.kits, '    '));
     for (const tree of f.trees) lines.push(...treeXml(tree, '    '));
+    if (f.components?.length) lines.push(`    <components>${escText(JSON.stringify(f.components))}</components>`);
     lines.push('  </forest>');
   } else {
     lines.push(...kitsXml(doc.kits, '  '), ...treeXml(doc.tree, '  '));
@@ -105,9 +110,18 @@ const localName = (el: Element): string => el.name.replace(/^.*:/, '');
 const textOf = (el: Element): string =>
   el.children.map((c) => ('data' in c ? (c.data as string) : c.type === 'tag' ? textOf(c as Element) : '')).join('');
 
+function json(text: string, what: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new FormatError(`<${what}> does not hold valid JSON`, 'xml');
+  }
+}
+
 function readNode(el: Element): Record<string, unknown> {
   const a = el.attribs;
   if (localName(el) === 'leaf') {
+    // Text leaves hold their attrs as <attr> children before the text, which has no element children.
     const leafAttrs = Object.fromEntries(elements(el, 'attr').map((x) => [x.attribs.name, x.attribs.value ?? '']));
     return { kind: 'leaf', id: a.id, type: a.type, value: a.type === 'image' || a.type === 'shape' ? a.value : (a.value ?? textOf(el)), attrs: leafAttrs };
   }
@@ -125,6 +139,7 @@ function readNode(el: Element): Record<string, unknown> {
     classes: a.class ?? '',
     attrs: Object.fromEntries(elements(el, 'attr').map((x) => [x.attribs.name, x.attribs.value ?? ''])),
     styles,
+    ...(elements(el, 'instance')[0] ? { instance: json(textOf(elements(el, 'instance')[0]), 'instance') } : {}),
     children: el.children
       .filter((c): c is Element => c.type === 'tag' && (localName(c) === 'branch' || localName(c) === 'leaf'))
       .map(readNode),
@@ -161,6 +176,7 @@ export function importXml(text: string): TreeDocument {
       updatedAt: a['updated-at'],
       kits: readKits(elements(forestEl, 'kits')[0]),
       trees: elements(forestEl, 'tree').map(readTree),
+      ...(elements(forestEl, 'components')[0] ? { components: json(textOf(elements(forestEl, 'components')[0]), 'components') } : {}),
     };
     return fromData({ version, forest }, 'xml');
   }

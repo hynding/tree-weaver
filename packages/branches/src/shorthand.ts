@@ -73,7 +73,7 @@ function splitStringForm(value: string): [string, string | undefined] | null {
     const c = value[i];
     if (quote) {
       if (c === quote) quote = '';
-    } else if (depth && (c === '"' || c === "'")) quote = c;
+    } else if (depth && (c === '"' || c === "'") && value[i - 1] === '=') quote = c; // quoted values only: `it's` is plain
     else if (c === '[') depth++;
     else if (c === ']') depth = Math.max(0, depth - 1);
     else if (!depth && /\s/.test(c)) return null;

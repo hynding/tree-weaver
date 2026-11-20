@@ -379,9 +379,9 @@ function writeHtml(el: El, depth: number, mode: 'html' | 'vue' | 'svelte', props
   }
   if (el.kind === 'text') {
     const text = escapeHtml(el.value);
-    // `{` starts an expression in Svelte, `{{` in Vue.
-    if (mode === 'svelte') return text.replace(/[{}]/g, (c) => (c === '{' ? '&#123;' : '&#125;'));
-    if (mode === 'vue') return text.replace(/\{\{/g, '{<!-- -->{');
+    // `{` starts an expression in Svelte, `{{` in Vue. Every brace is escaped, so neither a run of
+    // braces nor two text leaves side by side can form one.
+    if (mode !== 'html') return text.replace(/[{}]/g, (c) => (c === '{' ? '&#123;' : '&#125;'));
     return text;
   }
   // Escape for HTML first, then Svelte's braces, so the &#123; entities are not escaped again.
@@ -495,7 +495,7 @@ function kitsCss(kits: DesignKit[]): string {
   const enabled = kits.filter((k) => k.enabled && k.source !== 'env');
   if (!enabled.length) return '';
   const imports = enabled.filter((k) => k.href).map((k) => `@import url("${k.href!.replace(/["\\]/g, '')}");`);
-  const inline = enabled.filter((k) => !k.href && k.css.trim()).map((k) => `/* ${k.name.replace(/\*\//g, '')} */\n${k.css.trim()}`);
+  const inline = enabled.filter((k) => !k.href && k.css.trim()).map((k) => `/* ${commentText(k.name)} */\n${k.css.trim()}`);
   return `/* Design kits from Tree Weaver, in load order. */\n${[...imports, ...inline].join('\n\n')}\n`;
 }
 
@@ -690,6 +690,11 @@ function variantRules(def: ComponentDef, variants: ComponentVariant[], slugs: Ma
 }
 
 
+/** Words a prop can't be named in a JS, Vue or Svelte component (a variable of that name is a syntax error). */
+const RESERVED_WORDS = new Set(
+  'arguments await break case catch class const continue debugger default delete do else enum eval export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield'.split(' '),
+);
+
 /** A prop's default as a JS literal. */
 const jsDefault = (p: ComponentProp): string =>
   p.type === 'boolean'
@@ -719,6 +724,8 @@ export function exportComponentDef(def: ComponentDef, opts: ComponentOptions): C
     return exportComponent(tree, { ...opts, name });
   }
   const props = componentProps(def);
+  const reserved = props.filter((p) => RESERVED_WORDS.has(p.name));
+  if (reserved.length) throw new Error(`Rename the prop${reserved.length > 1 ? 's' : ''} ${reserved.map((p) => `"${p.name}"`).join(', ')} before exporting "${def.name}": ${reserved.length > 1 ? 'they are' : 'it is a'} reserved word${reserved.length > 1 ? 's' : ''} in JavaScript`);
   const variants = styling === 'css' ? def.variants : [];
   const tokens = themeTokens((opts.kits ?? []).filter((k) => k.enabled));
   const prefix = `${cssIdent(slugify(def.name, 'component'))}__`;
@@ -732,12 +739,15 @@ export function exportComponentDef(def: ComponentDef, opts: ComponentOptions): C
     classes: new Map(),
   };
   const root = branchEl(def.root, build, false);
+  // The editor ignores `data-show-if` on a component's root (see expandComponent), and so does the export.
+  if (root.kind === 'el') delete root.cond;
   const rootCls = build.classes!.get(def.root.id)!;
   const slugs = variantSlugs(variants);
   if (root.kind === 'el' && variants.length && rootCls) root.variantClass = true;
   build.rules.push(...variantRules(def, variants, slugs, rootCls, build.classes!));
   const options = variants.map((v) => slugs.get(v)!);
-  const allProps = variants.length ? [...props, { name: 'variant', type: 'enum' as const, default: '', options }] : props;
+  // With variants, `variant` is the generated variant prop; a prop of the same name would be declared twice.
+  const allProps = variants.length ? [...props.filter((p) => p.name !== 'variant'), { name: 'variant', type: 'enum' as const, default: '', options }] : props;
   const helper = variants.length ? variantHelper(rootCls, opts.typescript && framework === 'react' ? name : undefined) : '';
 
   const css = styling === 'css' ? renderDisplayCss(build.rules) : '';

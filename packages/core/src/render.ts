@@ -46,15 +46,19 @@ export function isSafeAttr(name: string, value: string): boolean {
   return true;
 }
 
-/** Strip characters that could break out of a declaration or the style element. */
-export function sanitizeCssValue(value: string): string {
-  let out = value.replace(/[{}]/g, '').replace(/;/g, ',');
-  // Repeat so a nested token cannot rebuild a tag (`</sty</stylele>` → `</style>`).
+/** Apply `fn` until the text stops changing, so removing one token can't rebuild another (`</sty</stylele>` → `</style>`). */
+export function untilStable(value: string, fn: (v: string) => string): string {
+  let out = value;
   for (let prev = ''; prev !== out; ) {
     prev = out;
-    out = out.replace(/<\/?(style|script)/gi, '');
+    out = fn(out);
   }
-  return out.trim();
+  return out;
+}
+
+/** Strip characters that could break out of a declaration or the style element. */
+export function sanitizeCssValue(value: string): string {
+  return untilStable(value.replace(/[{}]/g, '').replace(/;/g, ','), (v) => v.replace(/<\/?(style|script)/gi, '')).trim();
 }
 
 export const isSafeCssProp = (prop: string): boolean => SAFE_PROP.test(prop);

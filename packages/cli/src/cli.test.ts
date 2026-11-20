@@ -589,6 +589,25 @@ describe('stdout output and argument checks', () => {
     expect(c.out).not.toContain('"output"');
   });
 
+  it('keeps edit commands to one document on stdout, without version logs for "-"', async () => {
+    const made = await cli(['new', 'home.tree.json', '--template', 'landing']);
+    const add = await cli(['add', 'home.tree.json', 'section', '-o', '-', '--json'], made.files);
+    expect(add.code).toBe(0);
+    expect(JSON.parse(add.out).format).toBe('tree-weaver');
+    const piped = await cli(['add', '-', 'section', '-o', '-'], {}, made.files['home.tree.json']);
+    expect(JSON.parse(piped.out).format).toBe('tree-weaver');
+    expect(Object.keys(piped.files).some((f) => f.includes('versions'))).toBe(false);
+    const tok = await cli(['tokens', 'home.tree.json', '--set', 'brand=#f00', '-o', '-'], made.files);
+    expect(JSON.parse(tok.out).format).toBe('tree-weaver');
+  });
+
+  it('keeps a version when the output names the input another way', async () => {
+    const made = await cli(['new', 'home.tree.json', '--template', 'landing']);
+    const r = await cli(['add', 'home.tree.json', 'section', '-o', './home.tree.json'], made.files);
+    expect(r.code).toBe(0);
+    expect(Object.keys(r.files).some((f) => f.includes('versions'))).toBe(true);
+  });
+
   it('checks components insert --index like add does', async () => {
     const made = await cli(['new', 'site.forest.json', '--forest', '--template', 'landing']);
     const forest = JSON.parse(made.files['site.forest.json']).forest;

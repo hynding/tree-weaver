@@ -9,7 +9,7 @@ import { isBranch, type Branch, type DesignKit, type Forest, type Tree, type Tre
 export type NodeChangeKind = 'added' | 'removed' | 'moved' | 'changed';
 
 /** What changed on a node that is in both versions. */
-export type NodeField = 'tag' | 'name' | 'type' | 'classes' | 'attrs' | 'styles' | 'value' | 'leaf type';
+export type NodeField = 'tag' | 'name' | 'type' | 'classes' | 'attrs' | 'styles' | 'value' | 'leaf type' | 'instance';
 
 export interface NodeChange {
   kind: NodeChangeKind;
@@ -95,6 +95,7 @@ function compareNodes(a: TreeNode, b: TreeNode): { fields: NodeField[]; displays
     const ids = new Set([...Object.keys(a.styles), ...Object.keys(b.styles)]);
     for (const d of ids) if (!sameMap(a.styles[d as keyof typeof a.styles], b.styles[d as keyof typeof b.styles])) displays.push(d);
     if (displays.length) fields.push('styles');
+    if (!same(a.instance, b.instance)) fields.push('instance');
   } else if (!isBranch(a) && !isBranch(b)) {
     if (a.type !== b.type) fields.push('leaf type');
     if (a.value !== b.value) fields.push('value');

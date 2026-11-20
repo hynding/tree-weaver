@@ -291,6 +291,18 @@ describe('Tree Weaver MCP server', () => {
     expect((await call('create_tree', { template: 'blank' })).text).toContain('"format": "tree-weaver"');
   });
 
+  it('returns edited documents instead of writing them in read-only mode', async () => {
+    writeFileSync(join(root, 't.tree.json'), example('landing-page.tree.json'));
+    const before = readFileSync(join(root, 't.tree.json'), 'utf8');
+    const { call } = await connect(true);
+    const r = await call('patch_tree', { path: 't.tree.json', ops: [{ op: 'insert', parent: '/', node: 'section' }] });
+    expect(r.isError).toBeFalsy();
+    expect(r.text).toContain('"format": "tree-weaver"');
+    const t = await call('set_tokens', { path: 't.tree.json', tokens: [{ name: 'brand', value: '#f00' }] });
+    expect(t.isError).toBeFalsy();
+    expect(readFileSync(join(root, 't.tree.json'), 'utf8')).toBe(before);
+  });
+
   // Screenshots need Playwright and a Chromium build; skip where the machine has neither.
   const canScreenshot = (() => {
     try {

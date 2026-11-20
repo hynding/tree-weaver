@@ -1,5 +1,5 @@
 import * as Y from 'yjs';
-import { isBranch, isStylesheetUrl, type Branch, type ComponentDef, type DesignKit, type DisplayStyles, type Forest, type Leaf, type Tree, type TreeNode } from '@tree-weaver/core';
+import { isBranch, isStylesheetUrl, normalizeComponent, type Branch, type ComponentDef, type DesignKit, type DisplayStyles, type Forest, type Leaf, type Tree, type TreeNode } from '@tree-weaver/core';
 
 /**
  * Live collaboration for Tree Weaver: a forest as a Yjs document, so people editing the same
@@ -276,21 +276,29 @@ const parse = <T>(v: unknown, fallback: T): T => {
   }
 };
 
+/* A peer's document is not trusted to hold the right shapes: anything malformed reads as empty. */
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+const stringMap = (v: unknown): Record<string, string> | undefined =>
+  isObj(v) ? Object.fromEntries(Object.entries(v).filter((e): e is [string, string] => typeof e[1] === 'string')) : undefined;
+const stringList = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+
 function readNode(id: string, m: YNode): TreeNode {
   if (m.get('kind') === 'leaf') {
-    const attrs = parse<Record<string, string> | undefined>(m.get('attrs'), undefined);
-    const leaf: Leaf = { kind: 'leaf', id, type: (m.get('leaf') as Leaf['type']) ?? 'text', value: (m.get('value') as string) ?? '' };
+    const attrs = stringMap(parse<unknown>(m.get('attrs'), undefined));
+    const type = m.get('leaf');
+    const value = m.get('value');
+    const leaf: Leaf = { kind: 'leaf', id, type: type === 'image' || type === 'shape' ? type : 'text', value: typeof value === 'string' ? value : '' };
     if (attrs) leaf.attrs = attrs;
     return leaf;
   }
   const styles: DisplayStyles = {};
-  for (const [k, v] of m) if (k.startsWith('s:')) styles[k.slice(2) as keyof DisplayStyles] = parse(v, {});
+  for (const [k, v] of m) if (k.startsWith('s:')) styles[k.slice(2) as keyof DisplayStyles] = stringMap(parse<unknown>(v, {})) ?? {};
   const branch: Branch = {
     kind: 'branch',
     id,
-    tag: (m.get('tag') as string) ?? 'div',
-    classes: parse<string[]>(m.get('classes'), []),
-    attrs: parse<Record<string, string>>(m.get('attrs'), {}),
+    tag: typeof m.get('tag') === 'string' ? (m.get('tag') as string) : 'div',
+    classes: stringList(parse<unknown>(m.get('classes'), [])),
+    attrs: stringMap(parse<unknown>(m.get('attrs'), {})) ?? {},
     styles,
     children: [],
   };
@@ -298,8 +306,14 @@ function readNode(id: string, m: YNode): TreeNode {
   const name = m.get('name');
   if (typeof type === 'string') branch.type = type;
   if (typeof name === 'string') branch.name = name;
-  const instance = parse<Branch['instance'] | undefined>(m.get('instance'), undefined);
-  if (instance) branch.instance = instance;
+  const instance = parse<unknown>(m.get('instance'), undefined);
+  if (isObj(instance) && typeof instance.component === 'string') {
+    branch.instance = { component: instance.component };
+    const props = stringMap(instance.props);
+    const variants = stringMap(instance.variants);
+    if (props) branch.instance.props = props;
+    if (variants) branch.instance.variants = variants;
+  }
   return branch;
 }
 
@@ -379,13 +393,22 @@ export function readForest(doc: Y.Doc): Forest | null {
     .map(([id, k]) => ({ id, order: (k.get('order') as string) ?? '', kit: parse<DesignKit | null>(k.get('data'), null) }))
     .filter((k): k is { id: string; order: string; kit: DesignKit } => !!k.kit)
     .sort(byOrder)
+    .filter((k) => isObj(k.kit) && typeof k.kit.css === 'string')
     .map((k) => {
       // A peer's kit link must still be a stylesheet URL, as on import.
-      const kit: DesignKit = { ...k.kit, id: k.id };
-      if (kit.href !== undefined && !isStylesheetUrl(kit.href)) delete kit.href;
+      const kit: DesignKit = { ...k.kit, id: k.id, name: String(k.kit.name ?? ''), enabled: k.kit.enabled !== false };
+      if (kit.href !== undefined && (typeof kit.href !== 'string' || !isStylesheetUrl(kit.href))) delete kit.href;
       return kit;
     });
-  const components = parse<ComponentDef[] | undefined>(m.forest.get('components'), undefined);
+  const rawComponents = parse<unknown>(m.forest.get('components'), undefined);
+  const components: ComponentDef[] = [];
+  for (const [i, c] of (Array.isArray(rawComponents) ? rawComponents : []).entries()) {
+    try {
+      components.push(normalizeComponent(c, `components[${i}]`));
+    } catch {
+      // A malformed definition is skipped; its instances keep their last expansion.
+    }
+  }
   const updatedAt = trees.reduce((latest, t) => (t.updatedAt > latest ? t.updatedAt : latest), (m.forest.get('createdAt') as string) ?? '');
   return {
     id: m.forest.get('id') as string,

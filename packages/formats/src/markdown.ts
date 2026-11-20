@@ -57,6 +57,10 @@ const isInlineNode = (n: TreeNode): boolean => !isBranch(n) || INLINE_TAGS.has(n
 export function escapeMarkdown(text: string, atLineStart = false): string {
   let out = text.replace(/\\/g, '\\\\').replace(/&/g, '&amp;').replace(/([`*_[\]<>|~])/g, '\\$1');
   if (atLineStart) out = out.replace(/^(\s*)([#+-])/, '$1\\$2').replace(/^(\s*)(\d+)([.)])/, '$1$2\\$3');
+  // A closing `#` run would be read as the end of a heading.
+  out = out.replace(/(^|\s)(#+)(\s*)$/, '$1\\$2$3');
+  // Bare URLs would become links (GFM autolinks).
+  out = out.replace(/\b(https?|ftp|mailto):/gi, '$1\\:').replace(/\bwww\./gi, 'www\\.');
   return out;
 }
 
@@ -72,8 +76,10 @@ function inline(node: TreeNode, first: boolean): string {
   if (MARK_INLINE[tag] && !needsMeta(node) && node.children.length) return wrapTrimmed(content(), MARK_INLINE[tag]);
   if (tag === 'code' && !needsMeta(node) && node.children.every((c) => !isBranch(c) && c.type === 'text')) {
     const code = node.children.map((c) => (c as Leaf).value).join('');
-    const fence = code.includes('`') ? '`` ' : '`';
-    return `${fence}${code}${fence.split('').reverse().join('')}`;
+    // A fence longer than any run of backticks in the code, padded with spaces when the code has any.
+    const longest = Math.max(0, ...(code.match(/`+/g) ?? []).map((r) => r.length));
+    const ticks = '`'.repeat(longest + 1);
+    return longest ? `${ticks} ${code} ${ticks}` : `${ticks}${code}${ticks}`;
   }
   if (tag === 'a' && !needsMeta(node, LINK_ATTRS) && node.attrs.href !== undefined) {
     const title = node.attrs.title ? ` "${node.attrs.title.replace(/"/g, '\\"')}"` : '';
@@ -133,7 +139,8 @@ function container(b: Branch): string {
 function list(b: Branch, depth: number): string | null {
   const ordered = b.tag === 'ol';
   const lines: string[] = [];
-  let n = Number(b.attrs.start ?? 1);
+  const start = Number.parseInt(b.attrs.start ?? '1', 10);
+  let n = Number.isFinite(start) ? start : 1;
   for (const item of b.children) {
     if (!isBranch(item) || item.tag !== 'li' || needsMeta(item)) return null;
     const inlineKids = item.children.filter(isInlineNode);

@@ -129,3 +129,10 @@ describe('string form selectors with colons and spaces', () => {
     expect(expandShorthand('Note:this is text')).toMatchObject({ value: 'Note:this is text' });
   });
 });
+
+describe('unquoted attribute values with quotes inside', () => {
+  it('treats an apostrophe mid-value as text', () => {
+    expect((expandShorthand("a[title=it's]: x") as Branch).attrs.title).toBe("it's");
+    expect((expandShorthand("a[href=/o'brien]: Bio") as Branch).attrs.href).toBe("/o'brien");
+  });
+});

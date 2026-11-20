@@ -1,6 +1,6 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { dirname } from 'node:path';
+import { dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs, type ParseArgsConfig } from 'node:util';
 import {
@@ -461,6 +461,12 @@ class Cli {
   note(text: string): void {
     this.io.stderr(`${text}\n`);
   }
+
+  /** Report after writing a document: to stdout when it went to a file, else to stderr, so stdout holds only the document. */
+  reportAfter(target: string | undefined, json: boolean, value: unknown, human: string): void {
+    if (target) this.report(json, value, human);
+    else this.note(human);
+  }
 }
 
 /* ------------------------------------------------------------- tree lookups */
@@ -524,6 +530,15 @@ async function keepVersion(cli: Cli, file: string, text: string, format: FormatI
   return version;
 }
 
+/** Where an edited document goes: the output file, else back to its file; undefined means stdout (`-`). */
+function editTarget(output: string | undefined, file: string): string | undefined {
+  const target = output ?? file;
+  return target === '-' ? undefined : target;
+}
+
+/** Whether two spellings name the same file (`t.json` and `./t.json`). */
+const sameFile = (a: string, b: string) => b !== '-' && resolvePath(a) === resolvePath(b);
+
 /** Put an updated tree back into its document and write it, in the document's own format. */
 async function writeTree(cli: Cli, loaded: Loaded, file: string, tree: Tree, output: string | undefined, versionAs?: string): Promise<string | undefined> {
   const { doc, format } = loaded;
@@ -532,9 +547,9 @@ async function writeTree(cli: Cli, loaded: Loaded, file: string, tree: Tree, out
   else next = { ...doc, tree: { ...tree, updatedAt: now() } };
   if (!getFormat(format).lossless) cli.note(`${file} is ${getFormat(format).label}, which doesn't keep every style or attribute; consider converting it to JSON first`);
   const data = next.kind === 'forest' ? exportForest(next.forest, format) : exportTree(next.tree, format, next.kits);
-  const target = output ?? (file === '-' ? undefined : file);
+  const target = editTarget(output, file);
   // Overwriting the file: keep what it was, so "versions restore" can bring it back.
-  if (versionAs && target && target === file && loaded.text !== data) await keepVersion(cli, file, loaded.text, format, { name: versionAs, source: 'agent', auto: true });
+  if (versionAs && target && sameFile(target, file) && loaded.text !== data) await keepVersion(cli, file, loaded.text, format, { name: versionAs, source: 'agent', auto: true });
   await cli.emit(target, data);
   return target;
 }
@@ -1024,8 +1039,8 @@ async function cmdComponents(cli: Cli, args: string[]): Promise<number> {
   const components = doc.kind === 'forest' ? (doc.forest.components ?? []) : [];
   const write = async (forest: Forest, label: string) => {
     const data = exportForest(forest, loaded.format);
-    const target = values.output ?? (file === '-' ? undefined : file);
-    if (!values['no-version'] && target && target === file && loaded.text !== data) await keepVersion(cli, file, loaded.text, loaded.format, { name: label, source: 'agent', auto: true });
+    const target = editTarget(values.output, file);
+    if (!values['no-version'] && target && sameFile(target, file) && loaded.text !== data) await keepVersion(cli, file, loaded.text, loaded.format, { name: label, source: 'agent', auto: true });
     await cli.emit(target, data);
     return target;
   };
@@ -1055,7 +1070,7 @@ async function cmdComponents(cli: Cli, args: string[]): Promise<number> {
       if (!saved) throw new Error(`Could not save "${ref}"`);
       const { forest, component: def } = saved;
       const target = await write(forest, 'Before saving a component');
-      cli.report(json, { component: { id: def.id, name: def.name, props: def.props.map((p) => p.name) }, output: target }, `Saved component "${def.name}" #${def.id}${def.props.length ? ` with props ${def.props.map((p) => p.name).join(', ')}` : ''}${target ? ` to ${target}` : ''}`);
+      cli.reportAfter(target, json, { component: { id: def.id, name: def.name, props: def.props.map((p) => p.name) }, output: target }, `Saved component "${def.name}" #${def.id}${def.props.length ? ` with props ${def.props.map((p) => p.name).join(', ')}` : ''}${target ? ` to ${target}` : ''}`);
       return 0;
     }
     case 'insert': {
@@ -1089,7 +1104,7 @@ async function cmdComponents(cli: Cli, args: string[]): Promise<number> {
       if (index !== undefined && index < 0) index = Math.max(0, parent.children.length + 1 + index);
       const root = insertNode(tree.root, parent.id, inst, index);
       const target = await write(replaceTree(doc.forest, { ...tree, root }), `Before inserting "${def.name}"`);
-      cli.report(json, { id: inst.id, component: def.id, output: target }, `Inserted "${def.name}" #${inst.id} into ${parent.name ?? parent.tag}${target ? ` in ${target}` : ''}`);
+      cli.reportAfter(target, json, { id: inst.id, component: def.id, output: target }, `Inserted "${def.name}" #${inst.id} into ${parent.name ?? parent.tag}${target ? ` in ${target}` : ''}`);
       return 0;
     }
     default:
@@ -1142,8 +1157,8 @@ async function cmdTokens(cli: Cli, args: string[]): Promise<number> {
     }
     const next: TreeDocument = doc.kind === 'forest' ? { kind: 'forest', forest: { ...doc.forest, kits, updatedAt: now() } } : { ...doc, kits };
     const data = next.kind === 'forest' ? exportForest(next.forest, loaded.format) : exportTree(next.tree, loaded.format, next.kits);
-    const target = values.output ?? (file === '-' ? undefined : file);
-    if (!values['no-version'] && target && target === file && loaded.text !== data) await keepVersion(cli, file, loaded.text, loaded.format, { name: 'Before tokens', source: 'agent', auto: true });
+    const target = editTarget(values.output, file);
+    if (!values['no-version'] && target && sameFile(target, file) && loaded.text !== data) await keepVersion(cli, file, loaded.text, loaded.format, { name: 'Before tokens', source: 'agent', auto: true });
     await cli.emit(target, data);
     if (target) cli.note(`Wrote ${target}`);
   }
@@ -1167,7 +1182,8 @@ async function cmdTokens(cli: Cli, args: string[]): Promise<number> {
     await cli.emit(values.output, out);
     return 0;
   }
-  if (edits && values.output === undefined && file === '-') return 0;
+  // The edited document went to stdout: nothing else may follow it there.
+  if (edits && editTarget(values.output, file) === undefined) return 0;
   const width = Math.max(4, ...tokens.map((t) => t.name.length));
   const lines = tokens.map((t) => `${t.name.padEnd(width)}  ${t.kind.padEnd(11)}  ${t.value}${t.resolved !== t.value ? `  (${t.resolved})` : ''}${t.edited ? `  [edited${t.kitValue ? `, kit: ${t.kitValue}` : ''}]` : ''}`);
   cli.report(!!values.json, { tokens }, tokens.length ? lines.join('\n') : 'No tokens: add :root { --name: value } to a kit, or use --set');

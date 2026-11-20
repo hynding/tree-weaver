@@ -350,7 +350,7 @@ export function applyPatch(root: Branch, ops: unknown, options: PatchOptions = {
           // Children are left out of the check (they are already valid), but a tag that can't hold any
           // must not take over a branch that has some.
           if (isBranch(next) && isBranch(node) && node.children.length && VOID_TAGS.has(next.tag.toLowerCase()))
-            throw new Error(`ops[${i}]: <${next.tag}> can't hold children, and this branch has ${node.children.length}`);
+            throw new Error(`<${next.tag}> can't hold children, and this branch has ${node.children.length}`);
           check(isBranch(next) ? { ...next, children: [] } : next, `ops[${i}]`, findParent(current, node.id)?.parent.id ?? null);
           current = updateNode(current, node.id, () => next);
           changed.push({ op: i, kind, id: node.id });

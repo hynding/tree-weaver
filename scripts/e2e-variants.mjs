@@ -10,8 +10,9 @@
  *   pnpm e2e:variants
  */
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 
-const root = new URL('../packages', import.meta.url).pathname;
+const root = fileURLToPath(new URL('../packages', import.meta.url));
 const core = await import(`${root}/core/dist/index.js`);
 const formats = await import(`${root}/formats/dist/index.js`);
 const { chromium } = createRequire(import.meta.url)('playwright');

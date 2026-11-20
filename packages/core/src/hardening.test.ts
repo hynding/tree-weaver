@@ -81,3 +81,32 @@ describe('parseVersionLog', () => {
     expect(parseVersionLog(log).versions).toHaveLength(1);
   });
 });
+
+describe('forest-wide ids', () => {
+  it('makes node and kit ids unique across trees', async () => {
+    const { normalizeForest } = await import('./index');
+    const tree = (id: string) => ({ id, name: id, root: { kind: 'branch', id: 'b1', tag: 'body', children: [{ kind: 'leaf', id: 'l1', type: 'text', value: 'x' }] } });
+    const f = normalizeForest({ name: 'F', trees: [tree('A'), tree('B')], kits: [{ id: 'k', name: 'a', css: '' }, { id: 'k', name: 'b', css: '' }] });
+    const ids = f.trees.flatMap((t) => [t.root.id, t.root.children[0].id]);
+    expect(new Set(ids).size).toBe(4);
+    expect(new Set(f.kits.map((k) => k.id)).size).toBe(2);
+  });
+
+  it('sees an instance being detached', async () => {
+    const { detachInstance } = await import('./index');
+    const card = createBranch({ tag: 'div', name: 'Card', children: [text('x')] });
+    const tree = createTree('T', createBranch({ tag: 'body', children: [card] }));
+    const saved = saveComponent(createForest('F', [tree]), tree.id, card.id, 'Card')!;
+    const t = saved.forest.trees[0];
+    const detached = { ...saved.forest, trees: [{ ...t, root: { ...t.root, children: [detachInstance(t.root.children[0] as never)] } }] };
+    const diff = diffForests(saved.forest, detached);
+    expect(diff.empty).toBe(false);
+    expect(diff.trees[0].changes[0].fields).toContain('instance');
+  });
+
+  it('strips nested tags from selectors and token values', async () => {
+    const { sanitizeSelector, sanitizeTokenValue } = await import('./index');
+    expect(sanitizeSelector('</sty</stylele>')).not.toMatch(/<\/style/i);
+    expect(sanitizeTokenValue('</sty</stylele>')).not.toMatch(/<\/style/i);
+  });
+});

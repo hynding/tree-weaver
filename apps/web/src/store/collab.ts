@@ -244,7 +244,13 @@ async function openShared(s: Session): Promise<void> {
   const forest = withCurrentBreakpoints(read);
   s.synced = forest;
   state.collabStatus = 'live';
-  await openDocument({ kind: 'forest', forest });
+  try {
+    await openDocument({ kind: 'forest', forest });
+  } catch (err) {
+    // The open forest couldn't be saved, so it stays open; sharing it would mix the two forests.
+    if (session === s) stopSharing(`Could not join: ${(err as Error).message}`);
+    return;
+  }
   installHistory(s);
   // The "waiting" dialog has done its job.
   if (state.dialog === 'share') state.dialog = null;

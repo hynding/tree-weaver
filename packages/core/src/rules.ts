@@ -2,7 +2,7 @@ import { createId } from './create';
 import { parseCss, type CssNode } from './css';
 import { displayForMedia } from './displays';
 import type { DesignKit, DisplayId, StyleMap, StyleRule } from './model';
-import { renderDisplayCss } from './render';
+import { renderDisplayCss, untilStable } from './render';
 
 /**
  * Custom classes and selectors. They live in an editable design kit: a kit whose
@@ -17,10 +17,12 @@ export const isEditableKit = (kit: DesignKit): kit is DesignKit & { rules: Style
 
 /** Tidy a selector so it can't break out of its rule: no braces, semicolons, comments or tags. */
 export function sanitizeSelector(selector: string): string {
-  return selector
-    .replace(/\/\*[\s\S]*?(\*\/|$)/g, '')
-    .replace(/<\/?(style|script)/gi, '')
-    .replace(/[{};@]/g, '')
+  return untilStable(selector, (s) =>
+    s
+      .replace(/\/\*[\s\S]*?(\*\/|$)/g, '')
+      .replace(/<\/?(style|script)/gi, '')
+      .replace(/[{};@]/g, ''),
+  )
     .replace(/\s+/g, ' ')
     .trim();
 }
