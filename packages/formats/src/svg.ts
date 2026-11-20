@@ -1,11 +1,14 @@
 import {
   CONTROL_CHARS,
   createId,
+  CUSTOM_KIT_SOURCE,
   isBranch,
+  isStylesheetUrl,
   isSvgRoot,
   renderNodeHtml,
   renderTreeCss,
   SVG_NAMESPACE,
+  TOKENS_KIT_SOURCE,
   walk,
   type Branch,
   type DesignKit,
@@ -56,7 +59,10 @@ export function exportSvg(tree: Tree, opts: SvgExportOptions = {}): string {
   const styles: string[] = [];
   for (const kit of (opts.kits ?? []).filter((k) => k.enabled)) {
     const css = kit.href ? `@import url("${kit.href.replace(/"/g, '%22')}");` : kit.css;
-    if (css.trim()) styles.push(`<style data-tw-kit="${xmlAttr(kit.id)}" data-tw-kit-name="${xmlAttr(kit.name)}">${cdata(css)}</style>`);
+    // The kind of kit rides along, as in an HTML export, so import gives back a linked,
+    // editable (custom classes) or tokens kit rather than plain CSS.
+    const kind = kit.href ? ` data-tw-kit-href="${xmlAttr(kit.href)}"` : `${kit.rules ? ' data-tw-kit-editable=""' : ''}${kit.tokens ? ' data-tw-kit-tokens=""' : ''}`;
+    if (css.trim()) styles.push(`<style data-tw-kit="${xmlAttr(kit.id)}" data-tw-kit-name="${xmlAttr(kit.name)}"${kind}>${cdata(css)}</style>`);
   }
   const branchCss = renderTreeCss(svg);
   if (branchCss) styles.push(`<style data-tw-styles="">${cdata(branchCss)}</style>`);
@@ -114,7 +120,14 @@ export function importSvg(text: string): TreeDocument {
     if (el.name.replace(/^svg:/, '') !== 'style') continue;
     const css = textOf(el).trim();
     if (el.attribs['data-tw-styles'] !== undefined) readTreeCss(css, styles);
-    else if (el.attribs['data-tw-kit'] !== undefined) kits.push({ id: el.attribs['data-tw-kit'] || createId('k'), name: el.attribs['data-tw-kit-name'] || 'Design kit', css, enabled: true });
+    else if (el.attribs['data-tw-kit'] !== undefined) {
+      const kit: Record<string, unknown> = { id: el.attribs['data-tw-kit'] || createId('k'), name: el.attribs['data-tw-kit-name'] || 'Design kit', css, enabled: true };
+      const href = (el.attribs['data-tw-kit-href'] ?? '').trim();
+      if (href && isStylesheetUrl(href)) Object.assign(kit, { href, css: '', source: href });
+      else if (el.attribs['data-tw-kit-editable'] !== undefined) Object.assign(kit, { editable: true, source: CUSTOM_KIT_SOURCE });
+      else if (el.attribs['data-tw-kit-tokens'] !== undefined) kit.source = TOKENS_KIT_SOURCE;
+      kits.push(kit);
+    }
     else if (css) looseCss.push(css);
   }
 

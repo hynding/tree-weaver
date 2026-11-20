@@ -446,3 +446,13 @@ describe('pass 20 fixes', () => {
     expect(() => applyGridLayout(root, svg.id, 'lg', layout)).toThrow();
   });
 });
+
+describe('pass 21 fixes', () => {
+  it('reports CSS that rules would drop or tidy', async () => {
+    const { parseRulesCss } = await import('./index');
+    for (const css of ['.a { color: red; &:hover { color: blue } }', '.a { *zoom: 1 }', '.a { content: "{" }', '.x\\@md { color: red }']) {
+      expect(parseRulesCss(css).changed.length).toBeGreaterThan(0);
+    }
+    expect(parseRulesCss('.a { color: red }\n.grid { grid-template-areas:\n  "a b"\n  "c d"; }\n@media (max-width: 767px) { .a { color: blue } }').changed).toEqual([]);
+  });
+});

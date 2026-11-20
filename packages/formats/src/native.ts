@@ -523,8 +523,12 @@ const comment = commentText;
 const swiftString = (s: string) =>
   `"${s.replace(/[\\"\n\r\t]|[\u0000-\u001f\u007f]/g, (c) => ({ '\\': '\\\\', '"': '\\"', '\n': '\\n', '\r': '\\r', '\t': '\\t' })[c] ?? `\\u{${c.charCodeAt(0).toString(16)}}`)}"`;
 
-/** A URL with anything outside the URL character set percent-encoded (existing escapes kept). */
-const encodeUrl = (url: string) => url.replace(/%(?![0-9a-f]{2})|[^A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=%]/giu, (c) => encodeURIComponent(c));
+/**
+ * A URL with anything outside the URL character set percent-encoded (existing escapes kept).
+ * A lone surrogate can't be percent-encoded (encodeURIComponent throws), so it becomes U+FFFD first.
+ */
+const encodeUrl = (url: string) =>
+  url.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '\uFFFD').replace(/%(?![0-9a-f]{2})|[^A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=%]/giu, (c) => encodeURIComponent(c));
 const swiftColor = (c: Rgba) => {
   const ch = (v: number) => num(v / 255);
   return `Color(red: ${ch(c.r)}, green: ${ch(c.g)}, blue: ${ch(c.b)}${c.a < 1 ? `, opacity: ${num(c.a)}` : ''})`;

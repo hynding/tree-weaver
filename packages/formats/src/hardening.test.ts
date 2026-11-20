@@ -1,4 +1,4 @@
-import { createBranch, createComponent, createForest, createLeaf, createTree, instantiateComponent, text, type Branch, type TreeNode } from '@tree-weaver/core';
+import { createBranch, createComponent, createCustomKit, createForest, createKit, createLeaf, createRule, createTree, instantiateComponent, text, withTokens, type Branch, type TreeNode } from '@tree-weaver/core';
 import { describe, expect, it } from 'vitest';
 import { exportComponent, exportComponentDef, exportForest, exportStorybook, exportTree, importDocument } from './index';
 
@@ -673,7 +673,7 @@ describe('pass 17 fixes', () => {
     } as never);
     expect(exportComponentDef(def, { framework: 'react' }).files[0].contents).toContain("(count && globalThis.String(count) !== 'false' && globalThis.String(count) !== '0') && (");
     expect(exportComponentDef(def, { framework: 'svelte' }).files[0].contents).toContain("{#if (count && globalThis.String(count) !== 'false' && globalThis.String(count) !== '0')}");
-    expect(exportComponentDef(def, { framework: 'vue' }).files[0].contents).toContain('v-if="(count &amp;&amp; globalThis.String(count) !== \'false\'');
+    expect(exportComponentDef(def, { framework: 'vue' }).files[0].contents).toContain('v-if="(count &amp;&amp; String(count) !== \'false\'');
   });
 
   it('keeps an ordered list with an unusual start as HTML in Markdown', () => {
@@ -779,5 +779,41 @@ describe('pass 20 fixes', () => {
     const tree = createTree('Home', createBranch({ tag: 'body', type: 'root', children: [createBranch({ tag: 'div', styles: { lg: { 'background-image': 'url("a b.png")' } } })] }));
     const out = exportComponent(tree, { framework: 'react', styling: 'tailwind' }).files[0].contents;
     expect(out).toContain('a%20b.png');
+  });
+});
+
+describe('pass 21 fixes', () => {
+  it('uses only globals Vue templates allow in v-if', () => {
+    const def = createComponent('Inbox', createBranch({ tag: 'div', children: [createBranch({ tag: 'span', attrs: { 'data-show-if': 'count' }, children: [text('{{count}}')] })] }), {
+      props: [{ name: 'count', type: 'text', default: '0' }],
+    } as never);
+    const vue = exportComponentDef(def, { framework: 'vue' }).files[0].contents;
+    expect(vue).not.toContain('globalThis');
+    expect(vue).toContain("String(count) !== '0'");
+  });
+
+  it('drops padding inside url() in Tailwind classes', () => {
+    const tree = createTree('Home', createBranch({ tag: 'body', type: 'root', children: [createBranch({ tag: 'div', styles: { lg: { 'background-image': 'url( "hero.png" )' } } })] }));
+    const out = exportComponent(tree, { framework: 'react', styling: 'tailwind' }).files[0].contents;
+    expect(out).toContain('[background-image:url(\\"hero.png\\")]');
+    expect(out).not.toContain('%20');
+  });
+
+  it('keeps linked, custom-class and token kits through an SVG file', () => {
+    const tree = createTree('Logo', createBranch({ tag: 'svg', type: 'root' }));
+    const linked = { ...createKit('Remote', ''), href: 'https://cdn.example.com/kit.css' };
+    const custom = createCustomKit('Mine', [createRule('.card', { lg: { color: 'red' } })]);
+    const tokens = withTokens(createKit('Tokens', ''), [{ name: '--brand', value: '#f00' }]);
+    const back = importDocument(exportTree(tree, 'svg', [linked, custom, tokens]), 'svg');
+    const kits = back.kits ?? [];
+    expect(kits.find((k) => k.name === 'Remote')?.href).toBe('https://cdn.example.com/kit.css');
+    expect(kits.find((k) => k.name === 'Mine')?.rules?.[0].selector).toBe('.card');
+    expect(kits.find((k) => k.name === 'Tokens')?.tokens?.[0].name).toBe('--brand');
+  });
+
+  it('exports a link holding a lone surrogate to SwiftUI', () => {
+    const tree = page([createBranch({ tag: 'a', attrs: { href: 'https://example.com/\uD800x' }, children: [text('Go')] })]);
+    const swift = exportComponent(tree, { framework: 'swiftui' }).files[0].contents;
+    expect(swift).toContain('%EF%BF%BDx');
   });
 });

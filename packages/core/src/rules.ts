@@ -2,7 +2,7 @@ import { createId } from './create';
 import { declarationList, parseCss, type CssNode } from './css';
 import { DISPLAY_IDS, displayForMedia } from './displays';
 import type { DesignKit, DisplayId, StyleMap, StyleRule } from './model';
-import { bracketsBalance, renderDisplayCss, untilStable } from './render';
+import { bracketsBalance, isSafeCssProp, renderDisplayCss, sanitizeCssValue, untilStable } from './render';
 
 /**
  * Custom classes and selectors. They live in an editable design kit: a kit whose
@@ -69,6 +69,12 @@ export interface ParsedRules {
    * same property, or a plain rule after a media query that sets the same property.
    */
   reordered: string[];
+  /**
+   * What the kit's CSS would lose or change once written back from rules: a nested rule, a
+   * property name or hack that isn't kept (`*zoom`), or a selector or value that has to be
+   * tidied (`\@`, `content: "{"`).
+   */
+  changed: string[];
 }
 
 /**
@@ -85,10 +91,24 @@ export function parseRulesCss(css: string, previous: StyleRule[] = []): ParsedRu
   const note = (text: string) => {
     if (!reordered.includes(text)) reordered.push(text);
   };
+  const changed: string[] = [];
+  const change = (text: string) => {
+    if (!changed.includes(text)) changed.push(text);
+  };
   const add = (selector: string, display: DisplayId, declarations: StyleMap, body: string) => {
     const sel = sanitizeSelector(selector);
+    const plain = selector.replace(/\s+/g, ' ').trim();
+    if (sel !== plain) change(`the selector ${plain || selector}`);
+    // Strings set aside, a brace left in the body is a nested rule, which rules can't hold.
+    if (/[{}]/.test(body.replace(/"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'/g, ''))) change(`a rule nested in ${plain}`);
+    const entries = declarationList(body);
+    for (const [prop, value] of entries) {
+      if (!isSafeCssProp(prop)) change(`${prop} in ${plain}`);
+      // Line breaks in a value (grid areas) are kept as spaces, which reads the same.
+      else if (sanitizeCssValue(value) !== value.replace(/[\n\r\f]+/g, ' ').trim()) change(`the ${prop} value in ${plain}`);
+    }
     if (!sel || !Object.keys(declarations).length) return;
-    const list = declarationList(body).map(([prop]) => prop);
+    const list = entries.map(([prop]) => prop);
     const props = new Set(list);
     if (props.size < list.length) note(`a property given twice in ${sel}`);
     const overlaps = (other: Set<string>) => [...props].some((p) => other.has(p));
@@ -125,7 +145,7 @@ export function parseRulesCss(css: string, previous: StyleRule[] = []): ParsedRu
     }
   };
   visit(parseCss(css), 'lg');
-  return { rules: [...bySelector.values()], skipped, reordered };
+  return { rules: [...bySelector.values()], skipped, reordered, changed };
 }
 
 /** Set or clear one declaration of a rule on a display. */

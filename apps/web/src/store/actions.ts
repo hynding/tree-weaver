@@ -1007,14 +1007,14 @@ export function moveRule(kitId: string, ruleId: string, delta: -1 | 1): void {
   );
 }
 
-/** Replace an editable kit's rules from CSS text. Returns what had to be left out. */
+/** Replace an editable kit's rules from CSS text. Returns what had to be left out or tidied. */
 export function setRulesCss(kitId: string, css: string): string[] {
   const forest = state.forest;
   const kit = customKits().find((k) => k.id === kitId);
   if (!forest || !kit) return [];
-  const { rules, skipped } = parseRulesCss(css, kit.rules);
+  const { rules, skipped, changed } = parseRulesCss(css, kit.rules);
   commit(editRules(forest, kitId, () => rules));
-  return skipped;
+  return [...skipped, ...changed];
 }
 
 /**
@@ -1025,9 +1025,9 @@ export function makeKitEditable(kitId: string): string[] {
   const forest = state.forest;
   const kit = forest?.kits.find((k) => k.id === kitId);
   if (!forest || !kit || kit.href || isEditableKit(kit)) return [];
-  const { rules, skipped, reordered } = parseRulesCss(kit.css);
+  const { rules, skipped, reordered, changed } = parseRulesCss(kit.css);
   // Only convert when nothing would be lost or would render differently.
-  if (skipped.length || reordered.length) return [...skipped, ...reordered];
+  if (skipped.length || reordered.length || changed.length) return [...skipped, ...reordered, ...changed];
   commit({ ...forest, kits: forest.kits.map((k) => (k.id === kitId ? withRules(k, rules) : k)) });
   return [];
 }

@@ -214,10 +214,14 @@ const bracket = (value: string): string =>
   value
     .trim()
     // Tailwind leaves `url(…)` as written, so spaces there are percent-encoded instead.
-    .split(/(url\((?:"[^"]*"|'[^']*'|[^)]*)\))/i)
+    .split(/(url\(\s*(?:"[^"]*"|'[^']*'|[^)]*?)\s*\))/i)
     .map((part, i) =>
       i % 2
-        ? part.replace(/\s/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`)
+        ? // Padding inside the parentheses means nothing to CSS; only the address's own spaces are kept.
+          part
+            .replace(/^(url\()\s+/i, '$1')
+            .replace(/\s+\)$/, ')')
+            .replace(/\s/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`)
         : part
             .replace(/_/g, '\\_')
             .replace(/\s*,\s*/g, ',')
@@ -287,8 +291,11 @@ function markPre(el: El, inPre = false): void {
 }
 
 /** A `data-show-if` test as the editor makes it: a boolean prop as it is; any other prop is off when '', 'false' or '0'. */
-function condExpr(cond: { prop: string; negate: boolean }, props: ReadonlySet<string>): string {
-  const on = props.has(cond.prop) ? cond.prop : `(${cond.prop} && globalThis.String(${cond.prop}) !== 'false' && globalThis.String(${cond.prop}) !== '0')`;
+function condExpr(cond: { prop: string; negate: boolean }, props: ReadonlySet<string>, vue = false): string {
+  // Vue templates may use only a fixed list of globals, which has `String` but not `globalThis`.
+  // Elsewhere `globalThis.String`, since a component may itself be called String.
+  const str = vue ? 'String' : 'globalThis.String';
+  const on = props.has(cond.prop) ? cond.prop : `(${cond.prop} && ${str}(${cond.prop}) !== 'false' && ${str}(${cond.prop}) !== '0')`;
   return cond.negate ? `!${on}` : on;
 }
 
@@ -655,7 +662,7 @@ function writePropsEl(el: El & { kind: 'el' }, depth: number, mode: 'vue' | 'sve
       return ` ${n}="${body}${variant ? `{${VARIANT_CALL}}` : ''}"`;
     })
     .join('');
-  const cond = mode === 'vue' && el.cond ? ` v-if="${escapeAttr(condExpr(el.cond, props))}"` : '';
+  const cond = mode === 'vue' && el.cond ? ` v-if="${escapeAttr(condExpr(el.cond, props, true))}"` : '';
   if (!el.svg && VOID_TAGS.has(el.tag)) return `<${el.tag}${cond}${attrs}>`;
   if (!el.children.length) return el.svg ? `<${el.tag}${cond}${attrs} />` : `<${el.tag}${cond}${attrs}></${el.tag}>`;
   if (el.pre || oneLine(el.children)) return `<${el.tag}${cond}${attrs}>${inlineChildren(el.children, mode, (c) => writeHtml(c, depth + 1, mode, props), el.pre)}</${el.tag}>`;
