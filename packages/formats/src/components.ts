@@ -243,6 +243,9 @@ const bracket = (value: string): string =>
  * kinds, a value that is exactly `var(--token)` becomes the theme utility (`bg-brand`).
  */
 export function tailwindClass(prop: string, value: string, tokenKinds?: ReadonlyMap<string, TokenKind>): string {
+  // Tailwind v4 generates nothing for `!important` inside the brackets; its `!` modifier works in v3 and v4.
+  const important = /\s*!\s*important\s*$/i;
+  if (important.test(value)) return `!${tailwindClass(prop, value.replace(important, ''), tokenKinds)}`;
   const v = value.trim();
   const themed = tokenKinds ? tailwindTokenClass(prop, v, tokenKinds) : undefined;
   if (themed) return themed;
@@ -293,7 +296,7 @@ function tailwindClasses(branch: Branch, tokenKinds: ReadonlyMap<string, TokenKi
       let tier = 1;
       for (const d of decls) {
         if (d.prop === prop) tier = Math.max(tier, d.tier);
-        else if (overlaps(d.prop, prop)) tier = Math.max(tier, d.cls.startsWith('[') || cls.startsWith('[') ? d.tier + 1 : d.tier);
+        else if (overlaps(d.prop, prop)) tier = Math.max(tier, /^!?\[/.test(d.cls) || /^!?\[/.test(cls) ? d.tier + 1 : d.tier);
       }
       decls.push({ prop, cls, variant, tier });
     }
@@ -360,9 +363,10 @@ interface Build {
 /**
  * Attribute names a framework template takes as plain attributes. Vue reads `:x`, `v-*`, `@x` and
  * `#x` as directives and Svelte reads `on:x`, `bind:x` and the like, which would run imported
- * attribute values as code, so only plain names and the XML namespaces are kept.
+ * attribute values as code, so only plain names and the XML namespaces are kept. No `.` either: on a
+ * bound attribute Vue reads `.camel` and `.prop` as modifiers (`:inner-h-t-m-l.camel` sets innerHTML).
  */
-const PLAIN_ATTR = /^(?:(?:xlink|xml|xmlns):)?[a-zA-Z_][\w.-]*$/;
+const PLAIN_ATTR = /^(?:(?:xlink|xml|xmlns):)?[a-zA-Z_][\w-]*$/;
 // `is` too: Vue renders `<component is="script">` and `is="vue:script"` as the element it names.
 /** Attribute names the frameworks take for themselves: `is` (Vue), `ref` and `key` (React, Vue), `slot` (Svelte, Vue), `children` and `dangerouslySetInnerHTML` (React). */
 const FRAMEWORK_ATTRS = new Set(['is', 'ref', 'key', 'slot', 'children', 'dangerouslysetinnerhtml']);
@@ -651,7 +655,10 @@ function writeHtml(el: El, depth: number, mode: 'html' | 'vue' | 'svelte', props
     // string expression keeps it. Escaped so neither template parser sees a tag or delimiter in it.
     if (el.pre && mode !== 'html' && /[ \t\n\f\r]{2}|[\n\t\f\r]|^[ \t\n\f\r]|[ \t\n\f\r]$/.test(el.value)) {
       const literal = JSON.stringify(el.value).replace(/[<>&{}]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
-      return mode === 'vue' ? `{{ ${literal} }}` : `{${literal}}`;
+      // Vue writes a constant subtree as an HTML string, and parsing that drops a newline right after
+      // `<pre>` or `<textarea>`. A call isn't a constant to Vue, so `String(…)` keeps it.
+      if (mode === 'vue') return /^[\r\n]/.test(el.value) ? `{{ String(${literal}) }}` : `{{ ${literal} }}`;
+      return `{${literal}}`;
     }
     const text = escapeHtml(el.value);
     // `{` starts an expression in Svelte, `{{` in Vue. Every brace is escaped, so neither a run of

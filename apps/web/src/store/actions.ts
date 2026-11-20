@@ -1,6 +1,7 @@
 import { getBlueprint, getStarter, getTemplate } from '@tree-weaver/branches';
 import {
   addTableColumn,
+  BASE_DISPLAY,
   applyDisplaySettings,
   changedDisplaySettings,
   cleanDisplaySettings,
@@ -1022,12 +1023,20 @@ function editRules(forest: Forest, kitId: string, fn: (rules: StyleRule[]) => St
  * An editable kit no other kit loads after (tokens kits aside), for styles moved off a branch:
  * they came after every kit as the branch's own styles, and must still beat the kits it matches.
  */
-function withLastCustomKit(forest: Forest): { forest: Forest; kitId: string } {
+function withLastCustomKit(forest: Forest, styles: StyleRule['styles'] = {}): { forest: Forest; kitId: string } {
   const kits = forest.kits;
+  // A kit writes every rule's base styles before its media blocks, so a rule there setting one of
+  // these properties for a narrower display would now come after the moved base styles.
+  const props = new Set(Object.values(styles).flatMap((map) => Object.keys(map ?? {})));
+  const clashes = (kit: DesignKit) =>
+    (kit.rules ?? []).some((r) => Object.entries(r.styles).some(([d, map]) => d !== BASE_DISPLAY && Object.keys(map ?? {}).some((p) => [...props].some((q) => p === q || p.startsWith(`${q}-`) || q.startsWith(`${p}-`)))));
   for (let i = kits.length - 1; i >= 0; i--) {
     // A kit that is turned off neither shows the rule nor overrides it.
     if (!kits[i].enabled) continue;
-    if (isEditableKit(kits[i])) return { forest, kitId: kits[i].id };
+    if (isEditableKit(kits[i])) {
+      if (clashes(kits[i])) break;
+      return { forest, kitId: kits[i].id };
+    }
     if (!isTokenKit(kits[i])) break;
   }
   const kit = createCustomKit();
@@ -1156,7 +1165,7 @@ export function extractClass(branchId: string, className: string): void {
     return;
   }
   const rule = createRule(selector, node.styles);
-  const { forest: withKit, kitId } = withLastCustomKit(forest);
+  const { forest: withKit, kitId } = withLastCustomKit(forest, node.styles);
   const next = updateTreeRoot(editRules(withKit, kitId, (rules) => [...rules, rule]), tree.id, (root) =>
     updateNode(root, branchId, (n) => (isBranch(n) ? { ...n, classes: [...new Set([...n.classes, className])], styles: {} } : n)),
   );

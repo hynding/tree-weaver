@@ -64,7 +64,7 @@ export class TwComponentPanel {
 
   private addVariant(def: ComponentDef) {
     const name = this.newVariant.trim();
-    if (!name || def.variants.some((v) => v.name === name)) return;
+    if (!name || name === '-' || def.variants.some((v) => v.name === name)) return;
     editComponentDef(def.id, (d) => ({ ...d, variants: [...d.variants, { name, styles: {} }] }), `Added variant “${name}”`);
     this.newVariant = '';
     setComponentVariant(name);

@@ -504,3 +504,13 @@ describe('pass 27 fixes', () => {
     expect(tokenShadowed(setToken([later, createTokenKit([])], { name: '--brand', value: 'green' }), '--brand')).toBe(false);
   });
 });
+
+describe('pass 28 fixes', () => {
+  it('treats the "-" pick as base, never a variant named "-"', async () => {
+    const { createComponent, variantPerDisplay, normalizeComponent } = await import('./index');
+    const def = { ...createComponent('Card', createBranch({ tag: 'div' })), variants: [{ name: '-', styles: {} }, { name: 'big', styles: {} }] };
+    expect(variantPerDisplay(def, { tablet: '-' }).tablet).toBeUndefined();
+    expect(variantPerDisplay(def, { tablet: 'big' }).tablet?.name).toBe('big');
+    expect(normalizeComponent(JSON.parse(JSON.stringify(def))).variants.map((v) => v.name)).toEqual(['big']);
+  });
+});

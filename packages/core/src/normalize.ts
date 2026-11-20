@@ -120,7 +120,7 @@ export function normalizeComponent(value: unknown, path = 'component'): Componen
   for (const [i, v] of (Array.isArray(value.variants) ? value.variants : []).entries()) {
     if (!isObj(v)) throw new TreeDataError('Expected a variant object', `${path}.variants[${i}]`);
     const name = str(v.name).trim();
-    if (!name || variants.some((w) => w.name === name)) continue;
+    if (!name || name === '-' || variants.some((w) => w.name === name)) continue;
     const styles: Record<string, DisplayStyles> = {};
     for (const [id, s] of Object.entries(isObj(v.styles) ? v.styles : {})) {
       const ds = normalizeStyles(s);

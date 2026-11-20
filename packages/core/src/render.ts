@@ -281,7 +281,10 @@ export function renderNodeHtml(node: TreeNode, opts: HtmlOptions = {}, depth = 0
  */
 export function renderTreeBody(root: Branch, opts: HtmlOptions = {}): string {
   if (isSvgRoot(root)) return renderNodeHtml(root, opts, opts.pretty ? 1 : 0);
-  return root.children.map((c) => renderNodeHtml(c, opts, opts.pretty ? 1 : 0)).join(opts.pretty ? '\n  ' : '');
+  // Line breaks between inline children would show as spaces, as inside any other branch.
+  const pretty = opts.pretty && !keepsWhitespace(root) && !root.children.some((c) => isInline(c) || (isBranch(c) && hasInlineDisplay(c)));
+  const inner = { ...opts, pretty: opts.pretty && !keepsWhitespace(root) };
+  return root.children.map((c) => renderNodeHtml(c, inner, opts.pretty ? 1 : 0)).join(pretty ? '\n  ' : '');
 }
 
 /** Attributes for the `<body>` element that represents the tree root (none for an SVG tree, whose root is the `<svg>`). */
@@ -326,9 +329,7 @@ ${kitStyles ? `${kitStyles}\n` : ''}<style data-tw-styles>
 ${styleText(renderTreeCss(tree.root))}
 </style>${opts.extraCss ? `\n<style>${styleText(opts.extraCss)}</style>` : ''}
 </head>
-<body${isSvgRoot(tree.root) ? '' : ` ${rootAttrs(tree.root)}`}>
-  ${body}
-</body>
+<body${isSvgRoot(tree.root) ? '' : ` ${rootAttrs(tree.root)}`}>${!isSvgRoot(tree.root) && keepsWhitespace(tree.root) ? body : `\n  ${body}\n`}</body>
 </html>
 `;
 }

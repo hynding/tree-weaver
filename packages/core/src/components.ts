@@ -142,7 +142,8 @@ export function variantPerDisplay(def: ComponentDef, picks: ComponentInstance['v
       const chain = getDisplay(d).inherits;
       for (let i = chain.length - 1; i >= 0 && name === undefined; i--) name = picks?.[chain[i]];
     }
-    out[d] = name ? def.variants.find((v) => v.name === name) : undefined;
+    // `-` is the pick for the base styles on a display (no variant), never a variant's name.
+    out[d] = name && name !== '-' ? def.variants.find((v) => v.name === name) : undefined;
   }
   return out;
 }

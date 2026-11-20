@@ -1016,3 +1016,30 @@ describe('pass 27 fixes', () => {
     expect(exportComponentDef(def, { framework: 'svelte' }).files[0].contents).toContain("{x ? 'true' : ''}");
   });
 });
+
+describe('pass 28 fixes', () => {
+  it('drops attribute names with a dot, which Vue reads as binding modifiers', () => {
+    const def = createComponent('Bio', createBranch({ tag: 'div', attrs: { 'inner-h-t-m-l.camel': '{{bio}}', 'href.prop': '{{bio}}' } }), { props: [{ name: 'bio', type: 'text', default: '<img src=x onerror=alert(1)>' }] } as never);
+    for (const framework of ['vue', 'svelte', 'react'] as const) expect(exportComponentDef(def, { framework }).files[0].contents).not.toMatch(/camel|href\.prop/);
+  });
+
+  it('keeps inline content under the root on one line in HTML', () => {
+    const html = exportTree(page([text('Price: '), createBranch({ tag: 'strong', children: [text('$5')] }), text('.')]), 'html');
+    expect(html).toMatch(/Price: <strong[^>]*>\$5<\/strong>\./);
+    const back = importDocument(html, 'html');
+    const root = back.kind === 'tree' ? back.tree.root : back.forest.trees[0].root;
+    expect(root.children.map((c) => ('value' in c ? c.value : c.tag))).toEqual(['Price: ', 'strong', '.']);
+  });
+
+  it('keeps a pre’s leading newline through Vue’s static stringifying', () => {
+    const tree = page([createBranch({ tag: 'pre', children: [text('\nfirst line')] })]);
+    expect(exportComponent(tree, { framework: 'vue' }).files[0].contents).toContain('{{ String("\\nfirst line") }}');
+  });
+
+  it('writes !important with Tailwind’s modifier', () => {
+    const tree = page([createBranch({ tag: 'p', styles: { lg: { color: 'red !important' }, tablet: { color: 'blue' } }, children: [text('x')] })]);
+    const out = exportComponent(tree, { framework: 'react', styling: 'tailwind' }).files.map((f) => f.contents).join('\n');
+    expect(out).toContain('![color:red]');
+    expect(out).not.toContain('important]');
+  });
+});
