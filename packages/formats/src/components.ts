@@ -853,7 +853,8 @@ function vueCustomElementNote(root: El): string {
   const tags = new Set<string>();
   const visit = (el: El) => {
     if (el.kind !== 'el') return;
-    if (el.tag.includes('-') && !el.svg) tags.add(el.tag);
+    // Vue reads `<search>` (newer than its list of HTML tags) as a component too.
+    if ((el.tag.includes('-') || el.tag.toLowerCase() === 'search') && !el.svg) tags.add(el.tag);
     el.children.forEach(visit);
   };
   visit(root);
@@ -1029,7 +1030,10 @@ h1, h2, h3, h4, h5, h6 { font-size: revert; font-weight: revert; }
 ol, ul, menu { list-style: revert; }
 img, svg, video, canvas, audio, iframe, embed, object { display: revert; vertical-align: revert; }
 video { max-width: revert; height: revert; }
-hr { height: revert; color: revert; border-top-width: revert; border-style: revert; }
+hr { height: revert; color: revert; border-width: revert; border-style: revert; }
+td, th, option { padding: revert; }
+fieldset { border: revert; }
+dialog { margin: revert; padding: revert; border: revert; }
 a { color: revert; text-decoration: revert; }
 abbr:where([title]) { text-decoration: revert; }
 b, strong { font-weight: revert; }

@@ -84,12 +84,14 @@ const lineSeparators = (text: string): string => text.replace(/[\u2028\u2029]/g,
 /** Set while a table row is written: a `|` there would split the cell, even inside code or a link. */
 let inTable = false;
 
-// Parentheses are backslash-escaped (they come back exactly); spaces, angle brackets and line breaks are percent-encoded.
+// Parentheses are backslash-escaped (they come back exactly); spaces, angle brackets and line breaks are percent-encoded;
+// an `&` that would start a reference (`&amp;`, `&copy;`) is written as one, as Markdown decodes them.
 const escapeUrl = (url: string): string =>
-  url.replace(inTable ? /[ <>\t\n\r|\u2028\u2029]/g : /[ <>\t\n\r\u2028\u2029]/g, (c) => encodeURIComponent(c)).replace(/[\\()]/g, '\\$&');
+  url.replace(inTable ? /[ <>\t\n\r|\u2028\u2029]/g : /[ <>\t\n\r\u2028\u2029]/g, (c) => encodeURIComponent(c)).replace(/[\\()]/g, '\\$&').replace(/&(?=#?[\w]+;)/g, '&amp;');
 /** A one-line title, quoted: a line break would end the paragraph, and a backslash could escape the closing quote. */
 // Every ASCII punctuation mark is backslash-escaped, so nothing in a title reads as Markdown.
-const titleOf = (title: string | undefined): string => (title ? ` "${lineSeparators(oneLine(title).replace(/[!-/:-@[-`{-~]/g, '\\$&'))}"` : '');
+// An `&` starting a reference is written as `&amp;`: Markdown decodes references even after a backslash.
+const titleOf = (title: string | undefined): string => (title ? ` "${lineSeparators(oneLine(title).replace(/&(?=#?\w+;)/g, '\u0000').replace(/[!-%'-/:-@[-`{-~]/g, '\\$&').replace(/\u0000/g, '&amp;'))}"` : '');
 const oneLine = (text: string): string => text.replace(/\s*[\n\r]\s*/g, ' ');
 /**
  * Inline HTML on one line (a blank line inside it would end the paragraph and start a new block),

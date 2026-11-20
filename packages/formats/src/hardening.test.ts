@@ -1624,3 +1624,20 @@ describe('pass 50 fixes', () => {
     expect(files.find((f) => f.path === 'index.html')?.contents).toContain('href="kits.css"');
   });
 });
+
+describe('pass 51 fixes', () => {
+  it('keeps references in Markdown link titles and URLs', () => {
+    const a = createBranch({ tag: 'a', attrs: { href: '/a?x=1&amp;y=2', title: 'a &amp; b' }, children: [text('go')] });
+    const doc = importDocument(exportTree(page([createBranch({ tag: 'p', children: [a] })]), 'markdown'), 'markdown');
+    const out = JSON.stringify(doc.kind === 'tree' ? doc.tree.root : null);
+    expect(out).toContain('"href":"/a?x=1&amp;y=2"');
+    expect(out).toContain('"title":"a &amp; b"');
+  });
+
+  it('names <search> for Vue, and base.css restores table cell padding', () => {
+    const tree = page([createBranch({ tag: 'search', children: [createBranch({ tag: 'table', children: [] })] })]);
+    expect(exportComponent(tree, { framework: 'vue' }).files[0].contents).toContain("['search']");
+    const base = exportComponent(tree, { framework: 'react', styling: 'tailwind' }).files.find((f) => f.path === 'base.css')?.contents;
+    expect(base).toContain('td, th, option { padding: revert; }');
+  });
+});

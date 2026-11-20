@@ -80,6 +80,8 @@ list bullets, button and field looks), which the editor keeps. So a Tailwind exp
 writes `base.css`, which `kits.css` loads first in the `components` layer: it puts those browser
 defaults back, and the kits and utilities after it still win. In v3, add `base.css` to your
 Tailwind input too, before the kit CSS.
+Preflight also hides an element with the `hidden` attribute using `!important`, which a branch's
+own `display` can't override in the export (the editor shows it).
 A kit class with the same name as a Tailwind utility (`container`, `hidden`, `table` …) gets
 Tailwind's rule too, which wins: Weaver Basic's `container` becomes Tailwind's stepped-width
 container. Rename such a class in your kit, or turn off that utility in your Tailwind config.

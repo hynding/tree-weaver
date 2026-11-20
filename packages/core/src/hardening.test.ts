@@ -746,3 +746,14 @@ describe('pass 50 fixes', async () => {
     expect(core.renderNodeHtml(row, { designer: true })).not.toMatch(/<\/td><span/);
   });
 });
+
+describe('pass 51 fixes', async () => {
+  const core = await import('./index');
+  it('reads an escaped quote outside a string as part of a name', () => {
+    const css = ".content-\\[\\'\\'\\]{--tw-content:'';content:var(--tw-content)}.b{color:red}:root{--brand:blue}";
+    const nodes = core.parseCss(css);
+    expect(nodes.map((n) => (n.type === 'rule' ? n.selector : ''))).toEqual([".content-\\[\\'\\'\\]", '.b', ':root']);
+    expect(core.themeTokens([{ id: 'k', name: 'K', css, enabled: true }]).map((t) => t.name)).toEqual(['--brand']);
+    expect(core.parseDeclarations("font-family:Tom\\'s Font;color:red")).toEqual({ 'font-family': "Tom\\'s Font", color: 'red' });
+  });
+});
