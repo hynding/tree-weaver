@@ -608,3 +608,20 @@ describe('pass 36 fixes', () => {
     expect(insertionProblem(root, div.id, createBranch({ tag: 'table', children: [createBranch({ tag: 'tr', children: [createBranch({ tag: 'td' })] })] }))).toBeNull();
   });
 });
+
+describe('pass 38 fixes', async () => {
+  const core = await import('./index');
+
+  it('lets a display inherit when its picked variant was deleted', () => {
+    const card = core.createBranch({ tag: 'div', styles: { lg: { padding: '32px' } }, children: [core.createLeaf('Hi')] });
+    const base = core.createComponent('Card', card);
+    const def = { ...base, variants: [{ name: 'compact', styles: { [base.root.id]: { lg: { padding: '8px' } } } }] };
+    const per = core.variantPerDisplay(def, { lg: 'compact', tablet: 'stacked' });
+    expect(per.tablet?.name).toBe('compact');
+    expect(per['mobile-portrait']?.name).toBe('compact');
+  });
+
+  it('treats param, keygen, basefont and bgsound as void', () => {
+    for (const tag of ['param', 'keygen', 'basefont', 'bgsound']) expect(core.canHaveChildren(core.createBranch({ tag }))).toBe(false);
+  });
+});

@@ -137,13 +137,18 @@ export function instanceValues(def: ComponentDef, instance: ComponentInstance | 
 /** The variant each display uses: its own pick, else the nearest display it inherits from. */
 export function variantPerDisplay(def: ComponentDef, picks: ComponentInstance['variants']): Record<DisplayId, ComponentVariant | undefined> {
   const out = {} as Record<DisplayId, ComponentVariant | undefined>;
+  // `-` is the pick for the base styles on a display (no variant), never a variant's name. A pick
+  // naming a variant that no longer exists counts as no pick, so the display inherits.
+  const pickOn = (d: DisplayId): string | undefined => {
+    const name = picks?.[d];
+    return name === '-' || (name !== undefined && def.variants.some((v) => v.name === name)) ? name : undefined;
+  };
   for (const d of DISPLAY_IDS) {
-    let name = picks?.[d];
+    let name = pickOn(d);
     if (name === undefined) {
       const chain = getDisplay(d).inherits;
-      for (let i = chain.length - 1; i >= 0 && name === undefined; i--) name = picks?.[chain[i]];
+      for (let i = chain.length - 1; i >= 0 && name === undefined; i--) name = pickOn(chain[i]);
     }
-    // `-` is the pick for the base styles on a display (no variant), never a variant's name.
     out[d] = name && name !== '-' ? def.variants.find((v) => v.name === name) : undefined;
   }
   return out;

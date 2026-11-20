@@ -140,7 +140,7 @@ export function importSvg(text: string): TreeDocument {
   const authored = top.attribs['data-tw'] !== undefined;
   if (looseCss.length) kits.push({ id: createId('k'), name: name ? `${name} styles` : 'Drawing styles', css: looseCss.join('\n\n'), enabled: true, source: 'svg' });
 
-  const ctx: Ctx = { styles };
+  const ctx: Ctx = { styles, xml: true };
   const root = convertParts('svg', clean(top).attribs, top.children, ctx, false);
   root.type ??= 'root';
   const rootAttrs = root.attrs as Record<string, string> | undefined;

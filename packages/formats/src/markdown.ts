@@ -119,7 +119,8 @@ function inline(node: TreeNode, first: boolean): string {
     const inner = content();
     // A same-kind mark at the edge (`****a**c**`, `**Dune**` for em in em) can't be read back as two.
     const core = inner.replace(/^[ \t\n\r\f]+|[ \t\n\r\f]+$/g, '');
-    if (core.startsWith(mark[0]) || (core.endsWith(mark[0]) && !core.endsWith(`\\${mark[0]}`))) return inlineHtml(renderNodeHtml(node));
+    // So can one with other whitespace at its edge (a non-breaking space): Markdown wouldn't open or close the mark there.
+    if (core.startsWith(mark[0]) || (core.endsWith(mark[0]) && !core.endsWith(`\\${mark[0]}`)) || /^\s|\s$/.test(core)) return inlineHtml(renderNodeHtml(node));
     return wrapTrimmed(inner, mark);
   }
   if (tag === 'code' && !needsMeta(node) && node.children.every((c) => !isBranch(c) && c.type === 'text')) {
@@ -150,7 +151,8 @@ function inline(node: TreeNode, first: boolean): string {
 }
 
 function wrapTrimmed(text: string, mark: string): string {
-  const m = /^(\s*)([\s\S]*?)(\s*)$/.exec(text)!;
+  // HTML whitespace only, as in the edge check: a non-breaking space is content and stays inside the mark.
+  const m = /^([ \t\n\r\f]*)([\s\S]*?)([ \t\n\r\f]*)$/.exec(text)!;
   return m[2] ? `${m[1]}${mark}${m[2]}${mark}${m[3]}` : text;
 }
 

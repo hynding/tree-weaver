@@ -107,6 +107,8 @@ export function readTreeCss(css: string, into: Map<string, DisplayStyles>): void
 export interface Ctx {
   /** Responsive styles per branch id, read from exported CSS or Markdown front matter. */
   styles: Map<string, DisplayStyles>;
+  /** Parsed as XML (a standalone .svg), which keeps whitespace the HTML parser drops. */
+  xml?: boolean;
 }
 
 export type RawNode = Record<string, unknown>;
@@ -305,7 +307,8 @@ export function convertParts(tag: string, attribs: Record<string, string>, child
     classes: a.class ?? '',
     attrs,
     styles,
-    children: dropLeadingNewline(tag, impliedTbody(tag, convertChildren(children, ctx, raw || RAW_TEXT_TAGS.has(tag) || keepsWhitespace({ tag, styles } as Branch) || (inSvg && a['xml:space'] === 'preserve'), childrenInSvg({ tag }, svg), !svg && isInlineTag(tag)))),
+    // An XML parse (a standalone .svg) keeps the newline after `<pre>`; only the HTML parser drops it.
+    children: (ctx.xml ? (_: string, c: RawNode[]) => c : dropLeadingNewline)(tag, impliedTbody(tag, convertChildren(children, ctx, raw || RAW_TEXT_TAGS.has(tag) || keepsWhitespace({ tag, styles } as Branch) || (inSvg && a['xml:space'] === 'preserve'), childrenInSvg({ tag }, svg), !svg && isInlineTag(tag)))),
   };
 }
 

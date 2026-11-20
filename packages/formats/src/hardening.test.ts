@@ -590,7 +590,7 @@ describe('pass 15 fixes', () => {
     } as never);
     const out = exportComponentDef(btn, { framework: 'react', typescript: true }).files[0].contents;
     expect(out).toContain("disabled={globalThis.String(disabled) !== 'false'}");
-    expect(out).toContain('title={globalThis.String(pressed)}');
+    expect(out).toContain("title={pressed ? 'true' : ''}");
     expect(out).toContain('tabIndex={globalThis.Number(pressed)}');
   });
 
@@ -1271,5 +1271,35 @@ describe('pass 37 fixes', () => {
 
   it('keeps grid line names in the grid utility', () => {
     expect(tw({ display: 'grid', 'grid-template-columns': '[a] 1fr [b] 2fr [c]' })).toContain('grid-cols-[[a]_1fr_[b]_2fr_[c]]');
+  });
+});
+
+describe('pass 38 fixes', () => {
+  it('writes an off boolean prop as nothing in attributes, classes and textarea text', () => {
+    const root = createBranch({ tag: 'div', children: [
+      createBranch({ tag: 'button', classes: ['tab', 'is-{{active}}'], attrs: { 'aria-pressed': '{{active}}' }, children: [text('Tab')] }),
+      createBranch({ tag: 'textarea', children: [text('a {{active}} b')] }),
+    ] });
+    const def = { ...createComponent('Tab', root), props: [{ name: 'active', type: 'boolean' as const, default: '' }] };
+    const react = exportComponentDef(def, { framework: 'react' }).files[0].contents;
+    expect(react).toContain("is-${(active ? 'true' : '')}");
+    expect(react).toContain("aria-pressed={active ? 'true' : ''}");
+    expect(react).toContain("defaultValue={`a ${(active ? 'true' : '')} b`}");
+    expect(react).not.toMatch(/String\(active\)/);
+    expect(exportComponentDef(def, { framework: 'vue' }).files[0].contents).toContain(`:aria-pressed="(active ? 'true' : '')"`);
+    expect(exportComponentDef(def, { framework: 'svelte' }).files[0].contents).toContain(`aria-pressed="{active ? 'true' : ''}"`);
+  });
+
+  it('keeps a non-breaking space at the edge of bold inside it', () => {
+    const tree = page([createBranch({ tag: 'p', children: [text('Price:'), createBranch({ tag: 'strong', children: [text(' €5')] })] })]);
+    const back = importDocument(exportTree(tree, 'markdown'), 'markdown');
+    const root = back.kind === 'tree' ? back.tree.root : back.forest.trees[0].root;
+    expect(JSON.stringify(root)).toContain('" €5"');
+  });
+
+  it('keeps the newline after <pre> in a standalone SVG', () => {
+    const doc = importDocument('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><foreignObject width="10" height="10"><div xmlns="http://www.w3.org/1999/xhtml"><pre>\nkeep</pre></div></foreignObject></svg>', 'svg');
+    const root = doc.kind === 'tree' ? doc.tree.root : doc.forest.trees[0].root;
+    expect(JSON.stringify(root)).toContain('"\\nkeep"');
   });
 });

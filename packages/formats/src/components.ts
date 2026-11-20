@@ -574,15 +574,17 @@ function segments(value: string): { lit: string; prop?: string }[] {
   return out;
 }
 const hasProps = (value: string) => /\{\{\s*[A-Za-z][A-Za-z0-9_]*\s*\}\}/.test(value);
+/** A prop as the editor writes it into text: a boolean prop (in `bools`) is 'true', or nothing when off. */
+const propText = (prop: string, bools?: ReadonlySet<string>): string => (bools?.has(prop) ? `(${prop} ? 'true' : '')` : prop);
 /** A JS template literal for a value with placeholders: `card-${tone}`. */
-const templateLiteral = (value: string, extra = ''): string =>
+const templateLiteral = (value: string, extra = '', bools?: ReadonlySet<string>): string =>
   `\`${segments(value)
-    .map((s) => s.lit.replace(/[`\\]/g, '\\$&').replace(/\$\{/g, '\\${') + (s.prop ? `\${${s.prop}}` : ''))
+    .map((s) => s.lit.replace(/[`\\]/g, '\\$&').replace(/\$\{/g, '\\${') + (s.prop ? `\${${propText(s.prop, bools)}}` : ''))
     .join('')}${extra}\``;
 /** A JS expression for a value: the bare prop when the value is just `{{prop}}`. */
-const propExpr = (value: string): string => {
+const propExpr = (value: string, bools?: ReadonlySet<string>): string => {
   const segs = segments(value);
-  return segs.length === 2 && !segs[0].lit && !segs[1].lit ? segs[0].prop! : templateLiteral(value);
+  return segs.length === 2 && !segs[0].lit && !segs[1].lit ? propText(segs[0].prop!, bools) : templateLiteral(value, '', bools);
 };
 /** The `variant` prop's modifier classes, added to the root's class list. */
 const VARIANT_CALL = 'variantClasses(variant)';
@@ -787,10 +789,10 @@ function writePropsEl(el: El & { kind: 'el' }, depth: number, mode: 'vue' | 'sve
         const on = props.has(expr) ? expr : `${expr} !== 'false'`;
         return mode === 'vue' ? ` :${n}="${escapeAttr(on)}"` : ` ${n}={${on}}`;
       }
-      if (mode === 'vue') return ` :${n}="${(n === 'class' ? escapeClassAttr : escapeAttr)(variant ? templateLiteral(v, variantSuffix) : propExpr(v))}"`;
+      if (mode === 'vue') return ` :${n}="${(n === 'class' ? escapeClassAttr : escapeAttr)(variant ? templateLiteral(v, variantSuffix, props) : propExpr(v, props))}"`;
       // Svelte: attribute values can hold {expressions} between literal text.
       const body = segments(v)
-        .map((s) => esc(s.lit, n) + (s.prop ? `{${s.prop}}` : ''))
+        .map((s) => esc(s.lit, n) + (s.prop ? `{${props.has(s.prop) ? `${s.prop} ? 'true' : ''` : s.prop}}` : ''))
         .join('');
       return ` ${n}="${body}${variant ? `{${VARIANT_CALL}}` : ''}"`;
     })
@@ -831,19 +833,20 @@ function writeJsx(el: El, depth: number, props: false | ReadonlySet<string> = fa
       // A custom element gets `class` and `for` as written: React 18 would write `classname=` there.
       const custom = el.tag.includes('-') && /^(class|for)$/i.test(n);
       const name = formField ? (n === 'value' ? 'defaultValue' : 'defaultChecked') : custom ? n.toLowerCase() : jsxAttrName(n);
-      if (props && n === 'class' && el.variantClass) return ` ${name}={${templateLiteral(v, variantSuffix)}}`;
+      if (props && n === 'class' && el.variantClass) return ` ${name}={${templateLiteral(v, variantSuffix, props)}}`;
       const numeric = !el.svg && NUMERIC_ATTRS.has(n.toLowerCase());
       // `hidden="until-found"` too: React takes `hidden` as a boolean only and renders a string as `hidden=""`.
       const boolAttr = !el.svg && BOOLEAN_ATTRS.has(n.toLowerCase());
       if (props && hasProps(v)) {
         const expr = propExpr(v);
         // `globalThis.Number`: a component or prop may itself be called Number.
-        if (props.has(expr)) return ` ${name}={${boolAttr ? expr : numeric ? `globalThis.Number(${expr})` : `globalThis.String(${expr})`}}`;
+        // A boolean prop in any other attribute reads as the editor writes it: 'true', or nothing when off.
+        if (props.has(expr)) return ` ${name}={${boolAttr ? expr : numeric ? `globalThis.Number(${expr})` : `${expr} ? 'true' : ''`}}`;
         // A text prop turns a boolean attribute on as HTML does (any value), unless it is "false".
         if (boolAttr) return ` ${name}={globalThis.String(${expr}) !== 'false'}`;
         // An empty prop leaves the attribute off, as the string form does, rather than giving 0.
         // A prop with no default is undefined, which would give NaN.
-        return numeric ? ` ${name}={${expr} == null || ${expr} === '' ? undefined : globalThis.Number(${expr})}` : ` ${name}={${expr}}`;
+        return numeric ? ` ${name}={${expr} == null || ${expr} === '' ? undefined : globalThis.Number(${expr})}` : ` ${name}={${propExpr(v, props)}}`;
       }
       // HTML turns a boolean attribute on whatever its value, and React (and its types) take `true`.
       if (boolAttr) return ` ${name}`;
@@ -861,7 +864,7 @@ function writeJsx(el: El, depth: number, props: false | ReadonlySet<string> = fa
   // wants its text as defaultValue anyway.
   if (el.tag === 'textarea' && el.children.length) {
     const value = el.children.map((c) => (c.kind === 'text' ? c.value : '')).join('');
-    const expr = props && hasProps(value) ? templateLiteral(value) : jsxString(value);
+    const expr = props && hasProps(value) ? templateLiteral(value, '', props) : jsxString(value);
     return / defaultValue=/.test(attrs) ? `<${el.tag}${attrs} />` : `<${el.tag}${attrs} defaultValue={${expr}} />`;
   }
   if (!el.children.length) return `<${el.tag}${attrs} />`;
