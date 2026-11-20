@@ -4,6 +4,7 @@ import type { Branch, DisplayId, DisplayStyles, Forest, StyleMap, Tree, TreeNode
 import { isBranch } from './model';
 import { isSvgOnly } from './svg';
 import { VOID_TAGS } from './ops';
+import { insertionProblem } from './patch';
 
 /**
  * Reusable components: a branch saved once in the forest, with props and variants, and used
@@ -457,6 +458,11 @@ export function updateComponentTree(forest: Forest, treeId: string, fn: (root: B
     const r = kids[rootAt] as Branch;
     // A void root (`<hr>`, `<input>`) can't hold them: they would never render.
     if (VOID_TAGS.has(r.tag.toLowerCase())) throw new Error(`The component's <${r.tag}> can't hold other branches`);
+    // They are checked against the root they land in (the editor checked them against the body).
+    for (const k of [...kids.slice(0, rootAt), ...kids.slice(rootAt + 1)]) {
+      const problem = insertionProblem({ ...nextBody, children: [r] }, r.id, k);
+      if (problem) throw new Error(problem);
+    }
     nextRoot = { ...r, children: [...kids.slice(0, rootAt), ...r.children, ...kids.slice(rootAt + 1)] };
   } else {
     if (kids.length && VOID_TAGS.has(def.root.tag.toLowerCase())) throw new Error(`The component's <${def.root.tag}> can't hold other branches`);

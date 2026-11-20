@@ -1,6 +1,6 @@
 import { createBranch, createComponent, createCustomKit, createForest, createKit, createLeaf, createRule, createTree, instantiateComponent, text, withTokens, type Branch, type TreeNode } from '@tree-weaver/core';
 import { describe, expect, it } from 'vitest';
-import { exportComponent, exportComponentDef, exportForest, exportStorybook, exportTree, importDocument } from './index';
+import { detectFormat, exportComponent, exportComponentDef, exportForest, exportStorybook, exportTree, importDocument } from './index';
 
 const page = (children: Branch['children']) => createTree('Home', createBranch({ tag: 'body', type: 'root', children }));
 
@@ -1430,5 +1430,35 @@ describe('pass 43 fixes', () => {
     const kits = storyKits([snap], { name: 'DS', styles: 'copy', source: 'x' });
     expect(kits[0]?.css).toContain('.ds-button');
     expect(kits[0]?.css).not.toContain('storybook-root');
+  });
+});
+
+describe('pass 44 fixes', () => {
+  it('keeps a submit button’s label as value in React, and moves selected options to the select', () => {
+    const doc = importDocument('<body><form><input type="submit" value="Sign up"><select><option>A</option><option selected value="b">B</option></select></form></body>', 'html');
+    const tree = doc.kind === 'tree' ? doc.tree : doc.forest.trees[0];
+    const jsx = exportComponent(tree, { framework: 'react' }).files[0].contents;
+    expect(jsx).toContain('type="submit" value="Sign up"');
+    expect(jsx).toContain('<select defaultValue={"b"}');
+    expect(jsx).not.toMatch(/<option[^>]* selected/);
+  });
+
+  it('reads Markdown that starts with a link or HTML as Markdown', () => {
+    expect(detectFormat('[![CI](https://ci.example/b.svg)](https://ci.example)\n\n# Lib')).toBe('markdown');
+    expect(detectFormat('<p align="center"><img src="l.png"></p>\n\n# Lib\n\n- one')).toBe('markdown');
+    expect(detectFormat('[{"kind":"leaf"}]')).toBe('json');
+    expect(detectFormat('<div><p>Hi</p></div>')).toBe('html');
+  });
+
+  it('lets a variant override an !important template value', () => {
+    const root = { ...createBranch({ tag: 'div', styles: { lg: { padding: '0 !important' } }, children: [text('x')] }), id: 'r' };
+    const def = { ...createComponent('Box', root), variants: [{ name: 'Roomy', styles: { r: { lg: { padding: '30px' } } } }] };
+    const css = exportComponentDef(def, { framework: 'react' }).files.map((f) => f.contents).join('\n');
+    expect(css).toMatch(/padding: 30px !important/);
+  });
+
+  it('reads CDATA text in XML', () => {
+    const xml = exportTree(page([text('a < b')]), 'xml').replace(/>a &lt; b</, '><![CDATA[if (a < b) {}]]><');
+    expect(JSON.stringify(importDocument(xml, 'xml'))).toContain('if (a < b) {}');
   });
 });

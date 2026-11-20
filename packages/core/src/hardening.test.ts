@@ -677,3 +677,17 @@ describe('pass 43 fixes', async () => {
     expect(html).toMatch(/<math[^>]*>x = 2<mi[^>]*><span[^>]*>y<\/span><\/mi><\/math>/);
   });
 });
+
+describe('pass 44 fixes', async () => {
+  const core = await import('./index');
+
+  it('checks a branch added beside a component root against the root it lands in', () => {
+    const p = core.createBranch({ tag: 'p', children: [core.text('x')] });
+    const forest = core.createForest('F', [core.createTree('T', core.createBranch({ tag: 'body', children: [p] }))]);
+    const saved = core.saveComponent(forest, forest.trees[0].id, p.id, 'Para')!;
+    const treeId = core.componentTreeId(saved.component.id);
+    const add = (tag: string) => core.updateTreeRoot(saved.forest, treeId, (root) => core.insertNode(root, root.id, core.createBranch({ tag }), 0));
+    expect(() => add('div')).toThrow(/paragraph/);
+    expect(() => add('span')).not.toThrow();
+  });
+});

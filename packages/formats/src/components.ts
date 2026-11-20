@@ -832,6 +832,33 @@ function vueCustomElementNote(root: El): string {
 
 const jsxString = (value: string): string => JSON.stringify(value);
 
+const IMPORTANT = /!\s*important\s*$/i;
+/**
+ * A variant's declarations, made `!important` where the template's own rule is: an important
+ * template value would otherwise beat the variant (the editor replaces it outright).
+ */
+function beatImportant(own: StyleMap, template: StyleMap): StyleMap {
+  const out: StyleMap = {};
+  for (const [k, v] of Object.entries(own)) out[k] = IMPORTANT.test(template[k] ?? '') && !IMPORTANT.test(v) ? `${v} !important` : v;
+  return out;
+}
+
+/** The options a <select> starts on (`selected`), as a JSX expression for its defaultValue, or ''. */
+function selectedOptions(select: El & { kind: 'el' }, props: false | ReadonlySet<string>): string {
+  const values: string[] = [];
+  const visit = (el: El) => {
+    if (el.kind !== 'el') return;
+    if (el.tag === 'option' && el.attrs.some(([n]) => n.toLowerCase() === 'selected')) {
+      const value = el.attrs.find(([n]) => n.toLowerCase() === 'value')?.[1] ?? el.children.map((c) => (c.kind === 'text' ? c.value : '')).join('').replace(/\s+/g, ' ').trim();
+      values.push(props && hasProps(value) ? templateLiteral(value, '', props) : jsxString(value));
+    } else if (el.tag === 'optgroup') el.children.forEach(visit);
+  };
+  select.children.forEach(visit);
+  if (!values.length) return '';
+  // One pick: the last selected option wins, as in the browser.
+  return select.attrs.some(([n]) => n.toLowerCase() === 'multiple') ? `[${values.join(', ')}]` : values[values.length - 1];
+}
+
 /** `props` is false outside a component; in one, the names of its boolean props. */
 function writeJsx(el: El, depth: number, props: false | ReadonlySet<string> = false): string {
   if (el.kind === 'text') {
@@ -849,12 +876,17 @@ function writeJsx(el: El, depth: number, props: false | ReadonlySet<string> = fa
     const { cond, ...rest } = el;
     return `{${condExpr(cond, props)} && (${writeJsx(rest, depth, props)})}`;
   }
-  const attrs = el.attrs
+  let attrs = el.attrs
     // A `.` in a name is fine in HTML but not in JSX, and of the `xmlns:` names React knows only `xmlnsXlink`.
     .filter(([n]) => !n.includes('.') && !(/^xmlns:/i.test(n) && n.toLowerCase() !== 'xmlns:xlink'))
+    // React picks options through the <select>'s defaultValue (written below), not `selected`.
+    .filter(([n]) => !(el.tag === 'option' && n.toLowerCase() === 'selected'))
     .map(([n, v]) => {
       // Without onChange, React makes `value`/`checked` read-only; the default* props keep fields editable.
-      const formField = (el.tag === 'input' || el.tag === 'textarea' || el.tag === 'select') && (n === 'value' || n === 'checked');
+      // Not a button's label (`type="submit" value="Sign up"`): React ignores defaultValue there.
+      const inputType = el.attrs.find(([k]) => k.toLowerCase() === 'type')?.[1].trim().toLowerCase() ?? '';
+      const buttonValue = el.tag === 'input' && n === 'value' && /^(submit|reset|button|image|hidden)$/.test(inputType);
+      const formField = (el.tag === 'input' || el.tag === 'textarea' || el.tag === 'select') && (n === 'value' || n === 'checked') && !buttonValue;
       // A custom element gets `class` and `for` as written: React 18 would write `classname=` there.
       const custom = el.tag.includes('-') && /^(class|for)$/i.test(n);
       const name = formField ? (n === 'value' ? 'defaultValue' : 'defaultChecked') : custom ? n.toLowerCase() : jsxAttrName(n);
@@ -885,6 +917,8 @@ function writeJsx(el: El, depth: number, props: false | ReadonlySet<string> = fa
       return v.includes('"') ? ` ${name}='${amp}'` : ` ${name}="${amp}"`;
     })
     .join('');
+  const selectDefault = el.tag === 'select' ? selectedOptions(el, props) : '';
+  if (selectDefault && !/ (defaultValue|value)=/.test(attrs)) attrs += ` defaultValue={${selectDefault}}`;
   // React takes one child at most in a <textarea> (props split the text into several), and
   // wants its text as defaultValue anyway.
   if (el.tag === 'textarea' && el.children.length) {
@@ -1112,7 +1146,7 @@ function variantRules(def: ComponentDef, variants: ComponentVariant[], slugs: Ma
           // The base display only needs what differs from the template's own rules.
           const plain = full(d.id, undefined);
           const own = Object.fromEntries(Object.entries(full(d.id, shown)).filter(([k, v]) => plain[k] !== v));
-          if (shown && Object.keys(own).length) rules.push({ selector: target(`.${mod(d.id, shown)}`), styles: { [d.id]: own } });
+          if (shown && Object.keys(own).length) rules.push({ selector: target(`.${mod(d.id, shown)}`), styles: { [d.id]: beatImportant(own, plain) } });
           continue;
         }
         for (const inherited of options) {
@@ -1121,7 +1155,7 @@ function variantRules(def: ComponentDef, variants: ComponentVariant[], slugs: Ma
           const own: StyleMap = {};
           for (const [k, v] of Object.entries(to)) if (from[k] !== v) own[k] = v;
           for (const k of Object.keys(from)) if (!(k in to)) own[k] = 'unset';
-          if (Object.keys(own).length) rules.push({ selector: target(`.${mod(parent, inherited)}.${mod(d.id, shown)}`), styles: { [d.id]: own } });
+          if (Object.keys(own).length) rules.push({ selector: target(`.${mod(parent, inherited)}.${mod(d.id, shown)}`), styles: { [d.id]: beatImportant(own, full(d.id, undefined)) } });
         }
       }
     }

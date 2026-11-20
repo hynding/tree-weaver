@@ -86,8 +86,10 @@ export function detectFormat(text: string, fileName?: string): FormatId {
   const head = text.replace(/^﻿/, '').trimStart();
   if (/^(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*|<!DOCTYPE[^>]*>\s*)*<svg[\s>]/i.test(head)) return 'svg';
   if (/^<\?xml|^<tree-weaver[\s>]/i.test(head)) return 'xml';
-  if (head.startsWith('<')) return 'html';
-  if (head.startsWith('{') || head.startsWith('[')) return 'json';
+  // Markdown may open with HTML (`<p align="center">`) or a link (`[![CI](…)](…)`): HTML only
+  // when it is a page, or has no Markdown blocks; JSON only when it reads as JSON.
+  if (head.startsWith('<') && (/^(<!DOCTYPE|<html[\s>]|<head[\s>]|<body[\s>])/i.test(head) || !/^(#{1,6}\s|[-*+]\s|\d+[.)]\s|```|~~~|>\s)/m.test(head))) return 'html';
+  if (head.startsWith('{') || /^\[\s*([[{"\]\d-]|true\b|false\b|null\b)/.test(head)) return 'json';
   if (/^---\s*\n[\s\S]*?^tree-weaver:/m.test(head)) return 'markdown';
   if (/^(format:\s*tree-weaver|forest:|tree:|trees:|root:)/m.test(head)) return 'yaml';
   return 'markdown';
