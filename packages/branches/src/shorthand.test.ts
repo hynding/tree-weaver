@@ -116,3 +116,16 @@ describe('shorthand documents', () => {
     expect(() => expandShorthandDocument({ tree: { name: 'x' } })).toThrow(/no "root"/);
   });
 });
+
+describe('string form selectors with colons and spaces', () => {
+  it('reads attribute values that hold colons, spaces and namespaces', () => {
+    const a = expandShorthand('a[href=https://example.com]: Join') as Branch;
+    expect(a.tag).toBe('a');
+    expect(a.attrs.href).toBe('https://example.com');
+    const b = expandShorthand('a[title="Hello world"]: Hi') as Branch;
+    expect(b.attrs.title).toBe('Hello world');
+    const u = expandShorthand('a[xlink:href=#x]:') as Branch;
+    expect(u.attrs['xlink:href']).toBe('#x');
+    expect(expandShorthand('Note:this is text')).toMatchObject({ value: 'Note:this is text' });
+  });
+});

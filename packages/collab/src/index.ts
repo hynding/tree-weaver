@@ -1,5 +1,5 @@
 import * as Y from 'yjs';
-import { isBranch, type Branch, type DesignKit, type DisplayStyles, type Forest, type Leaf, type Tree, type TreeNode } from '@tree-weaver/core';
+import { isBranch, isStylesheetUrl, type Branch, type ComponentDef, type DesignKit, type DisplayStyles, type Forest, type Leaf, type Tree, type TreeNode } from '@tree-weaver/core';
 
 /**
  * Live collaboration for Tree Weaver: a forest as a Yjs document, so people editing the same
@@ -154,6 +154,7 @@ function writeNode(nodes: Y.Map<YNode>, p: Placed, order: string | undefined): v
     setIfChanged(m, 'name', n.name);
     setIfChanged(m, 'classes', n.classes.length ? json(n.classes) : undefined);
     setIfChanged(m, 'attrs', Object.keys(n.attrs).length ? json(n.attrs) : undefined);
+    setIfChanged(m, 'instance', n.instance ? json(n.instance) : undefined);
     const displays = new Set([...Object.keys(n.styles), ...[...m.keys()].filter((k) => k.startsWith('s:')).map((k) => k.slice(2))]);
     for (const d of displays) {
       const s = n.styles[d as keyof DisplayStyles];
@@ -183,6 +184,7 @@ export function writeForest(doc: Y.Doc, prev: Forest | null, next: Forest, origi
     setIfChanged(m.forest as YNode, 'name', next.name);
     setIfChanged(m.forest as YNode, 'createdAt', next.createdAt);
     setIfChanged(m.forest as YNode, 'version', next.version);
+    setIfChanged(m.forest as YNode, 'components', next.components?.length ? json(next.components) : undefined);
 
     // Trees.
     const treeKeys = orderKeys(
@@ -296,6 +298,8 @@ function readNode(id: string, m: YNode): TreeNode {
   const name = m.get('name');
   if (typeof type === 'string') branch.type = type;
   if (typeof name === 'string') branch.name = name;
+  const instance = parse<Branch['instance'] | undefined>(m.get('instance'), undefined);
+  if (instance) branch.instance = instance;
   return branch;
 }
 
@@ -375,7 +379,13 @@ export function readForest(doc: Y.Doc): Forest | null {
     .map(([id, k]) => ({ id, order: (k.get('order') as string) ?? '', kit: parse<DesignKit | null>(k.get('data'), null) }))
     .filter((k): k is { id: string; order: string; kit: DesignKit } => !!k.kit)
     .sort(byOrder)
-    .map((k) => ({ ...k.kit, id: k.id }));
+    .map((k) => {
+      // A peer's kit link must still be a stylesheet URL, as on import.
+      const kit: DesignKit = { ...k.kit, id: k.id };
+      if (kit.href !== undefined && !isStylesheetUrl(kit.href)) delete kit.href;
+      return kit;
+    });
+  const components = parse<ComponentDef[] | undefined>(m.forest.get('components'), undefined);
   const updatedAt = trees.reduce((latest, t) => (t.updatedAt > latest ? t.updatedAt : latest), (m.forest.get('createdAt') as string) ?? '');
   return {
     id: m.forest.get('id') as string,
@@ -383,6 +393,7 @@ export function readForest(doc: Y.Doc): Forest | null {
     version: 1,
     trees: trees.map(({ order: _, ...t }) => t),
     kits,
+    ...(components?.length ? { components } : {}),
     createdAt: (m.forest.get('createdAt') as string) ?? updatedAt,
     updatedAt,
   };

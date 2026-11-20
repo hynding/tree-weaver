@@ -577,3 +577,30 @@ describe('tree-weaver components', () => {
     expect((await cli(['export', 'site.json', '--component', 'Nope'], ins.files)).err).toContain('Components: Card');
   });
 });
+
+describe('stdout output and argument checks', () => {
+  it('writes only the document to stdout with -o -', async () => {
+    const made = await cli(['new', 'home.tree.json', '--template', 'landing']);
+    const r = await cli(['render', 'home.tree.json', '-o', '-'], made.files);
+    expect(r.code).toBe(0);
+    expect(r.out.trimEnd().endsWith('</html>')).toBe(true);
+    expect(r.out).not.toContain('Wrote -');
+    const c = await cli(['convert', 'home.tree.json', '--to', 'yaml', '-o', '-', '--json'], made.files);
+    expect(c.out).not.toContain('"output"');
+  });
+
+  it('checks components insert --index like add does', async () => {
+    const made = await cli(['new', 'site.forest.json', '--forest', '--template', 'landing']);
+    const forest = JSON.parse(made.files['site.forest.json']).forest;
+    const branchId = forest.trees[0].root.children[0].id;
+    const saved = await cli(['components', 'site.forest.json', 'save', branchId, '--name', 'Hero'], made.files);
+    expect(saved.code).toBe(0);
+    const bad = await cli(['components', 'site.forest.json', 'insert', 'Hero', '--index', 'abc'], saved.files);
+    expect(bad.code).toBe(2);
+    expect(bad.err).toContain('--index must be a whole number');
+    const end = await cli(['components', 'site.forest.json', 'insert', 'Hero', '--index=-1', '--json'], saved.files);
+    expect(end.code).toBe(0);
+    const root = JSON.parse(end.files['site.forest.json']).forest.trees[0].root;
+    expect(root.children.at(-1).id).toBe(JSON.parse(end.out).id);
+  });
+});

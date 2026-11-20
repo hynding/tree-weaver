@@ -1,6 +1,7 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseArgs, type ParseArgsConfig } from 'node:util';
 import {
   applyPatch,
@@ -571,7 +572,7 @@ async function cmdNew(cli: Cli, args: string[]): Promise<number> {
     if (!getFormat(format).forest) throw new UsageError(`${getFormat(format).label} holds one tree; use json, yaml or xml for a starter forest`);
     const forest = starter.create(values.name);
     await cli.emit(output, exportForest(forest, format));
-    if (output) {
+    if (output && output !== '-') {
       cli.report(
         json,
         { output, format, kind: 'forest', starter: starter.id, trees: forest.trees.map((t) => ({ id: t.id, name: t.name })), components: (forest.components ?? []).map((c) => c.name) },
@@ -595,7 +596,7 @@ async function cmdNew(cli: Cli, args: string[]): Promise<number> {
     data = exportTree(tree, format, kits);
   }
   await cli.emit(output, data);
-  if (output) {
+  if (output && output !== '-') {
     cli.report(json, { output, format, kind: values.forest ? 'forest' : 'tree', template: template.id, tree: { id: tree.id, name: tree.name } }, `Wrote ${output} (${template.label} ${values.forest ? 'forest' : 'tree'}, ${getFormat(format).label})`);
   }
   return 0;
@@ -656,7 +657,7 @@ async function cmdRender(cli: Cli, args: string[]): Promise<number> {
   for (const file of values.kit ?? []) kits.push(kitFromFile(file, await cli.read(file)));
   const html = exportTree(tree, 'html', kits);
   await cli.emit(values.output, html);
-  if (values.output) cli.report(!!values.json, { output: values.output, tree: { id: tree.id, name: tree.name }, bytes: Buffer.byteLength(html) }, `Wrote ${values.output} (${tree.name})`);
+  if (values.output && values.output !== '-') cli.report(!!values.json, { output: values.output, tree: { id: tree.id, name: tree.name }, bytes: Buffer.byteLength(html) }, `Wrote ${values.output} (${tree.name})`);
   return 0;
 }
 
@@ -774,7 +775,7 @@ async function cmdConvert(cli: Cli, args: string[]): Promise<number> {
   }
   if (!getFormat(to).lossless) cli.note(`${getFormat(to).label} keeps the content but not every style or attribute`);
   await cli.emit(values.output, data);
-  if (values.output) cli.report(!!values.json, { output: values.output, from: format, to }, `Wrote ${values.output} (${what}, ${getFormat(format).label} to ${getFormat(to).label})`);
+  if (values.output && values.output !== '-') cli.report(!!values.json, { output: values.output, from: format, to }, `Wrote ${values.output} (${what}, ${getFormat(format).label} to ${getFormat(to).label})`);
   return 0;
 }
 
@@ -931,7 +932,7 @@ async function cmdExpand(cli: Cli, args: string[]): Promise<number> {
   const doc = importDocument(JSON.stringify(plain), 'json');
   const out = doc.kind === 'forest' && getFormat(to).forest ? exportForest(doc.forest, to) : exportTree(pickTree(cli, doc, undefined, `${getFormat(to).label} holds one tree`), to, doc.kind === 'tree' ? doc.kits : doc.forest.kits);
   await cli.emit(values.output, out);
-  if (values.output) {
+  if (values.output && values.output !== '-') {
     const c = check.counts;
     cli.report(!!values.json, { output: values.output, format: to, valid: true, warnings: check.warnings, counts: c }, `Wrote ${values.output} (${c.branches} branches, ${c.leaves} leaves, ${getFormat(to).label})`);
   }
@@ -1082,7 +1083,10 @@ async function cmdComponents(cli: Cli, args: string[]): Promise<number> {
       const unknown = Object.keys(props).filter((p) => !componentProps(def).some((q) => q.name === p));
       if (unknown.length) cli.note(`"${def.name}" has no prop ${unknown.join(', ')}; ignored when rendering`);
       const inst = instantiateComponent(def, props, variants);
-      const index = values.index !== undefined ? Number(values.index) : undefined;
+      if (values.index !== undefined && !/^-?\d+$/.test(values.index)) throw new UsageError('--index must be a whole number');
+      let index = values.index !== undefined ? Number(values.index) : undefined;
+      // Negative counts from the end, as for `add`.
+      if (index !== undefined && index < 0) index = Math.max(0, parent.children.length + 1 + index);
       const root = insertNode(tree.root, parent.id, inst, index);
       const target = await write(replaceTree(doc.forest, { ...tree, root }), `Before inserting "${def.name}"`);
       cli.report(json, { id: inst.id, component: def.id, output: target }, `Inserted "${def.name}" #${inst.id} into ${parent.name ?? parent.tag}${target ? ` in ${target}` : ''}`);
@@ -1302,7 +1306,7 @@ const ALIASES: Record<string, string> = { component: 'export', check: 'validate'
 
 async function version(io: CliIO): Promise<string> {
   try {
-    const pkg = JSON.parse(await io.readFile(new URL('../package.json', import.meta.url).pathname)) as { version?: string };
+    const pkg = JSON.parse(await io.readFile(fileURLToPath(new URL('../package.json', import.meta.url)))) as { version?: string };
     return pkg.version ?? 'unknown';
   } catch {
     return 'unknown';

@@ -41,6 +41,8 @@ export interface ForestDiff {
   renamed?: { from: string; to: string };
   trees: TreeDiff[];
   kits: KitDiff[];
+  /** Forest-level changes that aren't one tree or kit: tree or kit order, components. */
+  other?: string[];
   /** True when nothing differs. */
   empty: boolean;
 }
@@ -180,7 +182,7 @@ export function diffTrees(before: Tree | undefined, after: Tree | undefined): Tr
 }
 
 const kitChanged = (a: DesignKit, b: DesignKit) =>
-  a.name !== b.name || a.css !== b.css || a.enabled !== b.enabled || (a.href ?? '') !== (b.href ?? '') || !same(a.rules, b.rules);
+  a.name !== b.name || a.css !== b.css || a.enabled !== b.enabled || (a.href ?? '') !== (b.href ?? '') || !same(a.rules, b.rules) || !same(a.tokens, b.tokens);
 
 /** Differences between two versions of a forest. Trees and kits are matched by id. */
 export function diffForests(before: Forest, after: Forest): ForestDiff {
@@ -202,7 +204,17 @@ export function diffForests(before: Forest, after: Forest): ForestDiff {
   }
   for (const k of before.kits) if (!afterKits.has(k.id)) kits.push({ id: k.id, name: k.name, status: 'removed' });
   const renamed = before.name !== after.name ? { from: before.name, to: after.name } : undefined;
-  return { ...(renamed ? { renamed } : {}), trees, kits, empty: !renamed && !trees.length && !kits.length };
+  const other: string[] = [];
+  // Order matters: kits cascade in order, and trees are listed in order. Compare the ids both sides share.
+  const order = (a: { id: string }[], b: { id: string }[]) => {
+    const ids = new Set(b.map((x) => x.id));
+    const common = new Set(a.map((x) => x.id).filter((id) => ids.has(id)));
+    return same(a.map((x) => x.id).filter((id) => common.has(id)), b.map((x) => x.id).filter((id) => common.has(id)));
+  };
+  if (!order(before.kits, after.kits)) other.push('Reordered kits');
+  if (!order(before.trees, after.trees)) other.push('Reordered trees');
+  if (!same(before.components ?? [], after.components ?? [])) other.push('Changed components');
+  return { ...(renamed ? { renamed } : {}), trees, kits, ...(other.length ? { other } : {}), empty: !renamed && !trees.length && !kits.length && !other.length };
 }
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -238,6 +250,7 @@ export function diffLines(diff: ForestDiff): string[] {
     }
   }
   for (const k of diff.kits) lines.push(`${k.status === 'added' ? 'Added' : k.status === 'removed' ? 'Removed' : 'Changed'} kit “${k.name}”`);
+  lines.push(...(diff.other ?? []));
   return lines;
 }
 

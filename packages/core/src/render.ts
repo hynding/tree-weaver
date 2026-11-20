@@ -41,13 +41,20 @@ export function safeTag(tag: string): string {
 export function isSafeAttr(name: string, value: string): boolean {
   const n = name.toLowerCase();
   if (!SAFE_ATTR.test(name) || n.startsWith('on') || n === 'style' || n === 'srcdoc' || n === BRANCH_ATTR || n.startsWith(`${BRANCH_ATTR}-`)) return false;
-  if (URL_ATTRS.has(n) && /^\s*(javascript|vbscript|data:text\/html)/i.test(value)) return false;
+  // Browsers drop tabs, newlines and leading control characters before reading a URL's scheme.
+  if (URL_ATTRS.has(n) && /^(javascript|vbscript|data:text\/html)/i.test(value.replace(/[\x00-\x20]/g, ''))) return false;
   return true;
 }
 
 /** Strip characters that could break out of a declaration or the style element. */
 export function sanitizeCssValue(value: string): string {
-  return value.replace(/[{}]/g, '').replace(/;/g, ',').replace(/<\/?(style|script)/gi, '').trim();
+  let out = value.replace(/[{}]/g, '').replace(/;/g, ',');
+  // Repeat so a nested token cannot rebuild a tag (`</sty</stylele>` → `</style>`).
+  for (let prev = ''; prev !== out; ) {
+    prev = out;
+    out = out.replace(/<\/?(style|script)/gi, '');
+  }
+  return out.trim();
 }
 
 export const isSafeCssProp = (prop: string): boolean => SAFE_PROP.test(prop);
@@ -59,7 +66,12 @@ export function declarations(styles: StyleMap, indent = '  '): string {
     .join('\n');
 }
 
-export const branchSelector = (id: string): string => `[${BRANCH_ATTR}="${id.replace(/["\\]/g, '')}"]`;
+/** Escape a branch id for a quoted CSS attribute selector (`<` too, so it can't close a style element). */
+const cssString = (v: string) => v.replace(/["\\]/g, '').replace(/[<\n\r\f]/g, (c) => `\\${c.charCodeAt(0).toString(16)} `);
+export const branchSelector = (id: string): string => `[${BRANCH_ATTR}="${cssString(id)}"]`;
+
+/** CSS made safe to place inside a <style> element. */
+export const styleText = (css: string): string => css.replace(/<\/style/gi, '<\\/style');
 
 /** Anything with a selector and per-display styles: a branch (by id) or a custom rule. */
 export interface DisplayRule {
@@ -204,7 +216,7 @@ export function renderDocument(tree: Tree, opts: DocumentOptions = {}): string {
     .map((k) => {
       const attrs = `data-tw-kit="${escapeAttr(k.id)}" data-tw-kit-name="${escapeAttr(k.name)}"${k.source === 'env' ? ' data-tw-env' : ''}${k.rules ? ' data-tw-kit-editable' : ''}${k.tokens ? ' data-tw-kit-tokens' : ''}`;
       if (k.href) return `<link rel="stylesheet" href="${escapeAttr(k.href)}" ${attrs}>`;
-      return `<style ${attrs}>\n${k.css.replace(/<\/style/gi, '<\\/style')}\n</style>`;
+      return `<style ${attrs}>\n${styleText(k.css)}\n</style>`;
     })
     .join('\n');
   const body = renderTreeBody(tree.root, { ...opts, pretty: opts.pretty ?? true });
@@ -220,8 +232,8 @@ export function renderDocument(tree: Tree, opts: DocumentOptions = {}): string {
 ${BASE_CSS}
 </style>
 ${kitStyles ? `${kitStyles}\n` : ''}<style data-tw-styles>
-${renderTreeCss(tree.root)}
-</style>${opts.extraCss ? `\n<style>${opts.extraCss}</style>` : ''}
+${styleText(renderTreeCss(tree.root))}
+</style>${opts.extraCss ? `\n<style>${styleText(opts.extraCss)}</style>` : ''}
 </head>
 <body${isSvgRoot(tree.root) ? '' : ` ${rootAttrs(tree.root)}`}>
   ${body}

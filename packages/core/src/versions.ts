@@ -52,6 +52,7 @@ export function parseVersionLog(text: string | null | undefined, strict = false)
     const versions = raw.versions.filter(
       (v): v is DocumentVersion => !!v && typeof v.id === 'string' && typeof v.document === 'string' && typeof v.createdAt === 'string',
     );
+    if (strict && versions.length !== raw.versions.length) damaged(`${raw.versions.length - versions.length} damaged version${raw.versions.length - versions.length > 1 ? 's' : ''}`);
     return { version: 1, versions: versions.map((v) => ({ ...v, name: typeof v.name === 'string' ? v.name : v.id, format: v.format || 'json' })) };
   } catch (err) {
     if (err instanceof VersionLogError) throw err;

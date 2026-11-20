@@ -90,3 +90,57 @@ describe('record stores', () => {
     });
   }
 });
+
+describe('IndexedDB writes', () => {
+  it('rejects a save whose transaction aborts at commit', async () => {
+    const factory = new IDBFactory();
+    const store = new IndexedDbForestStore(factory, 'abort-test');
+    const forest = createForest('F', [createTree('T')]);
+    await store.save(forest);
+    // Abort every write transaction right after its request succeeds, as a full quota does.
+    const db = await (store as unknown as { open(): Promise<IDBDatabase> }).open();
+    const tx = db.transaction.bind(db);
+    db.transaction = ((...args: Parameters<IDBDatabase['transaction']>) => {
+      const t = tx(...args);
+      if (args[1] === 'readwrite') {
+        const objectStore = t.objectStore.bind(t);
+        t.objectStore = (name: string) => {
+          const os = objectStore(name);
+          const put = os.put.bind(os);
+          os.put = (...a: Parameters<IDBObjectStore['put']>) => {
+            const req = put(...a);
+            req.addEventListener('success', () => t.abort());
+            return req;
+          };
+          return os;
+        };
+      }
+      return t;
+    }) as IDBDatabase['transaction'];
+    await expect(store.save({ ...forest, name: 'G' })).rejects.toBeTruthy();
+    db.transaction = tx;
+    expect((await store.load(forest.id))!.name).toBe('F');
+  });
+
+  it('retries opening after a failed open', async () => {
+    const factory = new IDBFactory();
+    let fail = true;
+    const flaky = new Proxy(factory, {
+      get(target, prop) {
+        if (prop === 'open' && fail) {
+          fail = false;
+          return () => {
+            const req = { onerror: null as null | (() => void), error: new Error('nope') } as unknown as IDBOpenDBRequest;
+            setTimeout(() => (req as unknown as { onerror: () => void }).onerror());
+            return req;
+          };
+        }
+        const v = Reflect.get(target, prop);
+        return typeof v === 'function' ? v.bind(target) : v;
+      },
+    });
+    const store = new IndexedDbForestStore(flaky, 'retry-test');
+    await expect(store.list()).rejects.toThrow('nope');
+    expect(await store.list()).toEqual([]);
+  });
+});

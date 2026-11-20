@@ -198,3 +198,26 @@ describe('rooms', () => {
     expect(parseRoomHash('#collab=nope')).toBeNull();
   });
 });
+
+describe('components over collab', () => {
+  it('carries component definitions and instance links', () => {
+    const f = sample();
+    const forest: Forest = {
+      ...withRoot(f, (root) => ({ ...root, children: root.children.map((c) => (c.id === 'h' ? { ...(c as Branch), instance: { component: 'c1', props: { title: 'Hi' } } } : c)) })),
+      components: [{ id: 'c1', name: 'Card', root: b('cr', { tag: 'div' }), props: [], variants: [] }],
+    };
+    const doc = new Y.Doc();
+    writeForest(doc, null, forest);
+    const back = readForest(doc)!;
+    expect(back.components).toEqual(forest.components);
+    expect((back.trees[0].root.children[0] as Branch).instance).toEqual({ component: 'c1', props: { title: 'Hi' } });
+  });
+
+  it('drops kit links that are not stylesheet URLs', () => {
+    const f = sample();
+    f.kits = [{ ...f.kits[0], href: 'javascript:alert(1)' }];
+    const doc = new Y.Doc();
+    writeForest(doc, null, f);
+    expect(readForest(doc)!.kits[0].href).toBeUndefined();
+  });
+});

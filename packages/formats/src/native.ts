@@ -18,6 +18,7 @@ import {
   themeTokens,
   tokenIdentifier,
 } from '@tree-weaver/core';
+import { commentText } from './slug';
 
 /**
  * Native exports: a tree as a SwiftUI view or a Flutter widget, for iOS, macOS, Android and
@@ -513,7 +514,8 @@ const gapOf = (l: Layout): string => (namingTokens && l.gapRef ? `DesignTokens.$
 
 const num = (n: number) => (Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100));
 const dbl = (n: number) => (Number.isInteger(n) ? `${n}` : num(n));
-const comment = (text: string) => text.replace(/\*\/|\n/g, ' ');
+/** Text for a Swift or Dart comment: one line, with no block comment openers (they nest) or closers. */
+const comment = commentText;
 
 /* --------------------------------------------------------------- swift */
 

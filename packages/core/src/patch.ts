@@ -3,7 +3,7 @@ import { isDisplayId } from './displays';
 import type { Branch, DisplayId, Leaf, TreeNode } from './model';
 import { isBranch } from './model';
 import { normalizeNode, TreeDataError } from './normalize';
-import { canHaveChildren, findNode, findParent, insertNode, isDescendant, removeNode, setStyles, updateNode } from './ops';
+import { canHaveChildren, findNode, VOID_TAGS, findParent, insertNode, isDescendant, removeNode, setStyles, updateNode } from './ops';
 import { canonicalTag, inSvgContext, placementProblem } from './svg';
 import { formatIssues, validateDocument, type ValidationIssue } from './validate';
 
@@ -347,6 +347,10 @@ export function applyPatch(root: Branch, ops: unknown, options: PatchOptions = {
             if (!Object.keys(leaf.attrs!).length) delete leaf.attrs;
             next = leaf;
           }
+          // Children are left out of the check (they are already valid), but a tag that can't hold any
+          // must not take over a branch that has some.
+          if (isBranch(next) && isBranch(node) && node.children.length && VOID_TAGS.has(next.tag.toLowerCase()))
+            throw new Error(`ops[${i}]: <${next.tag}> can't hold children, and this branch has ${node.children.length}`);
           check(isBranch(next) ? { ...next, children: [] } : next, `ops[${i}]`, findParent(current, node.id)?.parent.id ?? null);
           current = updateNode(current, node.id, () => next);
           changed.push({ op: i, kind, id: node.id });

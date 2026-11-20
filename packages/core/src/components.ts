@@ -113,7 +113,7 @@ export function componentProps(def: ComponentDef): ComponentProp[] {
 
 /** Fill `{{name}}` placeholders. Unknown names become empty. */
 export function fillPlaceholders(value: string, values: Record<string, string>): string {
-  return value.replace(PLACEHOLDER, (_m, name: string) => values[name] ?? '');
+  return value.replace(PLACEHOLDER, (_m, name: string) => (Object.hasOwn(values, name) ? values[name] : '') ?? '');
 }
 
 const truthy = (v: string | undefined) => !!v && v !== 'false' && v !== '0';
@@ -181,7 +181,8 @@ export function expandComponent(def: ComponentDef, instance: ComponentInstance, 
     const cond = node.attrs[IF_ATTR]?.trim();
     if (cond && !isRoot) {
       const negate = cond.startsWith('!');
-      const on = truthy(values[cond.replace(/^!/, '')]);
+      const prop = cond.replace(/^!/, '');
+      const on = Object.hasOwn(values, prop) && truthy(values[prop]);
       if (negate ? on : !on) return null;
     }
     const attrs: Record<string, string> = {};
@@ -293,7 +294,14 @@ export function saveComponent(forest: Forest, treeId: string, branchId: string, 
   };
   replace(tree.root, (b) => ((found = b), b));
   if (!found) return null;
-  const component = createComponent(name, found, init);
+  let component = createComponent(name, found, init);
+  if (found.id !== tree.root.id) {
+    // The instance keeps the branch's id, so the template's root takes a new one: ids stay unique
+    // across the forest. Variant styles keyed by the old id follow it.
+    const rootId = createId('b');
+    const rekey = (styles: ComponentVariant['styles']) => Object.fromEntries(Object.entries(styles).map(([id, st]) => [id === found!.id ? rootId : id, st]));
+    component = { ...component, root: { ...component.root, id: rootId }, variants: component.variants.map((v) => ({ ...v, styles: rekey(v.styles) })) };
+  }
   let next: Forest = { ...forest, components: [...(forest.components ?? []), component] };
   if (found.id !== tree.root.id) {
     const root = replace(tree.root, () => ({ ...instantiateComponent(component), id: branchId })) as Branch;

@@ -1,4 +1,4 @@
-import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 
 /**
@@ -31,6 +31,9 @@ export class Workspace {
         break;
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+        // A symlink whose target doesn't exist yet: writing would follow it wherever it points.
+        const link = await lstat(probe).catch(() => null);
+        if (link?.isSymbolicLink()) throw new Error(`"${path}" leads through a broken symlink; it may point outside the workspace (${this.root})`);
         const up = dirname(probe);
         if (up === probe) break;
         probe = up;

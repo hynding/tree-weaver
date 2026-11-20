@@ -159,20 +159,33 @@ function scheduleSave() {
   saveTimer = setTimeout(() => void saveNow(), 400);
 }
 
-export async function saveNow(): Promise<void> {
+/** Save the open forest now. Resolves false (after telling the user) when the save failed. */
+export async function saveNow(): Promise<boolean> {
   clearTimeout(saveTimer);
   const forest = state.forest;
-  if (!forest) return;
+  if (!forest) return true;
   state.saveState = 'saving';
   try {
     await store.save(forest);
     state.forests = await store.list();
     if (state.forest === forest) state.saveState = 'saved';
     else scheduleSave();
+    return true;
   } catch (err) {
     state.saveState = 'error';
     toast(`Could not save locally: ${(err as Error).message}`, 'error');
+    return false;
   }
+}
+
+/**
+ * Save the open forest before something replaces it. When the save fails, the forest stays
+ * open (replacing it would lose the unsaved edits) and this resolves false.
+ */
+async function saveBeforeLeaving(): Promise<boolean> {
+  if (await saveNow()) return true;
+  toast('The open forest stays open because its changes could not be saved. Export it to keep a copy, then try again.', 'error');
+  return false;
 }
 
 /** Replace the forest. Records an undo step unless `record` is false; `meta` says where the change came from (default: the editor). */
@@ -735,7 +748,7 @@ export function renameForest(name: string): void {
 }
 
 export async function newForest(name?: string): Promise<void> {
-  await saveNow();
+  if (!(await saveBeforeLeaving())) return;
   const forest = freshForest(name || uniqueName('New forest', state.forests.map((f) => f.name)));
   openLoaded(forest, '');
   await saveNow();
@@ -746,7 +759,7 @@ export async function newForest(name?: string): Promise<void> {
 export async function newForestFromStarter(id: string, name?: string): Promise<void> {
   const starter = getStarter(id);
   if (!starter) return toast(`No template "${id}"`, 'error');
-  await saveNow();
+  if (!(await saveBeforeLeaving())) return;
   const forest = starter.create(name || uniqueName(starter.label, state.forests.map((f) => f.name)));
   state.dialog = null;
   openLoaded(forest, '');
@@ -756,7 +769,7 @@ export async function newForestFromStarter(id: string, name?: string): Promise<v
 
 export async function openForest(id: string): Promise<void> {
   if (id === state.forest?.id) return;
-  await saveNow();
+  if (!(await saveBeforeLeaving())) return;
   const forest = await store.load(id);
   if (!forest) {
     toast('That forest could not be loaded', 'error');
@@ -997,7 +1010,7 @@ export interface ImportResult {
 export async function importText(text: string, format?: FormatId, fileName?: string): Promise<ImportResult> {
   const doc = importDocument(text, format, fileName);
   if (doc.kind === 'forest') {
-    await saveNow();
+    if (!(await saveNow())) throw new Error('The open forest’s changes could not be saved, so it stays open. Export it to keep a copy, then import again.');
     let forest = doc.forest;
     if (state.forests.some((f) => f.id === forest.id)) {
       forest = { ...forest, id: createId('f'), name: uniqueName(forest.name, state.forests.map((f) => f.name)) };
@@ -1044,6 +1057,8 @@ export async function openDocument(doc: TreeDocument, meta: ChangeMeta = {}): Pr
     forest = createForest(doc.tree.name, [doc.tree]);
     forest.kits = doc.kits.filter((k) => !isEnvKit(k));
   }
+  // Edits still waiting for the debounced save would be lost when the forest is replaced.
+  if (open && state.saveState !== 'saved' && !(await saveNow())) throw new Error('The open forest’s changes could not be saved, so it stays open');
   openLoaded(forest, '');
   await saveNow();
   return { kind: doc.kind, trees: forest.trees.length };

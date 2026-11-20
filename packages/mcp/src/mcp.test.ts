@@ -276,6 +276,11 @@ describe('Tree Weaver MCP server', () => {
     expect((await call('outline', { path: '/etc/hostname' })).text).toContain('outside the workspace');
     symlinkSync(tmpdir(), join(root, 'escape'));
     expect((await call('create_tree', { path: 'escape/x.tree.json' })).text).toContain('outside the workspace');
+    // A broken symlink would be followed by the write, wherever it points.
+    const target = join(mkdtempSync(join(tmpdir(), 'tw-out-')), 'pwned.json');
+    symlinkSync(target, join(root, 'link.tree.json'));
+    expect((await call('create_tree', { path: 'link.tree.json' })).text).toContain('broken symlink');
+    expect(existsSync(target)).toBe(false);
   });
 
   it('writes nothing in read-only mode', async () => {
