@@ -247,7 +247,10 @@ function nameArgBranches(node: Branch, args: Record<string, unknown>): void {
  * the story rendered more than one element. Inline styles become desktop (base) styles.
  */
 export function snapshotToBranch(snapshot: StorySnapshot): Branch {
-  const doc = importHtml(`<body>${snapshot.html}</body>`);
+  // A Storybook that Tree Weaver exported styles branches by id (`[data-tw="…"]`): those rules
+  // become the branches' own styles, since the branches get fresh ids when they are inserted.
+  const treeCss = snapshot.sheets.flatMap((sh) => splitRules(sh.css ?? '')).filter(isTreeRule).join('\n').replace(/<\/style/gi, '<\\/style');
+  const doc = importHtml(`${treeCss ? `<head><style data-tw-styles>${treeCss}</style></head>` : ''}<body>${snapshot.html}</body>`);
   if (doc.kind !== 'tree') throw new FormatError(`Story "${snapshot.id}" did not render a tree`);
   const children = doc.tree.root.children.filter((c) => !(c.kind === 'leaf' && c.type === 'text' && !c.value.trim()));
   const single = children.length === 1 && isBranch(children[0]) ? children[0] : null;
@@ -307,6 +310,9 @@ export interface StoryKitOptions {
  * at runtime (`<style>` tags, CSS-in-JS) are merged rule by rule into one kit, since each story
  * adds its own. Storybook's own preview styling is left out.
  */
+/** A rule styling one branch by its Tree Weaver id, read into the branch rather than a kit. */
+const isTreeRule = (rule: string): boolean => /\[data-tw=/.test(rule);
+
 export function storyKits(snapshots: StorySnapshot[], opts: StoryKitOptions): DesignKit[] {
   const files = new Map<string, string>();
   const rules: string[] = [];
@@ -314,11 +320,16 @@ export function storyKits(snapshots: StorySnapshot[], opts: StoryKitOptions): De
   for (const snap of snapshots) {
     for (const sheet of snap.sheets) {
       if (isStorybookChrome(sheet)) continue;
+      const all = splitRules(sheet.css ?? '');
+      const kept = all.filter((r) => !isTreeRule(r));
+      // A sheet of branch styles only (a Tree Weaver export's stories CSS) is read into the branches.
+      if (all.length && !kept.length) continue;
       if (sheet.href) {
-        if (!files.has(sheet.href) || (!files.get(sheet.href) && sheet.css)) files.set(sheet.href, sheet.css);
+        const css = kept.join('\n');
+        if (!files.has(sheet.href) || (!files.get(sheet.href) && css)) files.set(sheet.href, css);
         continue;
       }
-      for (const rule of splitRules(sheet.css)) {
+      for (const rule of kept) {
         if (seenRules.has(rule)) continue;
         seenRules.add(rule);
         rules.push(rule);

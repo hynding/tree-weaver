@@ -1303,3 +1303,33 @@ describe('pass 38 fixes', () => {
     expect(JSON.stringify(root)).toContain('"\\nkeep"');
   });
 });
+
+describe('pass 39 fixes', () => {
+  it('reads back Markdown with many instances of one component', () => {
+    const shared = { lg: { padding: '8px' } };
+    const tree = page(Array.from({ length: 120 }, () => createBranch({ tag: 'div', styles: shared, children: [text('x')] })));
+    const md = exportTree(tree, 'markdown');
+    expect(md).not.toMatch(/\*a1|&a1/);
+    expect(() => importDocument(md, 'markdown')).not.toThrow();
+  });
+
+  it('leaves out value on textarea and select in component exports', () => {
+    const tree = page([createBranch({ tag: 'textarea', attrs: { value: 'attr' }, children: [text('child')] })]);
+    for (const framework of ['react', 'vue', 'svelte'] as const) expect(exportComponent(tree, { framework }).files[0].contents).not.toMatch(/value="attr"|defaultValue="attr"/);
+  });
+
+  it('keeps whitespace in SVG text with xml:space="preserve" in Vue', () => {
+    const svg = createBranch({ tag: 'svg', type: 'root', attrs: { viewBox: '0 0 10 10' }, children: [createBranch({ tag: 'text', attrs: { 'xml:space': 'preserve' }, children: [text(' a  b ')] })] });
+    const vue = exportComponent(createTree('Pic', svg), { framework: 'vue' }).files[0].contents;
+    expect(vue).toMatch(/<text[^>]*>[^<]*a  b/);
+  });
+
+  it('reads a Tree Weaver Storybook’s branch styles into the imported branches', async () => {
+    const { snapshotToBranch, storyKits } = await import('./index');
+    const css = '[data-tw="b_1"] { color: red; }\n@media (max-width: 767px) { [data-tw="b_1"] { padding: 4px; } }';
+    const snap = { id: 's', title: 'T', name: 'N', html: '<div data-tw="b_1">Hi</div>', sheets: [{ css }] };
+    const branch = snapshotToBranch(snap);
+    expect(branch.styles.lg).toEqual({ color: 'red' });
+    expect(storyKits([snap], { name: 'SB', styles: 'copy', source: 'x' })).toEqual([]);
+  });
+});

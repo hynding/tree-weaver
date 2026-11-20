@@ -549,6 +549,8 @@ function branchEl(branch: Branch, b: Build, inSvg: boolean, asTag?: string): El 
       continue;
     }
     if (name === 'class' || name === 'style' || !isExportAttr(name, value, b.defaults)) continue;
+    // HTML ignores `value` on these (the content or the selected option counts); frameworks don't.
+    if (name.toLowerCase() === 'value' && (tag === 'textarea' || tag === 'select') && !svg) continue;
     attrs.push([name, value]);
   }
   if (tag === 'svg' && !inSvg && !branch.attrs.xmlns) attrs.push(['xmlns', 'http://www.w3.org/2000/svg']);
@@ -556,7 +558,7 @@ function branchEl(branch: Branch, b: Build, inSvg: boolean, asTag?: string): El 
   const el: El = cond ? { kind: 'el', tag, attrs, children, svg, cond } : { kind: 'el', tag, attrs, children, svg };
   if (!svg && hasInlineDisplay(branch)) el.inlineDisplay = true;
   // `white-space: pre` and the like show whitespace as written, as a <pre> does.
-  if (keepsWhitespace(branch)) el.pre = true;
+  if (keepsWhitespace(branch) || (svg && branch.attrs['xml:space'] === 'preserve')) el.pre = true;
   return el;
 }
 

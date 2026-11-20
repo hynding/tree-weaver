@@ -426,10 +426,10 @@ export function exportMarkdown(tree: Tree, opts: MarkdownExportOptions = {}): st
   // Renderers without front matter show it as text, where HTML in a name or CSS would be live:
   // then every string is double-quoted with `<` escaped (YAML reads `\x3C` back as `<`).
   // Only inside strings: an empty list is written `[]`.
-  let yaml = stringifyYaml(front, { lineWidth: 0 });
+  let yaml = stringifyYaml(front, { lineWidth: 0, aliasDuplicateObjects: false });
   // Link syntax too: front matter shown as Markdown would make `[x](javascript:…)` a live link.
   if (/[<[\]`]/.test(yaml))
-    yaml = stringifyYaml(front, { lineWidth: 0, defaultStringType: 'QUOTE_DOUBLE', defaultKeyType: 'QUOTE_DOUBLE' }).replace(/"(?:[^"\\]|\\.)*"/g, (q) => q.replace(/[<[\]`]/g, (c) => `\\x${c.charCodeAt(0).toString(16).toUpperCase()}`));
+    yaml = stringifyYaml(front, { lineWidth: 0, aliasDuplicateObjects: false, defaultStringType: 'QUOTE_DOUBLE', defaultKeyType: 'QUOTE_DOUBLE' }).replace(/"(?:[^"\\]|\\.)*"/g, (q) => q.replace(/[<[\]`]/g, (c) => `\\x${c.charCodeAt(0).toString(16).toUpperCase()}`));
   return `---\n${yaml}---\n\n${body}\n`;
 }
 

@@ -89,9 +89,12 @@ export function nestingProblem(ancestors: readonly Branch[], node: TreeNode): st
   if (tag === 'li' && inScope((t) => t === 'li', new Set([...SCOPE, 'ul', 'ol']))) return `An <li> can't go inside another <li> without a list around it; the browser would end the outer item`;
   if ((tag === 'dd' || tag === 'dt') && inScope((t) => t === 'dd' || t === 'dt', new Set([...SCOPE, 'dl']))) return `A <${tag}> can't go inside a <dd> or <dt> without a <dl> around it; the browser would end the outer one`;
   if (tag === 'option' && parentTag === 'option') return `An <option> can't go inside another <option>`;
+  if (tag === 'optgroup' && (parentTag === 'option' || parentTag === 'optgroup')) return `An <optgroup> can't go inside an <${parentTag}>; the browser would end the <${parentTag}> there`;
   if (/^(input|select|textarea|keygen)$/.test(tag) && inScope((t) => t === 'select', new Set(['template']))) return `A <${tag}> can't go inside a <select>; the browser would end the select there`;
   if (tag === 'nobr' && inScope((t) => t === 'nobr')) return 'A <nobr> can\'t go inside another <nobr>; the browser would end the outer one';
-  if ((tag === 'rt' || tag === 'rp') && inScope((t) => t === 'rt' || t === 'rp', new Set([...SCOPE, 'ruby']))) return `A <${tag}> can't go inside an <rt> or <rp>; the browser would end the outer one`;
+  // In a <ruby>, these end the open annotation parts (an <rt> or <rp> leaves an <rtc> open).
+  const rubyParts = tag === 'rt' || tag === 'rp' ? ['rt', 'rp', 'rb'] : tag === 'rb' || tag === 'rtc' ? ['rt', 'rp', 'rb', 'rtc'] : null;
+  if (rubyParts && rubyParts.includes(parentTag) && inScope((t) => t === 'ruby')) return `A <${tag}> can't go inside an <${parentTag}>; the browser would end the <${parentTag}> there`;
   // HTML in MathML (outside <mtext> and the like) breaks out of the formula.
   if (MATH_BREAKOUT.has(tag)) {
     for (let i = ancestors.length - 1; i >= 0; i--) {

@@ -625,3 +625,17 @@ describe('pass 38 fixes', async () => {
     for (const tag of ['param', 'keygen', 'basefont', 'bgsound']) expect(core.canHaveChildren(core.createBranch({ tag }))).toBe(false);
   });
 });
+
+describe('pass 39 fixes', async () => {
+  const core = await import('./index');
+  const problem = (path: string[], tag: string) => core.nestingProblem(path.map((t) => core.createBranch({ tag })) .map((b, i) => ({ ...b, tag: path[i] })), core.createBranch({ tag }));
+
+  it('refuses an optgroup in an option or optgroup, and ruby parts the parser would close', () => {
+    expect(problem(['select', 'option'], 'optgroup')).toMatch(/optgroup/);
+    expect(problem(['select', 'optgroup'], 'optgroup')).toMatch(/optgroup/);
+    expect(problem(['select'], 'optgroup')).toBeNull();
+    expect(problem(['ruby', 'rt'], 'rtc')).toMatch(/rtc/);
+    expect(problem(['ruby', 'rb'], 'rt')).toMatch(/rt/);
+    expect(problem(['ruby', 'rtc'], 'rt')).toBeNull();
+  });
+});
