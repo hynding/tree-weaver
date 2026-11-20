@@ -232,6 +232,15 @@ function renderLeaf(leaf: Leaf, opts: HtmlOptions): string {
   return opts.inSvg ? `<tspan ${LEAF_ATTR}="${escapeAttr(leaf.id)}">${content}</tspan>` : `<span ${LEAF_ATTR}="${escapeAttr(leaf.id)}">${content}</span>`;
 }
 
+/**
+ * Whether a branch shows its whitespace as written: a `<pre>` or `<textarea>`, or `white-space:
+ * pre`, `pre-wrap`, `pre-line` or `break-spaces` on any display. Pretty printing would add to it.
+ */
+export function keepsWhitespace(node: Branch): boolean {
+  if (/^(pre|textarea|listing|xmp|plaintext)$/i.test(node.tag)) return true;
+  return Object.values(node.styles ?? {}).some((map) => /^\s*(pre|pre-wrap|pre-line|break-spaces)\b/i.test(map?.['white-space'] ?? ''));
+}
+
 /** Whether a child keeps its parent's content on one line when pretty printed. */
 const isInline = (node: TreeNode): boolean => (isBranch(node) ? INLINE_TAGS.has(node.tag) : node.type !== 'shape');
 
@@ -243,8 +252,9 @@ export function renderNodeHtml(node: TreeNode, opts: HtmlOptions = {}, depth = 0
   const open = `<${tag}${svgRoot} ${renderAttrs(node, opts.xml)}>`;
   if (VOID_TAGS.has(tag) && !opts.inSvg) return opts.xml ? `${open.slice(0, -1)}/>` : open;
   if (!node.children.length) return `${open}</${tag}>`;
-  const inner = { ...opts, inSvg };
-  const inline = !opts.pretty || node.children.some(isInline);
+  const keep = keepsWhitespace(node);
+  const inner = { ...opts, inSvg, pretty: opts.pretty && !keep };
+  const inline = !opts.pretty || keep || node.children.some(isInline);
   if (inline) return `${open}${node.children.map((c) => renderNodeHtml(c, inner, depth + 1)).join('')}</${tag}>`;
   const pad = '  '.repeat(depth + 1);
   const body = node.children.map((c) => `${pad}${renderNodeHtml(c, inner, depth + 1)}`).join('\n');

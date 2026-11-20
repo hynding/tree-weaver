@@ -1,4 +1,5 @@
 import {
+  keepsWhitespace,
   BOOLEAN_ATTRS,
   canonicalSvgAttr,
   canonicalTag,
@@ -265,19 +266,22 @@ type El =
       /** Inside a `<pre>` (or a textarea): whitespace is written exactly as it is. */
       pre?: boolean;
     }
-  | { kind: 'text'; value: string };
+  | { kind: 'text'; value: string; pre?: boolean };
 
 /** Mark `<pre>` and `<textarea>` elements and everything inside them. */
 function markPre(el: El, inPre = false): void {
-  if (el.kind !== 'el') return;
-  const pre = inPre || PRE_TAGS.has(el.tag);
+  if (el.kind !== 'el') {
+    if (inPre) el.pre = true;
+    return;
+  }
+  const pre = inPre || el.pre || PRE_TAGS.has(el.tag);
   if (pre) el.pre = true;
   el.children.forEach((c) => markPre(c, pre));
 }
 
 /** A `data-show-if` test as the editor makes it: a boolean prop as it is; any other prop is off when '', 'false' or '0'. */
 function condExpr(cond: { prop: string; negate: boolean }, props: ReadonlySet<string>): string {
-  const on = props.has(cond.prop) ? cond.prop : `(${cond.prop} && String(${cond.prop}) !== 'false' && String(${cond.prop}) !== '0')`;
+  const on = props.has(cond.prop) ? cond.prop : `(${cond.prop} && globalThis.String(${cond.prop}) !== 'false' && globalThis.String(${cond.prop}) !== '0')`;
   return cond.negate ? `!${on}` : on;
 }
 
@@ -430,7 +434,10 @@ function branchEl(branch: Branch, b: Build, inSvg: boolean, asTag?: string): El 
   }
   if (tag === 'svg' && !inSvg && !branch.attrs.xmlns) attrs.push(['xmlns', 'http://www.w3.org/2000/svg']);
   const children = branch.children.map((c: TreeNode) => (isBranch(c) ? branchEl(c, b, childSvg) : leafEl(c, childSvg, b.defaults)));
-  return cond ? { kind: 'el', tag, attrs, children, svg, cond } : { kind: 'el', tag, attrs, children, svg };
+  const el: El = cond ? { kind: 'el', tag, attrs, children, svg, cond } : { kind: 'el', tag, attrs, children, svg };
+  // `white-space: pre` and the like show whitespace as written, as a <pre> does.
+  if (keepsWhitespace(branch)) el.pre = true;
+  return el;
 }
 
 /* ------------------------------------------------------ props in markup */
@@ -519,6 +526,12 @@ function writeHtml(el: El, depth: number, mode: 'html' | 'vue' | 'svelte', props
     return inner;
   }
   if (el.kind === 'text') {
+    // Vue condenses whitespace and Svelte collapses it between nodes, even where CSS shows it; a
+    // string expression keeps it. Escaped so neither template parser sees a tag or delimiter in it.
+    if (el.pre && mode !== 'html' && /\s\s|[\n\t]|^\s|\s$/.test(el.value)) {
+      const literal = JSON.stringify(el.value).replace(/[<>&{}]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
+      return mode === 'vue' ? `{{ ${literal} }}` : `{${literal}}`;
+    }
     const text = escapeHtml(el.value);
     // `{` starts an expression in Svelte, `{{` in Vue. Every brace is escaped, so neither a run of
     // braces nor two text leaves side by side can form one.
@@ -650,7 +663,7 @@ function writeJsx(el: El, depth: number, props: false | ReadonlySet<string> = fa
     if (props && hasProps(el.value))
       return segments(el.value)
         // React renders nothing for `true` and `false`, so a boolean prop is written as text.
-        .map((s) => (s.lit ? writeJsx({ kind: 'text', value: s.lit }, depth) : '') + (s.prop ? (props.has(s.prop) ? `{String(${s.prop})}` : `{${s.prop}}`) : ''))
+        .map((s) => (s.lit ? writeJsx({ kind: 'text', value: s.lit }, depth) : '') + (s.prop ? (props.has(s.prop) ? `{globalThis.String(${s.prop})}` : `{${s.prop}}`) : ''))
         .join('');
     // Plain text is fine unless it holds JSX syntax characters; then use a string expression.
     // Line breaks too: JSX text collapses them (and the indentation around them).
@@ -673,9 +686,9 @@ function writeJsx(el: El, depth: number, props: false | ReadonlySet<string> = fa
       if (props && hasProps(v)) {
         const expr = propExpr(v);
         // `globalThis.Number`: a component or prop may itself be called Number.
-        if (props.has(expr)) return ` ${name}={${boolAttr ? expr : numeric ? `globalThis.Number(${expr})` : `String(${expr})`}}`;
+        if (props.has(expr)) return ` ${name}={${boolAttr ? expr : numeric ? `globalThis.Number(${expr})` : `globalThis.String(${expr})`}}`;
         // A text prop turns a boolean attribute on as HTML does (any value), unless it is "false".
-        if (boolAttr) return ` ${name}={String(${expr}) !== 'false'}`;
+        if (boolAttr) return ` ${name}={globalThis.String(${expr}) !== 'false'}`;
         // An empty prop leaves the attribute off, as the string form does, rather than giving 0.
         return numeric ? ` ${name}={${expr} === '' ? undefined : globalThis.Number(${expr})}` : ` ${name}={${expr}}`;
       }
@@ -918,7 +931,7 @@ function variantRules(def: ComponentDef, variants: ComponentVariant[], slugs: Ma
 
 /** Words a prop can't be named in a JS, Vue or Svelte component (a variable of that name is a syntax error). */
 const RESERVED_WORDS = new Set(
-  'key ref variantClasses VARIANT_DISPLAYS arguments await break case catch class const continue debugger default delete do else enum eval export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield'.split(' '),
+  'key ref variantClasses VARIANT_DISPLAYS globalThis String Number arguments await break case catch class const continue debugger default delete do else enum eval export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield'.split(' '),
 );
 
 /** A prop's default as a JS literal. */

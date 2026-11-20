@@ -1,6 +1,6 @@
 import { createId } from './create';
 import { declarationList, parseCss, type CssNode } from './css';
-import { displayForMedia } from './displays';
+import { DISPLAY_IDS, displayForMedia } from './displays';
 import type { DesignKit, DisplayId, StyleMap, StyleRule } from './model';
 import { bracketsBalance, renderDisplayCss, untilStable } from './render';
 
@@ -98,6 +98,11 @@ export function parseRulesCss(css: string, previous: StyleRule[] = []): ParsedRu
     });
     if (last >= 0 && seen.slice(last + 1).some((r) => overlaps(r.props))) note(`${sel} set again after other rules`);
     if (display === 'lg' && seen.some((r) => r.display !== 'lg' && overlaps(r.props))) note(`${sel} after a media query`);
+    // Display blocks are written back in display order (tablet before the phones), so a rule
+    // that comes after one written later would lose to it once converted.
+    else if (seen.some((r) => r.display !== 'lg' && DISPLAY_IDS.indexOf(r.display) > DISPLAY_IDS.indexOf(display) && overlaps(r.props))) {
+      note(`${sel} after a narrower display's media query`);
+    }
     seen.push({ selector: sel, display, props });
     let rule = bySelector.get(sel);
     if (!rule) {

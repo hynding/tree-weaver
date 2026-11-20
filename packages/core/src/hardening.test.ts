@@ -404,3 +404,19 @@ describe('pass 16 fixes', () => {
     expect(parseTracks('repeat(3, 1fr)')).toHaveLength(3);
   });
 });
+
+describe('pass 18 fixes', () => {
+  it('reports display media blocks out of display order', async () => {
+    const { parseRulesCss } = await import('./index');
+    const css = '@media (max-width: 600px) and (orientation: portrait) { .a { color: red; } } @media (max-width: 1024px) { .a { color: blue; } }';
+    expect(parseRulesCss(css).reordered).toHaveLength(1);
+    const inOrder = '@media (max-width: 1024px) { .a { color: blue; } } @media (max-width: 600px) and (orientation: portrait) { .a { color: red; } }';
+    expect(parseRulesCss(inOrder).reordered).toEqual([]);
+  });
+
+  it('prints elements that show whitespace on one line', async () => {
+    const { renderNodeHtml } = await import('./index');
+    const div = createBranch({ tag: 'div', styles: { lg: { 'white-space': 'pre-line' } }, children: [createBranch({ tag: 'p', children: [text('one')] }), createBranch({ tag: 'p', children: [text('two')] })] });
+    expect(renderNodeHtml(div, { pretty: true })).not.toContain('\n');
+  });
+});

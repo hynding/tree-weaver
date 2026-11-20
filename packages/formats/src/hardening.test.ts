@@ -589,8 +589,8 @@ describe('pass 15 fixes', () => {
       props: [{ name: 'disabled', type: 'text', default: '' }, { name: 'pressed', type: 'boolean', default: '' }],
     } as never);
     const out = exportComponentDef(btn, { framework: 'react', typescript: true }).files[0].contents;
-    expect(out).toContain("disabled={String(disabled) !== 'false'}");
-    expect(out).toContain('title={String(pressed)}');
+    expect(out).toContain("disabled={globalThis.String(disabled) !== 'false'}");
+    expect(out).toContain('title={globalThis.String(pressed)}');
     expect(out).toContain('tabIndex={globalThis.Number(pressed)}');
   });
 
@@ -624,7 +624,7 @@ describe('pass 16 fixes', () => {
       props: [{ name: 'off', type: 'text', default: 'false' }, { name: 'gone', type: 'boolean', default: '' }],
     } as never);
     const react = exportComponentDef(def, { framework: 'react', typescript: true }).files[0].contents;
-    expect(react).toContain("disabled={String(off) !== 'false'}");
+    expect(react).toContain("disabled={globalThis.String(off) !== 'false'}");
     expect(react).toContain('hidden={gone}');
     const vue = exportComponentDef(def, { framework: 'vue' }).files[0].contents;
     expect(vue).toContain(`:disabled="off !== 'false'"`);
@@ -653,7 +653,7 @@ describe('pass 17 fixes', () => {
     const tree = imported('<pre><code>    indented();\n  more();\n\n</code></pre>');
     for (const framework of ['svelte', 'vue'] as const) {
       const out = exportComponent(tree, { framework }).files[0].contents;
-      expect(out).toContain('    indented();\n  more();\n\n</code>');
+      expect(out).toContain('"    indented();\\n  more();\\n\\n"');
       expect(out).not.toContain("' '");
     }
   });
@@ -671,9 +671,9 @@ describe('pass 17 fixes', () => {
     const def = createComponent('Inbox', createBranch({ tag: 'div', children: [text('Inbox'), createBranch({ tag: 'span', attrs: { 'data-show-if': 'count' }, children: [text('{{count}}')] })] }), {
       props: [{ name: 'count', type: 'text', default: '0' }],
     } as never);
-    expect(exportComponentDef(def, { framework: 'react' }).files[0].contents).toContain("(count && String(count) !== 'false' && String(count) !== '0') && (");
-    expect(exportComponentDef(def, { framework: 'svelte' }).files[0].contents).toContain("{#if (count && String(count) !== 'false' && String(count) !== '0')}");
-    expect(exportComponentDef(def, { framework: 'vue' }).files[0].contents).toContain('v-if="(count &amp;&amp; String(count) !== \'false\'');
+    expect(exportComponentDef(def, { framework: 'react' }).files[0].contents).toContain("(count && globalThis.String(count) !== 'false' && globalThis.String(count) !== '0') && (");
+    expect(exportComponentDef(def, { framework: 'svelte' }).files[0].contents).toContain("{#if (count && globalThis.String(count) !== 'false' && globalThis.String(count) !== '0')}");
+    expect(exportComponentDef(def, { framework: 'vue' }).files[0].contents).toContain('v-if="(count &amp;&amp; globalThis.String(count) !== \'false\'');
   });
 
   it('keeps an ordered list with an unusual start as HTML in Markdown', () => {
@@ -683,5 +683,36 @@ describe('pass 17 fixes', () => {
     const back = importDocument(md, 'markdown');
     const root = back.kind === 'tree' ? back.tree.root : back.forest.trees[0].root;
     expect(JSON.stringify(root)).toContain('"tag":"ol"');
+  });
+});
+
+describe('pass 18 fixes', () => {
+  const poem = () =>
+    createTree('Home', createBranch({ tag: 'body', type: 'root', children: [createBranch({ tag: 'div', styles: { lg: { 'white-space': 'pre-wrap' } }, children: [text('Roses are red,\n    violets  are blue.')] })] }));
+
+  it('keeps whitespace under white-space: pre-wrap in Vue and Svelte', () => {
+    expect(exportComponent(poem(), { framework: 'vue' }).files[0].contents).toContain('{{ "Roses are red,\\n    violets  are blue." }}');
+    expect(exportComponent(poem(), { framework: 'svelte' }).files[0].contents).toContain('{"Roses are red,\\n    violets  are blue."}');
+  });
+
+  it('keeps whitespace under white-space: pre-wrap on HTML import and round trip', () => {
+    const doc = importDocument('<body><div style="white-space: pre-wrap">Roses are red,\n    violets are blue.</div></body>', 'html');
+    const tree = doc.kind === 'tree' ? doc.tree : doc.forest.trees[0];
+    expect(JSON.stringify(tree.root)).toContain('Roses are red,\\n    violets are blue.');
+    const back = importDocument(exportTree(poem(), 'html'), 'html');
+    const root = back.kind === 'tree' ? back.tree.root : back.forest.trees[0].root;
+    expect(JSON.stringify(root)).toContain('Roses are red,\\n    violets  are blue.');
+  });
+
+  it('calls the global String in a component named String', () => {
+    const def = createComponent('String', createBranch({ tag: 'button', attrs: { disabled: '{{busy}}', 'data-show-if': 'label' }, children: [text('{{label}}')] }));
+    const out = exportComponentDef(def, { framework: 'react' }).files[0].contents;
+    expect(out.replace('function String(', '')).not.toMatch(/[^.]String\(/);
+  });
+
+  it('suffixes native type names that clash with names the code uses', () => {
+    const tree = createTree('Font Style', createBranch({ tag: 'body', type: 'root', children: [createBranch({ tag: 'p', styles: { lg: { 'font-style': 'italic' } }, children: [text('Hi')] })] }));
+    expect(exportComponent(tree, { framework: 'flutter' }).name).not.toBe('FontStyle');
+    expect(exportComponent({ ...tree, name: 'self' }, { framework: 'swiftui' }).name).not.toBe('Self');
   });
 });

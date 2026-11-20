@@ -1,4 +1,5 @@
 import {
+  keepsWhitespace,
   BRANCH_ATTR,
   canonicalSvgAttr,
   canonicalTag,
@@ -13,6 +14,7 @@ import {
   parseCss,
   parseDeclarations,
   renderDocument,
+  type Branch,
   type CssNode,
   type DesignKit,
   type DisplayId,
@@ -292,7 +294,7 @@ export function convertParts(tag: string, attribs: Record<string, string>, child
     classes: a.class ?? '',
     attrs,
     styles,
-    children: dropLeadingNewline(tag, impliedTbody(tag, convertChildren(children, ctx, raw || RAW_TEXT_TAGS.has(tag), childrenInSvg({ tag }, svg), !svg && isInlineTag(tag)))),
+    children: dropLeadingNewline(tag, impliedTbody(tag, convertChildren(children, ctx, raw || RAW_TEXT_TAGS.has(tag) || keepsWhitespace({ tag, styles } as Branch), childrenInSvg({ tag }, svg), !svg && isInlineTag(tag)))),
   };
 }
 
