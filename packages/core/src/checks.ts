@@ -1,5 +1,6 @@
 import { DISPLAYS, resolveStyles } from './displays';
 import { isBranch, type Branch, type DesignKit, type DisplayId, type Leaf, type StyleMap, type Tree, type TreeNode } from './model';
+import { nestingProblem } from './nesting';
 import { VOID_TAGS } from './ops';
 import { renderDocument } from './render';
 import { canonicalTag, childrenInSvg, isSvgRoot } from './svg';
@@ -27,6 +28,7 @@ export type CheckRule =
   | 'link-href'
   | 'form-label'
   | 'duplicate-id'
+  | 'nesting'
   | 'empty-branch'
   | 'fixed-width'
   | 'contrast'
@@ -259,6 +261,8 @@ export function checkTree(tree: Tree): CheckReport {
   const h1s: Visit[] = [];
   for (const v of visits) {
     const { node, path, ancestors, inSvg } = v;
+    const nesting = inSvg ? null : nestingProblem(ancestors, node);
+    if (nesting) add({ rule: 'nesting', severity: 'error', id: node.id, path, message: nesting, fix: 'Move it, or change its tag or its parent\'s, so the page shows the structure the tree has' });
     if (!isBranch(node)) {
       if (node.type === 'image' && !inSvg && node.attrs?.alt === undefined) {
         add({ rule: 'image-alt', severity: 'error', id: node.id, path, message: `Image ${node.value ? `"${node.value.slice(0, 60)}" ` : ''}has no alt text`, fix: 'Set attrs.alt to what the image shows, or to "" when it is only decoration' });

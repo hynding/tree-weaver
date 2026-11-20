@@ -1,0 +1,64 @@
+import type { Branch, TreeNode } from './model';
+import { isBranch } from './model';
+
+/**
+ * Nestings the HTML parser rearranges. The canvas, previews and exports all go through it, so a
+ * tree holding one would show a structure the tree doesn't have (a `<div>` in a `<p>` closes the
+ * paragraph; an `<a>` in an `<a>` closes the outer link; a `<div>` in a `<table>` moves before it).
+ */
+
+/** Start tags that close an open `<p>`. */
+const CLOSES_P = new Set(
+  'address article aside blockquote center details dialog dir div dl fieldset figcaption figure footer form h1 h2 h3 h4 h5 h6 header hgroup hr listing main menu nav ol p pre search section summary table ul xmp plaintext li dd dt'.split(' '),
+);
+/** Elements that stop the parser's search for an open element of the same kind ("scope"). */
+const SCOPE = new Set(['applet', 'caption', 'html', 'table', 'td', 'th', 'marquee', 'object', 'template', 'foreignobject', 'svg', 'math']);
+/** Children each table part takes; anything else is moved out in front of the table. */
+const TABLE_CHILDREN: Record<string, Set<string>> = {
+  table: new Set(['caption', 'colgroup', 'thead', 'tbody', 'tfoot', 'tr', 'script', 'template', 'style']),
+  thead: new Set(['tr', 'script', 'template', 'style']),
+  tbody: new Set(['tr', 'script', 'template', 'style']),
+  tfoot: new Set(['tr', 'script', 'template', 'style']),
+  tr: new Set(['td', 'th', 'script', 'template', 'style']),
+  colgroup: new Set(['col', 'template']),
+};
+const HEADING = /^h[1-6]$/;
+
+/** Whether a start tag ends an open `<p>` (the parser closes the paragraph before it). */
+export const closesParagraph = (tag: string): boolean => CLOSES_P.has(tag.toLowerCase());
+
+/**
+ * Why the HTML parser would move `node` out of the place `ancestors` (outermost first, the parent
+ * last) describe, or null. Only the node itself is checked; callers check what it holds in turn.
+ */
+export function nestingProblem(ancestors: readonly Branch[], node: TreeNode): string | null {
+  const parent = ancestors[ancestors.length - 1];
+  if (!parent) return null;
+  const parentTag = parent.tag.toLowerCase();
+  const table = Object.hasOwn(TABLE_CHILDREN, parentTag) ? TABLE_CHILDREN[parentTag] : undefined;
+  if (table) {
+    if (!isBranch(node)) return node.type === 'text' && !node.value.trim() ? null : `A <${parentTag}> can only hold ${[...table].filter((t) => !['script', 'template', 'style'].includes(t)).map((t) => `<${t}>`).join(', ')}; the browser would move this out in front of the table`;
+    if (!table.has(node.tag.toLowerCase())) return `A <${parentTag}> can only hold ${[...table].filter((t) => !['script', 'template', 'style'].includes(t)).map((t) => `<${t}>`).join(', ')}, not <${node.tag}>; the browser would move it out in front of the table`;
+    return null;
+  }
+  if (!isBranch(node)) return null;
+  const tag = node.tag.toLowerCase();
+  // Open elements the parser would find from here, up to a scope boundary.
+  const inScope = (want: (t: string) => boolean, stop: Set<string> = SCOPE): boolean => {
+    for (let i = ancestors.length - 1; i >= 0; i--) {
+      const t = ancestors[i].tag.toLowerCase();
+      if (want(t)) return true;
+      if (stop.has(t)) return false;
+    }
+    return false;
+  };
+  if (CLOSES_P.has(tag) && inScope((t) => t === 'p', new Set([...SCOPE, 'button']))) return `<${tag}> can't go inside a <p>: the browser would end the paragraph there. Use a <div> (or a <span> inside the paragraph) instead`;
+  if (HEADING.test(tag) && HEADING.test(parentTag)) return `A heading can't go directly inside another heading; the browser would end the outer one`;
+  if (tag === 'a' && inScope((t) => t === 'a', new Set(['caption', 'td', 'th', 'marquee', 'object', 'template', 'applet']))) return `A link can't go inside another link; the browser would end the outer one`;
+  if (tag === 'button' && inScope((t) => t === 'button')) return `A button can't go inside another button; the browser would end the outer one`;
+  if (tag === 'form' && ancestors.some((a) => a.tag.toLowerCase() === 'form')) return `A form can't go inside another form; the browser drops the inner <form>`;
+  if (tag === 'li' && inScope((t) => t === 'li', new Set([...SCOPE, 'ul', 'ol']))) return `An <li> can't go inside another <li> without a list around it; the browser would end the outer item`;
+  if ((tag === 'dd' || tag === 'dt') && inScope((t) => t === 'dd' || t === 'dt', new Set([...SCOPE, 'dl']))) return `A <${tag}> can't go inside a <dd> or <dt> without a <dl> around it; the browser would end the outer one`;
+  if (tag === 'option' && parentTag === 'option') return `An <option> can't go inside another <option>`;
+  return null;
+}

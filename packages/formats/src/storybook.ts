@@ -6,6 +6,7 @@ import {
   inSvgContext,
   isBranch,
   renderNodeHtml,
+  safeTag,
   renderTreeBody,
   renderTreeCss,
   rootAttrs,
@@ -135,7 +136,14 @@ function collectLeaves(node: TreeNode): { args: Record<string, string>; leaves: 
 function branchHtml(root: Branch, node: Branch): string {
   const chain = ancestorsOf(root, node.id);
   const parent = chain[chain.length - 1];
-  if (!parent || !inSvgContext(root, parent.id)) return renderNodeHtml(node, { designer: true });
+  if (!parent) return renderNodeHtml(node, { designer: true });
+  // A table part outside a table is dropped by the HTML parser, so it keeps its table ancestors.
+  const tableAt = chain.map((b) => b.tag.toLowerCase()).lastIndexOf('table');
+  if (/^(caption|colgroup|col|thead|tbody|tfoot|tr|td|th)$/i.test(node.tag) && tableAt >= 0) {
+    const wrap = chain.slice(tableAt).map((b) => safeTag(b.tag));
+    return `${wrap.map((t) => `<${t}>`).join('')}${renderNodeHtml(node, { designer: true })}${[...wrap].reverse().map((t) => `</${t}>`).join('')}`;
+  }
+  if (!inSvgContext(root, parent.id)) return renderNodeHtml(node, { designer: true });
   const svg = [...chain].reverse().find((b) => b.tag === 'svg');
   const viewBox = svg?.attrs.viewBox ? ` viewBox="${escapeAttr(svg.attrs.viewBox)}"` : '';
   return `<svg xmlns="${SVG_NAMESPACE}"${viewBox}>${renderNodeHtml(node, { designer: true, inSvg: true })}</svg>`;

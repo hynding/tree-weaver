@@ -15,6 +15,7 @@ import {
   text,
   validateDocument,
   VersionLogError,
+  type Branch,
 } from './index';
 
 describe('rendering untrusted trees', () => {
@@ -521,5 +522,24 @@ describe('pass 29 fixes', () => {
     const def = createComponent('Rule', createBranch({ tag: 'hr' }));
     const forest = { ...createForest('F', [createTree('Home')]), components: [def] };
     expect(() => updateTreeRoot(forest, componentTreeId(def.id), (body) => insertNode(body, body.id, createBranch({ tag: 'p' })))).toThrow(/can't hold/);
+  });
+});
+
+describe('pass 30 fixes', () => {
+  it('refuses nestings the HTML parser would rearrange, and lint reports them', async () => {
+    const { insertionProblem, checkTree } = await import('./index');
+    const p = createBranch({ tag: 'p', children: [createBranch({ tag: 'span' })] });
+    const a = createBranch({ tag: 'a', attrs: { href: '#' } });
+    const table = createBranch({ tag: 'table' });
+    const root = createBranch({ tag: 'body', type: 'root', children: [p, a, table] });
+    const span = p.children[0] as Branch;
+    expect(insertionProblem(root, p.id, createBranch({ tag: 'div' }))).toMatch(/inside a <p>/);
+    expect(insertionProblem(root, span.id, createBranch({ tag: 'ul' }))).toMatch(/inside a <p>/);
+    expect(insertionProblem(root, p.id, createBranch({ tag: 'em' }))).toBeNull();
+    expect(insertionProblem(root, a.id, createBranch({ tag: 'span', children: [createBranch({ tag: 'a' })] }))).toMatch(/inside another link/);
+    expect(insertionProblem(root, table.id, createBranch({ tag: 'div' }))).toMatch(/in front of the table/);
+    expect(insertionProblem(root, table.id, createBranch({ tag: 'tbody' }))).toBeNull();
+    const bad = createTree('Bad', { ...root, children: [{ ...p, children: [createBranch({ tag: 'div' })] }] });
+    expect(checkTree(bad).issues.map((i) => i.rule)).toContain('nesting');
   });
 });

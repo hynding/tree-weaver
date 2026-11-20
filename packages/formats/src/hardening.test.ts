@@ -1073,3 +1073,27 @@ describe('pass 29 fixes', () => {
     expect(exportStorybook(createForest('Site', [tree])).files.map((f) => f.content).join('\n')).not.toContain('notesText');
   });
 });
+
+describe('pass 30 fixes', () => {
+  it('keeps a <p> holding a select or picture, and a heading holding a div', () => {
+    const select = createBranch({ tag: 'select', children: [createBranch({ tag: 'option', children: [text('S')] })] });
+    const tree = page([createBranch({ tag: 'p', children: [text('Size: '), select] }), createBranch({ tag: 'h1', children: [createBranch({ tag: 'div', children: [text('Title')] })] })]);
+    const out = exportComponent(tree, { framework: 'svelte' }).files[0].contents;
+    expect(out).toMatch(/<p[^>]*>Size: <select/);
+    expect(out).toMatch(/<h1[^>]*>\s*<div/);
+    expect(exportComponent(page([createBranch({ tag: 'p', children: [createBranch({ tag: 'div' })] })]), { framework: 'svelte' }).files[0].contents).not.toMatch(/<p[ >]/);
+  });
+
+  it('writes a loose run starting with a textarea as HTML in Markdown', () => {
+    const tree = page([createBranch({ tag: 'p', children: [text('Intro')] }), createBranch({ tag: 'textarea', children: [text('notes')] }), text(' see '), createBranch({ tag: 'em', children: [text('this')] })]);
+    const back = importDocument(exportTree(tree, 'markdown'), 'markdown');
+    const root = back.kind === 'tree' ? back.tree.root : back.forest.trees[0].root;
+    expect(root.children.map((c) => ('tag' in c ? c.tag : c.value))).toEqual(['p', 'textarea', ' see ', 'em']);
+  });
+
+  it('keeps a table part’s table around its Storybook story', () => {
+    const row = createBranch({ tag: 'tr', name: 'Total row', children: [createBranch({ tag: 'td', children: [text('Total')] })] });
+    const tree = page([createBranch({ tag: 'table', children: [createBranch({ tag: 'tbody', children: [row] })] })]);
+    expect(exportStorybook(createForest('Site', [tree])).files.map((f) => f.content).join('\n')).toMatch(/<table><tbody><tr data-tw=\\"[^"\\]+\\" data-tw-name=\\"Total row\\"/);
+  });
+});

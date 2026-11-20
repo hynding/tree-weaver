@@ -1,4 +1,5 @@
 import {
+  closesParagraph,
   keepsWhitespace,
   BOOLEAN_ATTRS,
   canonicalSvgAttr,
@@ -422,14 +423,18 @@ function leafEl(leaf: Leaf, inSvg: boolean, defaults?: Record<string, string>): 
  * warns about): a link in a link becomes a span, a paragraph or heading holding blocks a div,
  * rows straight under a table go in a tbody, and whitespace between table parts goes.
  */
-/** Whether a block element sits anywhere below `node` (Svelte refuses one at any depth under a `<p>`). */
-function blockBelow(node: Branch, inSvg = false): boolean {
+/**
+ * Whether an element matching `test` sits anywhere below `node`, outside SVG. Svelte refuses a
+ * paragraph-closing element (`<div>`, `<ul>` …) at any depth under a `<p>`, and a heading under
+ * a heading; others (`<select>`, `<picture>`, `<ruby>`) are fine there, in browsers too.
+ */
+function tagBelow(node: Branch, test: (tag: string) => boolean, inSvg = false): boolean {
   return node.children.some((c) => {
     if (!isBranch(c)) return false;
     const lower = c.tag.toLowerCase();
-    if (inSvg) return blockBelow(c, lower !== 'foreignobject');
-    if (lower === 'svg') return blockBelow(c, true);
-    return !isInlineTag(lower) || blockBelow(c);
+    if (inSvg) return tagBelow(c, test, lower !== 'foreignobject');
+    if (lower === 'svg') return tagBelow(c, test, true);
+    return test(lower) || tagBelow(c, test);
   });
 }
 
@@ -477,8 +482,8 @@ export function repairNesting(node: Branch, ctx: { a?: boolean; form?: boolean; 
   let tag = node.tag;
   if ((lower === 'a' && ctx.a) || (lower === 'button' && ctx.button)) tag = 'span';
   if (lower === 'form' && ctx.form) tag = 'div';
-  const holdsBlock = blockBelow(node);
-  if ((lower === 'p' || /^h[1-6]$/.test(lower)) && holdsBlock) tag = 'div';
+  if (lower === 'p' && tagBelow(node, closesParagraph)) tag = 'div';
+  if (/^h[1-6]$/.test(lower) && tagBelow(node, (t) => /^h[1-6]$/.test(t))) tag = 'div';
   // An <li> right inside an <li> (a <td> in a <td>, …) would close its parent when parsed.
   const group = Object.hasOwn(AUTO_CLOSE_GROUP, lower) ? AUTO_CLOSE_GROUP[lower] : undefined;
   if (group && ctx.parent && Object.hasOwn(AUTO_CLOSE_GROUP, ctx.parent) && AUTO_CLOSE_GROUP[ctx.parent] === group) tag = group === 'ruby' ? 'span' : 'div';

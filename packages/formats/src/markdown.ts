@@ -237,7 +237,9 @@ function blocks(nodes: TreeNode[]): string[] {
   let run: TreeNode[] = [];
   const flush = () => {
     if (!run.length) return;
-    const text = inlineLine(run);
+    let text = inlineLine(run);
+    // A leading <textarea> would leave the rest raw (an HTML block): write the whole run as HTML.
+    if (/^<textarea(\s|>|$)/i.test(text)) text = inlineHtml(run.map((n) => renderNodeHtml(n)).join('').replace(/^[ \t\n\r\f]+|[ \t\n\r\f]+$/g, ''));
     if (text) out.push(`${directive('inline')}\n${text}`);
     run = [];
   };

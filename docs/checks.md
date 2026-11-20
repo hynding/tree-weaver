@@ -16,6 +16,7 @@ the displays it shows on, and a fix.
 | `image-alt` | error | An image leaf with no `alt`. Use `alt: ""` for images that are only decoration. |
 | `link-name` | error | A link or button with no text, image alt, `aria-label` or `title`. |
 | `duplicate-id` | error | The same `id` attribute on more than one element. |
+| `nesting` | error | An element the HTML parser would move: a block inside a `<p>`, a link inside a link, a `<div>` directly in a `<table>`, and the like. The page would show a different structure than the tree. |
 | `link-href` | warning | An `<a>` without `href`, which can't be followed or focused. |
 | `form-label` | warning | An `input`, `select` or `textarea` without a `<label for>`, a wrapping `<label>` or an `aria-label`. |
 | `heading-order` | warning | A heading that skips a level (`<h1>` then `<h3>`). A first heading below `<h2>` is a note. |
