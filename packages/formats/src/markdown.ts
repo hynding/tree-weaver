@@ -239,11 +239,21 @@ function blocks(nodes: TreeNode[]): string[] {
     if (text) out.push(`${directive('inline')}\n${text}`);
     run = [];
   };
+  let prevList = '';
   for (const node of nodes) {
-    if (isInlineNode(node)) run.push(node);
-    else {
+    if (isInlineNode(node)) {
+      run.push(node);
+      prevList = '';
+    } else {
       flush();
-      out.push(block(node as Branch));
+      const md = block(node as Branch);
+      // Two lists of a kind side by side would read back as one (loose) list; an empty comment
+      // between them is CommonMark's way to keep them apart.
+      const tag = (node as Branch).tag;
+      const isList = (tag === 'ul' || tag === 'ol') && /^(-|\d+\.) /.test(md);
+      if (isList && prevList === tag) out.push('<!-- -->');
+      prevList = isList ? tag : '';
+      out.push(md);
     }
   }
   flush();

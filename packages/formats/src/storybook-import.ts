@@ -159,8 +159,10 @@ export const isStorybookChrome = (sheet: StorySheet): boolean =>
 
 /** Rewrite relative `url(...)` references in CSS against the stylesheet's own URL, so copied CSS still finds fonts and images. */
 export function absolutizeCssUrls(css: string, baseHref: string): string {
+  // `@import "file.css"` names a URL without `url()`: written as `url()` first, it is rewritten below too.
+  const imports = css.replace(/@import\s+(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)')/g, (_, dq?: string, sq?: string) => `@import url("${(dq ?? sq ?? '').replace(/"/g, '\\"')}")`);
   // Quoted and bare forms apart: a quoted path may hold `)` (`url("img/logo(1).png")`).
-  return css.replace(/url\(\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^'")\s]+))\s*\)/g, (whole, dq?: string, sq?: string, bare?: string) => {
+  return imports.replace(/url\(\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^'")\s]+))\s*\)/g, (whole, dq?: string, sq?: string, bare?: string) => {
     const target = (dq ?? sq ?? bare ?? '').replace(/\\(.)/g, '$1').trim();
     if (!target || /^(data:|[a-z][a-z0-9+.-]*:|#|\/\/)/i.test(target)) return whole;
     try {

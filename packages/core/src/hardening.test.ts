@@ -490,3 +490,17 @@ describe('pass 26 fixes', () => {
     expect(displayProblems(order).join(' ')).toMatch(/breakpoint \(2000px\) is above/);
   });
 });
+
+describe('pass 27 fixes', () => {
+  it('turns the token kit on when a token is edited, and says when a later kit wins', async () => {
+    const { setToken, tokenValues, tokenShadowed, createTokenKit } = await import('./index');
+    const off = { ...createTokenKit([{ name: '--brand', value: 'red' }]), enabled: false };
+    const kits = setToken([off], { name: '--brand', value: 'green' });
+    expect(kits[0].enabled).toBe(true);
+    expect(tokenValues(kits).get('--brand')).toBe('green');
+    const later = createKit('Later', ':root { --brand: blue; }');
+    const shadowed = setToken([createTokenKit([]), later], { name: '--brand', value: 'green' });
+    expect(tokenShadowed(shadowed, '--brand')).toBe(true);
+    expect(tokenShadowed(setToken([later, createTokenKit([])], { name: '--brand', value: 'green' }), '--brand')).toBe(false);
+  });
+});

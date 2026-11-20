@@ -9,6 +9,7 @@ import {
   isBranch,
   isSafeAttr,
   isSafeCssProp,
+  hasInlineDisplay,
   isSvgRoot,
   renderDisplayCss,
   safeTag,
@@ -316,6 +317,8 @@ type El =
       variantClass?: boolean;
       /** Inside a `<pre>` (or a textarea): whitespace is written exactly as it is. */
       pre?: boolean;
+      /** Its own styles make it `inline*`, so a line break beside it would show as a gap. */
+      inlineDisplay?: boolean;
     }
   | { kind: 'text'; value: string; pre?: boolean };
 
@@ -533,6 +536,7 @@ function branchEl(branch: Branch, b: Build, inSvg: boolean, asTag?: string): El 
   if (tag === 'svg' && !inSvg && !branch.attrs.xmlns) attrs.push(['xmlns', 'http://www.w3.org/2000/svg']);
   const children = branch.children.map((c: TreeNode) => (isBranch(c) ? branchEl(c, b, childSvg) : leafEl(c, childSvg, b.defaults)));
   const el: El = cond ? { kind: 'el', tag, attrs, children, svg, cond } : { kind: 'el', tag, attrs, children, svg };
+  if (!svg && hasInlineDisplay(branch)) el.inlineDisplay = true;
   // `white-space: pre` and the like show whitespace as written, as a <pre> does.
   if (keepsWhitespace(branch)) el.pre = true;
   return el;
@@ -569,6 +573,8 @@ const variantSuffix = `\${${VARIANT_CALL}}`;
 /* ------------------------------------------------------------- writers */
 
 const isInlineEl = (el: El): boolean => el.kind === 'text' || isInlineTag(el.tag);
+/** Keep children on one line when line breaks could change the text, or open gaps between inline-block siblings. */
+const keepTogether = (children: El[]): boolean => oneLine(children) || children.some((c) => c.kind === 'el' && c.inlineDisplay);
 /** Keep children on one line when line breaks could change the text: any text, or only inline elements. */
 const oneLine = (children: El[]): boolean => children.some((c) => c.kind === 'text') || children.every(isInlineEl);
 /**
@@ -628,7 +634,11 @@ function writeHtml(el: El, depth: number, mode: 'html' | 'vue' | 'svelte', props
   if (el.kind === 'text' && props && mode !== 'html' && hasProps(el.value)) {
     // Vue: {{ title }}; Svelte: {title}. Literal parts are escaped as usual.
     return segments(el.value)
-      .map((s) => writeHtml({ kind: 'text', value: s.lit, pre: el.pre }, depth, mode) + (s.prop ? (mode === 'vue' ? `{{ ${s.prop} }}` : `{${s.prop}}`) : ''))
+      .map((s) => {
+        // A boolean prop reads as the editor stores it: 'true', or nothing when off.
+        const expr = s.prop && props.has(s.prop) ? `${s.prop} ? 'true' : ''` : s.prop;
+        return writeHtml({ kind: 'text', value: s.lit, pre: el.pre }, depth, mode) + (expr ? (mode === 'vue' ? `{{ ${expr} }}` : `{${expr}}`) : '');
+      })
       .join('');
   }
   if (el.kind === 'el' && props && mode !== 'html') {
@@ -657,7 +667,7 @@ function writeHtml(el: El, depth: number, mode: 'html' | 'vue' | 'svelte', props
   const attrs = el.attrs.map(([n, v]) => (v === '' && !el.svg ? ` ${n}` : ` ${n}="${esc(v, n)}"`)).join('');
   if (!el.svg && VOID_TAGS.has(el.tag)) return `<${el.tag}${attrs}>`;
   if (!el.children.length) return el.svg ? `<${el.tag}${attrs} />` : `<${el.tag}${attrs}></${el.tag}>`;
-  if (el.pre || oneLine(el.children)) return `<${el.tag}${attrs}>${leadNewline(el.tag, inlineChildren(el.children, mode, (c) => writeHtml(c, depth + 1, mode), el.pre))}</${el.tag}>`;
+  if (el.pre || keepTogether(el.children)) return `<${el.tag}${attrs}>${leadNewline(el.tag, inlineChildren(el.children, mode, (c) => writeHtml(c, depth + 1, mode), el.pre))}</${el.tag}>`;
   const pad = '  '.repeat(depth + 1);
   return `<${el.tag}${attrs}>\n${childLines(el.children, pad, (c) => writeHtml(c, depth + 1, mode))}\n${'  '.repeat(depth)}</${el.tag}>`;
 }
@@ -767,7 +777,7 @@ function writePropsEl(el: El & { kind: 'el' }, depth: number, mode: 'vue' | 'sve
   const cond = mode === 'vue' && el.cond ? ` v-if="${escapeAttr(condExpr(el.cond, props, true))}"` : '';
   if (!el.svg && VOID_TAGS.has(el.tag)) return `<${el.tag}${cond}${attrs}>`;
   if (!el.children.length) return el.svg ? `<${el.tag}${cond}${attrs} />` : `<${el.tag}${cond}${attrs}></${el.tag}>`;
-  if (el.pre || oneLine(el.children)) return `<${el.tag}${cond}${attrs}>${leadNewline(el.tag, inlineChildren(el.children, mode, (c) => writeHtml(c, depth + 1, mode, props), el.pre))}</${el.tag}>`;
+  if (el.pre || keepTogether(el.children)) return `<${el.tag}${cond}${attrs}>${leadNewline(el.tag, inlineChildren(el.children, mode, (c) => writeHtml(c, depth + 1, mode, props), el.pre))}</${el.tag}>`;
   const pad = '  '.repeat(depth + 1);
   return `<${el.tag}${cond}${attrs}>\n${childLines(el.children, pad, (c) => writeHtml(c, depth + 1, mode, props))}\n${'  '.repeat(depth)}</${el.tag}>`;
 }
@@ -779,8 +789,9 @@ function writeJsx(el: El, depth: number, props: false | ReadonlySet<string> = fa
   if (el.kind === 'text') {
     if (props && hasProps(el.value))
       return segments(el.value)
-        // React renders nothing for `true` and `false`, so a boolean prop is written as text.
-        .map((s) => (s.lit ? writeJsx({ kind: 'text', value: s.lit }, depth) : '') + (s.prop ? (props.has(s.prop) ? `{globalThis.String(${s.prop})}` : `{${s.prop}}`) : ''))
+        // React renders nothing for `true` and `false`, so a boolean prop is written as the editor
+        // stores it: 'true', or nothing when off.
+        .map((s) => (s.lit ? writeJsx({ kind: 'text', value: s.lit }, depth) : '') + (s.prop ? (props.has(s.prop) ? `{${s.prop} ? 'true' : ''}` : `{${s.prop}}`) : ''))
         .join('');
     // Plain text is fine unless it holds JSX syntax characters; then use a string expression.
     // Line breaks too: JSX text collapses them (and the indentation around them).

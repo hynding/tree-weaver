@@ -985,3 +985,34 @@ describe('pass 26 fixes', () => {
     expect(texts).toContain('"Roses\\nViolets"');
   });
 });
+
+describe('pass 27 fixes', () => {
+  const shape = (n: TreeNode): unknown => ('children' in n ? { [n.tag]: n.children.map(shape) } : n.type === 'text' ? n.value : n.type);
+  const li = (t: string) => createBranch({ tag: 'li', children: [text(t)] });
+
+  it('keeps two adjacent lists apart in Markdown', () => {
+    const tree = page([createBranch({ tag: 'ul', children: [li('a')] }), createBranch({ tag: 'ul', children: [li('b')] }), createBranch({ tag: 'ol', children: [li('c')] }), createBranch({ tag: 'ol', children: [li('d')] })]);
+    const back = importDocument(exportTree(tree, 'markdown'), 'markdown');
+    const root = back.kind === 'tree' ? back.tree.root : back.forest.trees[0].root;
+    expect(JSON.stringify(shape(root))).toBe(JSON.stringify(shape(tree.root)));
+  });
+
+  it('writes inline-block siblings without line breaks between them', () => {
+    const item = (t: string) => createBranch({ tag: 'li', styles: { lg: { display: 'inline-block' } }, children: [text(t)] });
+    const tree = page([createBranch({ tag: 'ul', children: [item('One'), item('Two')] })]);
+    expect(exportTree(tree, 'html')).toMatch(/One<\/li><li[^>]*>Two/);
+    expect(exportComponent(tree, { framework: 'svelte' }).files[0].contents).toMatch(/One<\/li><li[^>]*>Two/);
+  });
+
+  it('absolutizes @import strings from Storybook', async () => {
+    const { absolutizeCssUrls } = await import('./storybook-import');
+    expect(absolutizeCssUrls('@import "./tokens.css";', 'https://sb.example.com/assets/main.css')).toBe('@import url("https://sb.example.com/assets/tokens.css");');
+  });
+
+  it('writes a boolean prop in text as the editor shows it', () => {
+    const def = createComponent('Flag', createBranch({ tag: 'p', children: [text('{{x}}')] }), { props: [{ name: 'x', type: 'boolean', default: 'false' }] } as never);
+    expect(exportComponentDef(def, { framework: 'react' }).files[0].contents).toContain("{x ? 'true' : ''}");
+    expect(exportComponentDef(def, { framework: 'vue' }).files[0].contents).toContain("{{ x ? 'true' : '' }}");
+    expect(exportComponentDef(def, { framework: 'svelte' }).files[0].contents).toContain("{x ? 'true' : ''}");
+  });
+});

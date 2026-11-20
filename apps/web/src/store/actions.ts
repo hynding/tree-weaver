@@ -57,6 +57,7 @@ import {
   type Tree,
   type TreeNode,
   addKitsBeforeTokens,
+  tokenShadowed,
   displayProblems,
   isTokenKit,
   resetToken,
@@ -924,7 +925,9 @@ export function setTokenValue(token: DesignToken): boolean {
   const forest = state.forest;
   if (!forest) return false;
   try {
-    commit({ ...forest, kits: setToken(forest.kits, token) });
+    const kits = setToken(forest.kits, token);
+    commit({ ...forest, kits });
+    if (tokenShadowed(kits, token.name)) toast(`A kit that loads after the Tokens kit also sets ${token.name}, so it wins. Move the Tokens kit later in the Kits tab.`, 'error');
     return true;
   } catch (err) {
     toast((err as Error).message, 'error');
@@ -1022,6 +1025,8 @@ function editRules(forest: Forest, kitId: string, fn: (rules: StyleRule[]) => St
 function withLastCustomKit(forest: Forest): { forest: Forest; kitId: string } {
   const kits = forest.kits;
   for (let i = kits.length - 1; i >= 0; i--) {
+    // A kit that is turned off neither shows the rule nor overrides it.
+    if (!kits[i].enabled) continue;
     if (isEditableKit(kits[i])) return { forest, kitId: kits[i].id };
     if (!isTokenKit(kits[i])) break;
   }
@@ -1030,7 +1035,8 @@ function withLastCustomKit(forest: Forest): { forest: Forest; kitId: string } {
 }
 
 function withCustomKit(forest: Forest): { forest: Forest; kitId: string } {
-  const existing = forest.kits.find(isEditableKit);
+  // Only one that is on: a rule added to a kit that is turned off would do nothing.
+  const existing = forest.kits.find((k) => isEditableKit(k) && k.enabled);
   if (existing) return { forest, kitId: existing.id };
   const kit = createCustomKit();
   return { forest: { ...forest, kits: [...forest.kits, kit] }, kitId: kit.id };

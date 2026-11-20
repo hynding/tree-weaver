@@ -205,7 +205,19 @@ export function setToken(kits: DesignKit[], token: DesignToken): DesignKit[] {
   const kit = kits[i] as DesignKit & { tokens: DesignToken[] };
   const exists = kit.tokens.some((t) => t.name === token.name);
   const tokens = exists ? kit.tokens.map((t) => (t.name === token.name ? { ...t, ...clean } : t)) : [...kit.tokens, clean];
-  return kits.map((k, j) => (j === i ? withTokens(k, tokens) : k));
+  // An edit is meant to show: a token kit that was turned off is turned back on.
+  return kits.map((k, j) => (j === i ? { ...withTokens(k, tokens), enabled: true } : k));
+}
+
+/**
+ * Whether a kit loading after the token kit sets `name` too, so a token edit doesn't show
+ * (the token kit was moved earlier). Compared with the token kit moved last.
+ */
+export function tokenShadowed(kits: DesignKit[], name: string): boolean {
+  const i = kits.findIndex(isTokenKit);
+  if (i < 0) return false;
+  const last = [...kits.slice(0, i), ...kits.slice(i + 1), kits[i]];
+  return tokenValues(kits).get(name) !== tokenValues(last).get(name);
 }
 
 /** Add kits before the token kit, so token edits keep winning over newly added kits. */

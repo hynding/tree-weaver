@@ -19,6 +19,7 @@ import {
   resetToken,
   setToken,
   themeTokens,
+  tokenShadowed,
   TOKEN_KINDS,
   type TokenKind,
   canHaveChildren,
@@ -1187,6 +1188,7 @@ async function cmdTokens(cli: Cli, args: string[]): Promise<number> {
     if (!values['no-version'] && target && sameFile(target, file) && loaded.text !== data) await keepVersion(cli, file, loaded.text, loaded.format, { name: 'Before tokens', source: 'agent', auto: true });
     await cli.emit(target, data);
     if (target) cli.note(`Wrote ${target}`);
+    for (const [name] of sets) if (tokenShadowed(kits, name)) cli.note(`${name}: a kit loading after the token kit sets it too, so that value wins; move the token kit last to use yours`);
   }
   const tokens = themeTokens(kits);
   if (values.format) {

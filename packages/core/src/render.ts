@@ -242,6 +242,11 @@ export function keepsWhitespace(node: Branch): boolean {
   return Object.values(node.styles ?? {}).some((map) => /^\s*(pre|pre-wrap|pre-line|break-spaces)\b/i.test(map?.['white-space'] ?? ''));
 }
 
+/** Whether a branch's own styles make it `inline`, `inline-block`, `inline-flex` … on any display. */
+export function hasInlineDisplay(node: Branch): boolean {
+  return Object.values(node.styles ?? {}).some((map) => /^\s*inline/i.test(map?.display ?? ''));
+}
+
 /** Whether a child keeps its parent's content on one line when pretty printed. */
 const isInline = (node: TreeNode): boolean => (isBranch(node) ? INLINE_TAGS.has(node.tag) : node.type !== 'shape');
 
@@ -257,7 +262,8 @@ export function renderNodeHtml(node: TreeNode, opts: HtmlOptions = {}, depth = 0
   // Text in a <textarea> or <title> isn't markup, so the designer's leaf spans would show as text.
   const rawText = !opts.inSvg && /^(textarea|title)$/i.test(tag);
   const inner = { ...opts, inSvg, pretty: opts.pretty && !keep, designer: opts.designer && !rawText };
-  const inline = !opts.pretty || keep || node.children.some(isInline);
+  // Also beside an inline-block child: a line break there would show as a gap the canvas doesn't have.
+  const inline = !opts.pretty || keep || node.children.some((c) => isInline(c) || (isBranch(c) && hasInlineDisplay(c)));
   if (inline) {
     const content = node.children.map((c) => renderNodeHtml(c, inner, depth + 1)).join('');
     // HTML parsers drop one newline right after <pre>, <textarea> or <listing>, so a leading one is doubled.
