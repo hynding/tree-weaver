@@ -59,13 +59,19 @@ its media query:
 | --- | --- |
 | `lg` | none (the base) |
 | `xl` | `min-[1440px]:` |
-| `tablet` | `max-[1024px]:` |
-| `mobile-landscape` | `max-[932px]:landscape:` |
-| `mobile-portrait` | `max-[600px]:portrait:` |
+| `tablet` | `max-[1024.02px]:` |
+| `mobile-landscape` | `max-[932.02px]:landscape:` |
+| `mobile-portrait` | `max-[600.02px]:portrait:` |
+
+The `.02px` keeps the breakpoint width itself in the smaller display, as `max-width` does: Tailwind v4
+writes `max-*` as `width < N`.
 
 Common keyword values map to named utilities (`display: flex` → `flex`, `text-align: center` →
 `text-center`), single values to the matching utility with an arbitrary value (`gap: 1rem` →
-`gap-[1rem]`), and everything else to an arbitrary property (`[grid-template-columns:repeat(3,minmax(0,1fr))]`).
+`gap-[1rem]`, `margin: 0 auto` → `m-[0_auto]`), and everything else to an arbitrary property
+(`[border:1px_solid]`). Tailwind orders arbitrary properties by name, so when a branch sets a
+shorthand and then a longhand it covers (`border`, then `border-top`), the longhand gets more
+specificity (`[&&]:[border-top:2px_solid_red]`) to keep winning, as it does in CSS.
 This needs Tailwind CSS v3.4 or later (for `max-*` variants), or v4. Make sure Tailwind scans the
 exported files. If the forest's display settings use other breakpoints, the variants follow them.
 

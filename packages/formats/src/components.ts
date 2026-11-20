@@ -137,14 +137,16 @@ const hasStyles = (b: Branch): boolean => Object.values(b.styles).some((m) => m 
 
 /* ------------------------------------------------------------ tailwind */
 
-/** The Tailwind variant prefix for a display, from its media query: `max-[1024px]:`, `max-[600px]:portrait:`. */
+/** The Tailwind variant prefix for a display, from its media query: `max-[1024.02px]:`, `max-[600.02px]:portrait:`. */
 export function tailwindVariant(display: DisplayDef): string {
   if (!display.media) return '';
   const parts: string[] = [];
   const min = /min-width:\s*(\d+(?:\.\d+)?)px/.exec(display.media);
   const max = /max-width:\s*(\d+(?:\.\d+)?)px/.exec(display.media);
   if (min) parts.push(`min-[${min[1]}px]`);
-  if (max) parts.push(`max-[${max[1]}px]`);
+  // Tailwind v4 writes `max-*` as `width < N`, which leaves out N itself; `max-width: N` takes
+  // it in. A fiftieth of a pixel more keeps that width in both v3 (`max-width`) and v4.
+  if (max) parts.push(`max-[${Number((Number(max[1]) + 0.02).toFixed(4))}px]`);
   if (/orientation:\s*landscape/.test(display.media)) parts.push('landscape');
   if (/orientation:\s*portrait/.test(display.media)) parts.push('portrait');
   return parts.map((p) => `${p}:`).join('');
@@ -246,8 +248,28 @@ export function tailwindClass(prop: string, value: string, tokenKinds?: Readonly
   return `[${prop}:${bracket(v)}]`;
 }
 
+/** Shorthands whose longhands don't share their name as a prefix (`border` → `border-top` does). */
+const MORE_LONGHANDS: Record<string, string[]> = {
+  inset: ['top', 'right', 'bottom', 'left'],
+  grid: ['grid-template-rows', 'grid-template-columns', 'grid-template-areas', 'grid-auto-rows', 'grid-auto-columns', 'grid-auto-flow'],
+  'grid-area': ['grid-row', 'grid-column', 'grid-row-start', 'grid-row-end', 'grid-column-start', 'grid-column-end'],
+  'grid-template': ['grid-template-rows', 'grid-template-columns', 'grid-template-areas'],
+  gap: ['row-gap', 'column-gap'],
+  'place-items': ['align-items', 'justify-items'],
+  'place-content': ['align-content', 'justify-content'],
+  'place-self': ['align-self', 'justify-self'],
+  'flex-flow': ['flex-direction', 'flex-wrap'],
+  font: ['line-height'],
+  columns: ['column-width', 'column-count'],
+  'border-color': ['border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color'],
+  'border-style': ['border-top-style', 'border-right-style', 'border-bottom-style', 'border-left-style'],
+  'border-width': ['border-top-width', 'border-right-width', 'border-bottom-width', 'border-left-width'],
+};
+const covers = (a: string, b: string) => b.startsWith(`${a}-`) || (Object.hasOwn(MORE_LONGHANDS, a) && MORE_LONGHANDS[a].includes(b));
+const overlaps = (a: string, b: string) => covers(a, b) || covers(b, a);
+
 function tailwindClasses(branch: Branch, tokenKinds: ReadonlyMap<string, TokenKind>): string[] {
-  const out: string[] = [];
+  const decls: { prop: string; cls: string; variant: string; tier: number }[] = [];
   for (const display of DISPLAYS) {
     const styles: StyleMap | undefined = branch.styles[display.id];
     if (!styles) continue;
@@ -255,10 +277,21 @@ function tailwindClasses(branch: Branch, tokenKinds: ReadonlyMap<string, TokenKi
     for (const [prop, raw] of Object.entries(styles)) {
       const value = sanitizeCssValue(raw);
       if (!isSafeCssProp(prop) || !value) continue;
-      out.push(`${variant}${tailwindClass(prop, value, tokenKinds)}`);
+      // Tailwind orders arbitrary properties by name, not as written, so a shorthand and a
+      // longhand it covers could swap. Each declaration that must beat an earlier overlapping
+      // one gets one more `&` of specificity (`[&&]:`); the same property on a later display
+      // keeps its tier, since Tailwind already writes display variants after the base.
+      // Two named utilities (`m-[0_auto]`, `mt-[2rem]`) are already written shorthand first.
+      const cls = tailwindClass(prop, value, tokenKinds);
+      let tier = 1;
+      for (const d of decls) {
+        if (d.prop === prop) tier = Math.max(tier, d.tier);
+        else if (overlaps(d.prop, prop)) tier = Math.max(tier, d.cls.startsWith('[') || cls.startsWith('[') ? d.tier + 1 : d.tier);
+      }
+      decls.push({ prop, cls, variant, tier });
     }
   }
-  return out;
+  return decls.map((d) => `${d.variant}${d.tier > 1 ? `[${'&'.repeat(d.tier)}]:` : ''}${d.cls}`);
 }
 
 /* ------------------------------------------------------- element model */
@@ -449,8 +482,10 @@ export function repairNesting(node: Branch, ctx: { a?: boolean; form?: boolean; 
   const now = tag.toLowerCase();
   if (/^(table|thead|tbody|tfoot|tr)$/.test(now)) {
     children = children.filter((c) => isBranch(c) || c.type !== 'text' || c.value.trim() !== '');
-    // Text or a stray cell where the parser expects rows: put it in a cell, and cells in a row.
-    children = wrapRuns(node, children, 'td', (c) => !isBranch(c) && c.type === 'text');
+    // Anything that isn't a table part (text, an image, a <p>) is moved out of a table by the
+    // parser, so it goes in a cell; and stray cells go in a row.
+    const parts = now === 'table' ? /^(caption|colgroup|col|thead|tbody|tfoot|tr|td|th|template)$/ : now === 'tr' ? /^(td|th|template)$/ : /^(tr|td|th|template)$/;
+    children = wrapRuns(node, children, 'td', (c) => !tagIs(c, parts));
     if (now !== 'tr') children = wrapRuns(node, children, 'tr', (c) => tagIs(c, /^t[dh]$/));
   }
   if (lower === 'table') {
@@ -571,6 +606,12 @@ function inlineChildren(children: El[], mode: 'html' | 'vue' | 'svelte', write: 
 
 /** HTML (also Vue and Svelte templates). */
 /** `props` is false outside a component; in one, the names of its boolean props. */
+/**
+ * A class attribute, with `&` left as written unless it could start a character reference:
+ * Tailwind reads classes from the source text, so `[&&]:` written `[&amp;&amp;]:` would be missed.
+ */
+const escapeClassAttr = (v: string): string => v.replace(/&(?=[#A-Za-z0-9])/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
 /** HTML (and Vue and Svelte templates) drop one newline right after these tags, so a leading one is doubled. */
 const leadNewline = (tag: string, content: string): string => (/^(pre|textarea|listing)$/i.test(tag) && /^[\r\n]/.test(content) ? `\n${content}` : content);
 
@@ -600,8 +641,11 @@ function writeHtml(el: El, depth: number, mode: 'html' | 'vue' | 'svelte', props
     return text;
   }
   // Escape for HTML first, then Svelte's braces, so the &#123; entities are not escaped again.
-  const esc = (v: string) => (mode === 'svelte' ? escapeAttr(v).replace(/[{}]/g, (c) => (c === '{' ? '&#123;' : '&#125;')) : escapeAttr(v));
-  const attrs = el.attrs.map(([n, v]) => (v === '' && !el.svg ? ` ${n}` : ` ${n}="${esc(v)}"`)).join('');
+  const esc = (v: string, n = '') => {
+    const out = n === 'class' ? escapeClassAttr(v) : escapeAttr(v);
+    return mode === 'svelte' ? out.replace(/[{}]/g, (c) => (c === '{' ? '&#123;' : '&#125;')) : out;
+  };
+  const attrs = el.attrs.map(([n, v]) => (v === '' && !el.svg ? ` ${n}` : ` ${n}="${esc(v, n)}"`)).join('');
   if (!el.svg && VOID_TAGS.has(el.tag)) return `<${el.tag}${attrs}>`;
   if (!el.children.length) return el.svg ? `<${el.tag}${attrs} />` : `<${el.tag}${attrs}></${el.tag}>`;
   if (el.pre || oneLine(el.children)) return `<${el.tag}${attrs}>${leadNewline(el.tag, inlineChildren(el.children, mode, (c) => writeHtml(c, depth + 1, mode), el.pre))}</${el.tag}>`;
@@ -688,11 +732,14 @@ export function jsxAttrName(name: string): string {
 /** An element of a Vue or Svelte component template, with prop bindings. */
 function writePropsEl(el: El & { kind: 'el' }, depth: number, mode: 'vue' | 'svelte', props: ReadonlySet<string>): string {
   // Escape for HTML first, then Svelte's braces, so the &#123; entities are not escaped again.
-  const esc = (v: string) => (mode === 'svelte' ? escapeAttr(v).replace(/[{}]/g, (c) => (c === '{' ? '&#123;' : '&#125;')) : escapeAttr(v));
+  const esc = (v: string, n = '') => {
+    const out = n === 'class' ? escapeClassAttr(v) : escapeAttr(v);
+    return mode === 'svelte' ? out.replace(/[{}]/g, (c) => (c === '{' ? '&#123;' : '&#125;')) : out;
+  };
   const attrs = el.attrs
     .map(([n, v]) => {
       const variant = n === 'class' && el.variantClass;
-      if (!hasProps(v) && !variant) return v === '' && !el.svg ? ` ${n}` : ` ${n}="${esc(v)}"`;
+      if (!hasProps(v) && !variant) return v === '' && !el.svg ? ` ${n}` : ` ${n}="${esc(v, n)}"`;
       // A boolean attribute is on unless its prop is off (see `expandComponent` in core): a
       // boolean prop as it is, any other value unless it is "false".
       if (!variant && !el.svg && BOOLEAN_ATTRS.has(n.toLowerCase())) {
@@ -700,10 +747,10 @@ function writePropsEl(el: El & { kind: 'el' }, depth: number, mode: 'vue' | 'sve
         const on = props.has(expr) ? expr : `${expr} !== 'false'`;
         return mode === 'vue' ? ` :${n}="${escapeAttr(on)}"` : ` ${n}={${on}}`;
       }
-      if (mode === 'vue') return ` :${n}="${escapeAttr(variant ? templateLiteral(v, variantSuffix) : propExpr(v))}"`;
+      if (mode === 'vue') return ` :${n}="${(n === 'class' ? escapeClassAttr : escapeAttr)(variant ? templateLiteral(v, variantSuffix) : propExpr(v))}"`;
       // Svelte: attribute values can hold {expressions} between literal text.
       const body = segments(v)
-        .map((s) => esc(s.lit) + (s.prop ? `{${s.prop}}` : ''))
+        .map((s) => esc(s.lit, n) + (s.prop ? `{${s.prop}}` : ''))
         .join('');
       return ` ${n}="${body}${variant ? `{${VARIANT_CALL}}` : ''}"`;
     })
@@ -759,7 +806,8 @@ function writeJsx(el: El, depth: number, props: false | ReadonlySet<string> = fa
       if (boolAttr) return ` ${name}`;
       // React's types take numbers for these.
       if (numeric && /^-?\d{1,15}$/.test(v.trim())) return ` ${name}={${Number(v.trim())}}`;
-      return /["\\{}<>\n]/.test(v) ? ` ${name}={${jsxString(v)}}` : ` ${name}="${v.replace(/&/g, '&amp;')}"`;
+      // `&` only where it could start a reference: Tailwind reads `[&&]:` classes from the source text.
+      return /["\\{}<>\n]/.test(v) ? ` ${name}={${jsxString(v)}}` : ` ${name}="${v.replace(/&(?=[#A-Za-z0-9])/g, '&amp;')}"`;
     })
     .join('');
   // React takes one child at most in a <textarea> (props split the text into several), and

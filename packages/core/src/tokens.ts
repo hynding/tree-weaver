@@ -65,7 +65,7 @@ export const isTokenName = (name: string): boolean => TOKEN_NAME.test(name);
 /** A token value that can't end its declaration or rule early. */
 export function sanitizeTokenValue(value: string): string {
   // `;` only outside strings and `url()`: a data URL (`data:image/svg+xml;charset=…`) needs its own.
-  const out = untilStable(semicolonsOutsideStrings(value.replace(/[{}]/g, '')), (v) =>
+  const out = untilStable(semicolonsOutsideStrings(value.replace(/[{}]/g, '').replace(/[\s;]+$/, '')), (v) =>
     v
       .replace(/\/\*[\s\S]*?(\*\/|$)/g, '')
       .replace(/<\/?(style|script)/gi, '')

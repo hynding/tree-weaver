@@ -505,6 +505,14 @@ export function insertBlueprint(blueprintId: string, targetId?: string, position
   if (bp) insertAt(bp.create(), targetId, position);
 }
 
+/** In a component instance's insides, edits would be undone by the instance at once: say so instead. */
+function refusedInsideInstance(id: string): boolean {
+  const tree = currentTree();
+  if (!tree || instanceRoleIn(tree.root, id) !== 'inside') return false;
+  toast(INSIDE_INSTANCE, 'error');
+  return true;
+}
+
 export function moveTo(id: string, targetId: string, position: DropPosition): void {
   const tree = currentTree();
   const node = tree && findNode(tree.root, id);
@@ -527,7 +535,7 @@ export function nudge(id: string, delta: -1 | 1): void {
   if (!parent) return;
   const index = parent.children.findIndex((c) => c.id === id);
   const to = index + delta;
-  if (to < 0 || to >= parent.children.length) return;
+  if (to < 0 || to >= parent.children.length || refusedInsideInstance(id)) return;
   editTree((root) => moveNode(root, id, parent.id, delta > 0 ? to + 1 : to));
 }
 
@@ -544,6 +552,7 @@ export function removeSelected(): void {
     toast('This is the component itself: delete it from the Components list instead', 'error');
     return;
   }
+  if (refusedInsideInstance(id)) return;
   const parent = parentOf(id);
   editTree((root) => removeNode(root, id));
   state.selectedId = parent && parent.id !== tree.root.id ? parent.id : null;
@@ -552,7 +561,7 @@ export function removeSelected(): void {
 export function duplicateSelected(): void {
   const id = state.selectedId;
   const tree = currentTree();
-  if (!id || !tree || id === tree.root.id || isTemplateRoot(tree, id)) return;
+  if (!id || !tree || id === tree.root.id || isTemplateRoot(tree, id) || refusedInsideInstance(id)) return;
   let newId = id;
   const dup = (root: Branch) => {
     const res = duplicateNode(root, id);
@@ -574,7 +583,7 @@ export function duplicateSelected(): void {
 export function wrapSelected(tag = 'div', type = 'box'): void {
   const id = state.selectedId;
   const tree = currentTree();
-  if (!id || !tree || id === tree.root.id || isTemplateRoot(tree, id)) return;
+  if (!id || !tree || id === tree.root.id || isTemplateRoot(tree, id) || refusedInsideInstance(id)) return;
   // Inside a drawing the wrapper is an SVG group.
   const parent = parentOf(id);
   const svg = !!parent && inSvgContext(tree.root, parent.id);
@@ -590,6 +599,7 @@ export function selectParent(): void {
 }
 
 export function updateBranch(id: string, patch: Partial<Omit<Branch, 'kind' | 'id' | 'children'>>): void {
+  if (refusedInsideInstance(id)) return;
   const tree = currentTree();
   const node = tree && findNode(tree.root, id);
   if (tree && node && isBranch(node) && patch.tag !== undefined && patch.tag !== node.tag) {
@@ -610,22 +620,25 @@ export function updateBranch(id: string, patch: Partial<Omit<Branch, 'kind' | 'i
 }
 
 export function updateLeaf(id: string, patch: Partial<Omit<Leaf, 'kind' | 'id'>>): void {
+  if (refusedInsideInstance(id)) return;
   editTree((root) => updateNode(root, id, (node) => (isBranch(node) ? node : { ...node, ...patch })));
 }
 
 export function setStyleValue(id: string, prop: string, value: string | null, display: DisplayId = state.display): void {
+  if (refusedInsideInstance(id)) return;
   editTree((root) => setStyle(root, id, display, prop, value));
 }
 
 /** Set several style properties on one display as a single undo step. */
 export function setStyleValues(id: string, patch: Record<string, string | null>, display: DisplayId = state.display): void {
+  if (refusedInsideInstance(id)) return;
   editTree((root) => setStyles(root, id, display, patch));
 }
 
 /** Turn a branch into a ready-made grid layout on the current display. */
 export function applyLayout(branchId: string, layoutId: string): void {
   const layout = getGridLayout(layoutId);
-  if (!layout) return;
+  if (!layout || refusedInsideInstance(branchId)) return;
   let created: string[] = [];
   editTree((root) => {
     const result = applyGridLayout(root, branchId, state.display, layout);
@@ -637,6 +650,7 @@ export function applyLayout(branchId: string, layoutId: string): void {
 
 /** Choose what a grid does on a smaller display. */
 export function setSmallScreen(branchId: string, display: DisplayId, choice: SmallScreenChoice): void {
+  if (refusedInsideInstance(branchId)) return;
   editTree((root) => applySmallScreen(root, branchId, display, choice));
 }
 

@@ -872,3 +872,40 @@ describe('pass 22 fixes', () => {
     expect(out).toContain("tab == null || tab === ''");
   });
 });
+
+describe('pass 23 fixes', () => {
+  const imported = (html: string) => {
+    const doc = importDocument(`<body>${html}</body>`, 'html');
+    return doc.kind === 'tree' ? doc.tree : doc.forest.trees[0];
+  };
+  const shape = (n: TreeNode): unknown => ('children' in n ? { [n.tag]: n.children.map(shape) } : n.type === 'text' ? n.value : n.type);
+  const mdBack = (tree: ReturnType<typeof imported>) => {
+    const back = importDocument(exportTree(tree, 'markdown'), 'markdown');
+    return JSON.stringify(shape(back.kind === 'tree' ? back.tree.root : back.forest.trees[0].root));
+  };
+
+  it('keeps a longhand after its shorthand in Tailwind, and includes the breakpoint width', () => {
+    const tree = page([createBranch({ tag: 'div', styles: { lg: { border: '1px solid blue', 'border-top': '2px solid red' }, tablet: { padding: '2px' } } })]);
+    const out = exportComponent(tree, { framework: 'html', styling: 'tailwind' }).files[0].contents;
+    expect(out).toContain('[border:1px_solid_blue] [&&]:[border-top:2px_solid_red]');
+    expect(out).toContain('max-[1024.02px]:p-[2px]');
+  });
+
+  it('writes same-kind emphasis nested at the edge as HTML in Markdown', () => {
+    for (const html of ['<p><em><em>Dune</em></em></p>', '<p><strong><strong>a</strong>c</strong></p>']) {
+      expect(mdBack(imported(html))).toBe(JSON.stringify(shape(imported(html).root)));
+    }
+  });
+
+  it('keeps headings holding a line separator in Markdown', () => {
+    const tree = page([createBranch({ tag: 'h2', children: [text('Price\u2028list')] })]);
+    expect(mdBack(tree)).toContain('"h2"');
+  });
+
+  it('puts non-table children of a table in a cell', () => {
+    const out = exportComponent(imported('<table><tbody><tr><td>a</td></tr></tbody></table>'), { framework: 'svelte' }).files[0].contents;
+    expect(out).toContain('<td');
+    const tree = page([createBranch({ tag: 'table', children: [createBranch({ tag: 'p', children: [text('x')] })] })]);
+    expect(exportComponent(tree, { framework: 'svelte' }).files[0].contents).toMatch(/<tbody[^>]*>\s*<tr[^>]*>\s*<td[^>]*>\s*<p/);
+  });
+});

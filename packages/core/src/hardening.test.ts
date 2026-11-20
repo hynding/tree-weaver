@@ -470,3 +470,12 @@ describe('pass 22 fixes', () => {
     expect(renderDocument(tree)).toMatch(/<pre[^>]*>\n\nline2<\/pre>/);
   });
 });
+
+describe('pass 23 fixes', () => {
+  it('drops a trailing semicolon from style and token values', async () => {
+    const { sanitizeTokenValue } = await import('./index');
+    expect(sanitizeCssValue('red;')).toBe('red');
+    expect(sanitizeCssValue('url(data:a;b) ; ')).toBe('url(data:a;b)');
+    expect(sanitizeTokenValue('#2f6f4f;')).toBe('#2f6f4f');
+  });
+});

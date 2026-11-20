@@ -92,7 +92,7 @@ describe('exportComponent', () => {
     expect(jsx).toContain('Needs Tailwind CSS');
     expect(jsx).toContain('grid');
     expect(jsx).toContain('grid-cols-[repeat(3,minmax(0,1fr))]');
-    expect(jsx).toContain('max-[1024px]:grid-cols-[repeat(2,minmax(0,1fr))]');
+    expect(jsx).toContain('max-[1024.02px]:grid-cols-[repeat(2,minmax(0,1fr))]');
   });
 
   it('keeps class names valid when the tree name starts with a digit', () => {
@@ -129,8 +129,8 @@ describe('Tailwind helpers', () => {
   it('maps displays to variants', () => {
     const byId = (id: string) => DISPLAYS.find((d) => d.id === id) as DisplayDef;
     expect(tailwindVariant(byId('lg'))).toBe('');
-    expect(tailwindVariant(byId('tablet'))).toBe('max-[1024px]:');
-    expect(tailwindVariant(byId('mobile-portrait'))).toMatch(/^max-\[\d+px\]:portrait:$/);
+    expect(tailwindVariant(byId('tablet'))).toBe('max-[1024.02px]:');
+    expect(tailwindVariant(byId('mobile-portrait'))).toMatch(/^max-\[\d+\.02px\]:portrait:$/);
     expect(tailwindVariant(byId('xl'))).toBe('min-[1440px]:');
   });
 

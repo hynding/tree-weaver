@@ -120,7 +120,8 @@ export function sanitizeCssValue(value: string): string {
   // Comment markers too: an unclosed `/*` would swallow every rule after it. So would an
   // unclosed bracket, so a value whose brackets don't balance is dropped.
   // Line breaks become spaces: a CSS string ends at one, so a quote can't hide a `(` on the next line.
-  const out = untilStable(semicolonsOutsideStrings(value.replace(/[{}]/g, '').replace(/[\n\r\f]+/g, ' ')), (v) => v.replace(/<\/?(style|script)/gi, '').replace(/\/\*|\*\//g, '')).trim();
+  // A trailing `;` (typed out of habit) is dropped rather than kept as a `,` that breaks the value.
+  const out = untilStable(semicolonsOutsideStrings(value.replace(/[{}]/g, '').replace(/[\n\r\f]+/g, ' ').replace(/[\s;]+$/, '')), (v) => v.replace(/<\/?(style|script)/gi, '').replace(/\/\*|\*\//g, '')).trim();
   return bracketsBalance(out) ? out : '';
 }
 

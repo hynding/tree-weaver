@@ -71,18 +71,21 @@ export function escapeMarkdown(text: string, atLineStart = false): string {
   out = out.replace(/(^|\s)(#+)(\s*)$/, '$1\\$2$3');
   // Bare URLs would become links (GFM autolinks).
   out = out.replace(/\b(https?|ftp|mailto):/gi, '$1\\:').replace(/\bwww\./gi, 'www\\.').replace(/([\w.+-])@(?=[\w-]+\.)/g, '$1\\@');
-  return out;
+  return lineSeparators(out);
 }
+
+/** U+2028 and U+2029 as references: Markdown parsers end a line at them, breaking headings and table rows. */
+const lineSeparators = (text: string): string => text.replace(/[\u2028\u2029]/g, (c) => `&#${c.charCodeAt(0)};`);
 
 /** Set while a table row is written: a `|` there would split the cell, even inside code or a link. */
 let inTable = false;
 
 // Parentheses are backslash-escaped (they come back exactly); spaces, angle brackets and line breaks are percent-encoded.
 const escapeUrl = (url: string): string =>
-  url.replace(inTable ? /[ <>\t\n\r|]/g : /[ <>\t\n\r]/g, (c) => encodeURIComponent(c)).replace(/[\\()]/g, '\\$&');
+  url.replace(inTable ? /[ <>\t\n\r|\u2028\u2029]/g : /[ <>\t\n\r\u2028\u2029]/g, (c) => encodeURIComponent(c)).replace(/[\\()]/g, '\\$&');
 /** A one-line title, quoted: a line break would end the paragraph, and a backslash could escape the closing quote. */
 // Every ASCII punctuation mark is backslash-escaped, so nothing in a title reads as Markdown.
-const titleOf = (title: string | undefined): string => (title ? ` "${oneLine(title).replace(/[!-/:-@[-`{-~]/g, '\\$&')}"` : '');
+const titleOf = (title: string | undefined): string => (title ? ` "${lineSeparators(oneLine(title).replace(/[!-/:-@[-`{-~]/g, '\\$&'))}"` : '');
 const oneLine = (text: string): string => text.replace(/\s*[\n\r]\s*/g, ' ');
 /**
  * Inline HTML on one line (a blank line inside it would end the paragraph and start a new block),
@@ -95,7 +98,8 @@ const inlineHtml = (html: string): string =>
     .map((part, i) => (i % 2 ? (inTable ? part.replace(/\|/g, '&#124;') : part) : part.replace(/[\\`*_[\]~!:|#+\-=.(){}]/g, (c) => `&#${c.charCodeAt(0)};`)))
     .join('')
     .replace(/\r/g, '&#13;')
-    .replace(/\n/g, '&#10;');
+    .replace(/\n/g, '&#10;')
+    .replace(/[\u2028\u2029]/g, (c) => `&#${c.charCodeAt(0)};`);
 
 function inline(node: TreeNode, first: boolean): string {
   if (!isBranch(node)) {
@@ -104,10 +108,19 @@ function inline(node: TreeNode, first: boolean): string {
   }
   const tag = node.tag;
   const content = () => inlineList(node.children, false);
-  if (Object.hasOwn(MARK_INLINE, tag) && !needsMeta(node) && node.children.length) return wrapTrimmed(content(), MARK_INLINE[tag]);
+  if (Object.hasOwn(MARK_INLINE, tag) && !needsMeta(node) && node.children.length) {
+    const mark = MARK_INLINE[tag];
+    const inner = content();
+    // A same-kind mark at the edge (`****a**c**`, `**Dune**` for em in em) can't be read back as two.
+    const core = inner.replace(/^[ \t\n\r\f]+|[ \t\n\r\f]+$/g, '');
+    if (core.startsWith(mark[0]) || (core.endsWith(mark[0]) && !core.endsWith(`\\${mark[0]}`))) return inlineHtml(renderNodeHtml(node));
+    return wrapTrimmed(inner, mark);
+  }
   if (tag === 'code' && !needsMeta(node) && node.children.every((c) => !isBranch(c) && c.type === 'text')) {
     // Markdown turns line breaks in a code span into spaces anyway; a blank line would end the paragraph.
     let code = oneLine(node.children.map((c) => (c as Leaf).value).join(''));
+    // A code span can't hold a reference, so a line separator (which would end the line) needs HTML.
+    if (/[\u2028\u2029]/.test(code)) return inlineHtml(renderNodeHtml(node));
     if (inTable) code = code.replace(/\|/g, '\\|');
     // A fence longer than any run of backticks in the code, padded with spaces when the code has any.
     const longest = Math.max(0, ...(code.match(/`+/g) ?? []).map((r) => r.length));
