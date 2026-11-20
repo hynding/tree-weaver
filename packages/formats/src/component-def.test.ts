@@ -98,7 +98,7 @@ describe('exportComponentDef', () => {
     expect(html).not.toContain('New');
     const swift = exportComponentDef(cardDef(), { framework: 'swiftui' });
     expect(swift.name).toBe('Card');
-    expect(file(swift, 'Card.swift')).toContain('Text("Card \\"title\\"")');
+    expect(file(swift, 'Card.swift')).toContain('Text(verbatim: "Card \\"title\\"")');
   });
 });
 

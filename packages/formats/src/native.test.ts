@@ -62,20 +62,20 @@ describe('exportSwiftUI', () => {
   it('carries layout changes between displays', () => {
     expect(swift).toContain('AnyLayout(VStackLayout');
     expect(swift).toMatch(/LazyVGrid\(columns: \(compact \? .*count: 1\) : .*count: 3\)\)/);
-    expect(swift).toMatch(/if !compact \{\n\s+Text\("Desktop only"\)/);
+    expect(swift).toMatch(/if !compact \{\n\s+Text\(verbatim: "Desktop only"\)/);
   });
 
   it('maps content to native views', () => {
-    expect(swift).toContain('Link("Docs", destination: URL(string: "https://example.com")!)');
+    expect(swift).toContain('Link(destination: URL(string: "https://example.com")!) { Text(verbatim: "Docs") }');
     expect(swift).toContain('AsyncImage(url: URL(string: "https://example.com/a.png"))');
     expect(swift).toContain('.accessibilityLabel("A picture")');
     expect(swift).toContain('TextField("Email"');
     expect(swift).toContain('Divider()');
-    expect(swift).toContain('Text("One")');
+    expect(swift).toContain('Text(verbatim: "One")');
   });
 
   it('escapes strings', () => {
-    expect(swift).toContain('Text("Say \\"hi\\" \\\\ $5")');
+    expect(swift).toContain('Text(verbatim: "Say \\"hi\\" \\\\ $5")');
   });
 
   it('applies design kit rules with tokens resolved', () => {
@@ -235,7 +235,7 @@ describe('native edge cases', () => {
   });
 
   it('keeps hidden header cells compilable in SwiftUI', () => {
-    expect(exportSwiftUI(tree(), { name: 'Edge' })).toMatch(/Group \{\n\s+if !compact \{\n\s+Text\("Head"\)[\s\S]*?\}\n\s+\}\n\s+\.fontWeight\(\.semibold\)/);
+    expect(exportSwiftUI(tree(), { name: 'Edge' })).toMatch(/Group \{\n\s+if !compact \{\n\s+Text\(verbatim: "Head"\)[\s\S]*?\}\n\s+\}\n\s+\.fontWeight\(\.semibold\)/);
   });
 
   it('hides list items and table cells in Flutter too', () => {

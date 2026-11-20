@@ -85,7 +85,8 @@ export function bracketsBalance(value: string): boolean {
 export function sanitizeCssValue(value: string): string {
   // Comment markers too: an unclosed `/*` would swallow every rule after it. So would an
   // unclosed bracket, so a value whose brackets don't balance is dropped.
-  const out = untilStable(value.replace(/[{}]/g, '').replace(/;/g, ','), (v) => v.replace(/<\/?(style|script)/gi, '').replace(/\/\*|\*\//g, '')).trim();
+  // Line breaks become spaces: a CSS string ends at one, so a quote can't hide a `(` on the next line.
+  const out = untilStable(value.replace(/[{}]/g, '').replace(/;/g, ',').replace(/[\n\r\f]+/g, ' '), (v) => v.replace(/<\/?(style|script)/gi, '').replace(/\/\*|\*\//g, '')).trim();
   return bracketsBalance(out) ? out : '';
 }
 
@@ -99,7 +100,7 @@ export function declarations(styles: StyleMap, indent = '  '): string {
 }
 
 /** Escape a branch id for a quoted CSS attribute selector (`<` too, so it can't close a style element). */
-const cssString = (v: string) => v.replace(/["\\]/g, '').replace(/[<\n\r\f]/g, (c) => `\\${c.charCodeAt(0).toString(16)} `);
+const cssString = (v: string) => v.replace(/["\\]/g, (c) => `\\${c}`).replace(/[<\n\r\f]/g, (c) => `\\${c.charCodeAt(0).toString(16)} `);
 export const branchSelector = (id: string): string => `[${BRANCH_ATTR}="${cssString(id)}"]`;
 
 /** CSS made safe to place inside a <style> element. */

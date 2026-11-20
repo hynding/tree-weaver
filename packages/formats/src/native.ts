@@ -598,10 +598,12 @@ function swiftBody(v: NView, o: Out, d: number, fill: boolean): void {
     case 'text': {
       if (v.link !== undefined) {
         // Percent-encoded here, so URL(string:) can't fail on spaces and the like.
-        if (/^(https?:|mailto:|tel:)/i.test(v.link)) o.line(d, `Link(${swiftString(v.text)}, destination: URL(string: ${swiftString(encodeUrl(v.link))})!)`);
-        else o.line(d, `Button(${swiftString(v.text)}) { /* go to ${comment(v.link || 'a page')} */ }`);
-      } else if (v.button) o.line(d, `Button(${swiftString(v.text)}) { }`);
-      else o.line(d, `Text(${swiftString(v.text)})`);
+        // Text(verbatim:) everywhere: a string literal is a LocalizedStringKey, which SwiftUI reads as
+        // Markdown, so `[x](https://…)` in imported text would become a live link.
+        if (/^(https?:|mailto:|tel:)/i.test(v.link)) o.line(d, `Link(destination: URL(string: ${swiftString(encodeUrl(v.link))})!) { Text(verbatim: ${swiftString(v.text)}) }`);
+        else o.line(d, `Button { /* go to ${comment(v.link || 'a page')} */ } label: { Text(verbatim: ${swiftString(v.text)}) }`);
+      } else if (v.button) o.line(d, `Button { } label: { Text(verbatim: ${swiftString(v.text)}) }`);
+      else o.line(d, `Text(verbatim: ${swiftString(v.text)})`);
       mods(v.look, { text: v.role, fill: fill && !v.button && v.link === undefined });
       return;
     }
@@ -636,7 +638,7 @@ function swiftBody(v: NView, o: Out, d: number, fill: boolean): void {
       o.line(d, 'VStack(alignment: .leading, spacing: 4) {');
       v.items.forEach((item, i) => {
         o.line(d + 1, 'HStack(alignment: .firstTextBaseline, spacing: 8) {');
-        o.line(d + 2, `Text(${swiftString(v.ordered ? `${i + 1}.` : '•')})`);
+        o.line(d + 2, `Text(verbatim: ${swiftString(v.ordered ? `${i + 1}.` : '•')})`);
         swiftView(item, o, d + 2, false);
         o.line(d + 1, '}');
       });

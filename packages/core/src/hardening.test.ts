@@ -167,3 +167,15 @@ describe('pass 5 fixes', () => {
     expect(css).toContain('.b');
   });
 });
+
+describe('pass 6 fixes', () => {
+  it('turns line breaks in CSS values into spaces before checking brackets', () => {
+    expect(sanitizeCssValue('"x\n("')).not.toMatch(/\n/);
+    expect(sanitizeCssValue('"x\n("')).toBe('"x ("');
+  });
+
+  it('escapes quotes and backslashes in branch selectors so styles still match', async () => {
+    const { branchSelector } = await import('./index');
+    expect(branchSelector('a"b\\c')).toBe('[data-tw="a\\"b\\\\c"]');
+  });
+});

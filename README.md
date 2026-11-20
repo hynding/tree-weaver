@@ -91,7 +91,7 @@ The same words are used in the code (`Forest`, `Tree`, `Branch`, `Leaf`) and in 
 | JSON     | tree or forest   | Lossless.                                                                                                           |
 | YAML     | tree or forest   | Lossless.                                                                                                           |
 | XML      | tree or forest   | Lossless (`<tree-weaver>` → `<forest>` → `<tree>` → `<branch>` / `<leaf>`).                                         |
-| HTML     | one tree         | A standalone page with kits and responsive CSS inlined. Branch ids, names and every display's styles import back. |
+| HTML     | one tree         | A standalone page with kits and responsive CSS inlined. Branch ids, names and every display's styles import back; component links and text-leaf attributes don't. |
 | Markdown | one tree         | Readable content (headings, lists, tables, links, images, code). Layout branches and styles ride along in front matter and HTML comments, so they import back. |
 | SVG      | one drawing      | A standalone `.svg` of an SVG tree (or a page's first `<svg>`), with kits and responsive styles inside. Imports back as an SVG tree; SVG files from other tools import too, without scripts, animation or editor metadata. |
 

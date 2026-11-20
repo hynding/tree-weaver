@@ -177,7 +177,14 @@ describe('pass 5 fixes', () => {
     const back = importDocument(exportTree(tree, 'markdown'), 'markdown');
     if (back.kind !== 'tree') throw new Error('expected a tree');
     const a = (back.tree.root.children[0] as Branch).children[0] as Branch;
-    expect(decodeURI(a.attrs.href)).toBe('/a(b');
+    expect(a.attrs.href).toBe('/a(b');
     expect(importDocument(`﻿${exportTree(tree, 'json')}`, 'json').kind).toBe('tree');
+  });
+});
+
+describe('pass 6 fixes', () => {
+  it('writes SwiftUI text verbatim so Markdown in content stays text', () => {
+    const swift = exportComponent(page([createBranch({ tag: 'p', children: [text('[Reset](https://evil.example) *now*')] })]), { framework: 'swiftui' }).files[0].contents;
+    expect(swift).toContain('Text(verbatim: "[Reset](https://evil.example) *now*")');
   });
 });
