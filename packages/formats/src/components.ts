@@ -579,8 +579,8 @@ const variantSuffix = `\${${VARIANT_CALL}}`;
 const isInlineEl = (el: El): boolean => el.kind === 'text' || isInlineTag(el.tag);
 /** Keep children on one line when line breaks could change the text, or open gaps between inline-block siblings. */
 const keepTogether = (children: El[]): boolean => oneLine(children) || children.some((c) => c.kind === 'el' && c.inlineDisplay);
-/** Keep children on one line when line breaks could change the text: any text, or only inline elements. */
-const oneLine = (children: El[]): boolean => children.some((c) => c.kind === 'text') || children.every(isInlineEl);
+/** Keep children on one line when line breaks could show as spaces: any text or inline element beside them (as the canvas renders). */
+const oneLine = (children: El[]): boolean => children.some((c) => c.kind === 'text' || isInlineEl(c));
 /**
  * Children on separate lines for HTML, Vue and Svelte. HTML keeps the line break between two
  * inline elements as a space, so runs of inline siblings stay together on one line.

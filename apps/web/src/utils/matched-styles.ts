@@ -182,7 +182,8 @@ class Collector {
       // text anyway (fetched with CORS), read the rules from a copy built from that text.
       if (text?.sheet) rules = text.sheet.cssRules;
       else {
-        if (sheet.href && text !== PENDING) this.unreadable.push({ source, href: sheet.href });
+        // Only web addresses are listed (as links): a kit's `@import "javascript:…"` makes a sheet too.
+        if (sheet.href && /^https?:\/\//i.test(sheet.href) && text !== PENDING) this.unreadable.push({ source, href: sheet.href });
         return;
       }
     }

@@ -337,16 +337,42 @@ const fileName = (href: string): string => href.split(/[?#]/)[0].split('/').pop(
  * and `<style>` / `<link rel="stylesheet">` become design kits. Documents exported
  * by Tree Weaver round-trip with their ids, names and responsive styles.
  */
+/** A `media` attribute as a condition, or '' when it always applies. Braces are dropped so it can't end a block. */
+export const mediaOf = (media: string | undefined): string => {
+  const m = (media ?? '').replace(/[{};]/g, '').trim();
+  return !m || /^(all|screen)$/i.test(m) ? '' : m;
+};
+
+/** A <style>'s CSS under its `media` attribute. */
+export const withMedia = (css: string, media: string | undefined): string => {
+  const m = mediaOf(media);
+  return m ? `@media ${m} {\n${css}\n}` : css;
+};
+
+/** Whether an element sits in a <noscript> or <template>, whose content doesn't apply. */
+function insideInert(el: Element): boolean {
+  for (let p = el.parent; p; p = p.parent) if (isElement(p as ChildNode) && /^(noscript|template)$/.test((p as Element).name)) return true;
+  return false;
+}
+
 export function importHtml(text: string): TreeDocument {
   const dom = parseDocument(text, { lowerCaseTags: true, lowerCaseAttributeNames: true, decodeEntities: true });
   const styles = new Map<string, DisplayStyles>();
   const kits: (DesignKit | Record<string, unknown>)[] = [];
-  const looseCss: string[] = [];
+  let looseCss: string[] = [];
   let title = '';
+  // Loose <style> blocks become one kit per run, in document order: a <link> between them, or an
+  // @import (which must come first in its sheet), starts a new one.
+  const flushCss = () => {
+    if (looseCss.length) kits.push({ id: createId('k'), name: 'Imported styles', css: looseCss.join('\n\n'), enabled: true, source: 'html' });
+    looseCss = [];
+  };
   let treeId = '';
   let body: Element | undefined;
 
   for (const el of allElements(dom.children)) {
+    // Styles in <noscript> or <template> don't apply, nor do alternate stylesheets.
+    if ((el.name === 'style' || el.name === 'link') && insideInert(el)) continue;
     if (el.name === 'title' && !title) title = textContent(el).trim();
     else if (el.name === 'meta' && el.attribs.name === 'tw-tree') treeId = el.attribs.content ?? '';
     else if (el.name === 'body' && !body) body = el;
@@ -360,19 +386,27 @@ export function importHtml(text: string): TreeDocument {
         if (el.attribs['data-tw-kit-editable'] !== undefined) Object.assign(kit, { editable: true, source: CUSTOM_KIT_SOURCE });
         if (el.attribs['data-tw-kit-tokens'] !== undefined) kit.source = TOKENS_KIT_SOURCE;
         kits.push(kit);
-      } else if (css.trim()) looseCss.push(css.trim());
-    } else if (el.name === 'link' && /\bstylesheet\b/i.test(el.attribs.rel ?? '') && el.attribs.href) {
+      } else if (css.trim()) {
+        if (/@import\b/i.test(css) && looseCss.length) flushCss();
+        looseCss.push(withMedia(css.trim(), el.attribs.media));
+      }
+    } else if (el.name === 'link' && /\bstylesheet\b/i.test(el.attribs.rel ?? '') && !/\balternate\b/i.test(el.attribs.rel ?? '') && el.attribs.href) {
+      flushCss();
       const href = el.attribs.href.trim();
       // A deployment's own stylesheet (`data-tw-env`) becomes an ordinary kit with a fresh id.
       const id = el.attribs['data-tw-env'] === undefined ? el.attribs['data-tw-kit'] : '';
       const kit: DesignKit = { id: id || createId('k'), name: el.attribs['data-tw-kit-name'] || fileName(href), css: '', enabled: true, source: href };
       // Absolute stylesheets stay linked; relative ones can't load from here, so keep them as an @import.
-      if (isStylesheetUrl(href)) kit.href = href;
-      else kit.css = `@import url("${href.replace(/"/g, '%22')}");`;
+      // A media condition (print) only an @import can carry.
+      const media = mediaOf(el.attribs.media);
+      if (isStylesheetUrl(href) && !media) kit.href = href;
+      else kit.css = `@import url("${href.replace(/"/g, '%22')}")${media ? ` ${media}` : ''};`;
       kits.push(kit);
     }
   }
-  if (looseCss.length) kits.push({ id: createId('k'), name: title ? `${title} styles` : 'Imported styles', css: looseCss.join('\n\n'), enabled: true, source: 'html' });
+  flushCss();
+  // Named after the page once the title is known.
+  for (const k of kits) if (title && (k as { source?: string; name?: string }).source === 'html' && (k as { name?: string }).name === 'Imported styles') (k as { name: string }).name = `${title} styles`;
 
   const ctx: Ctx = { styles };
   // An exported SVG tree: the body holds just the drawing, which is the tree's root.

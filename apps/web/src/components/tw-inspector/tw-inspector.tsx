@@ -1204,7 +1204,7 @@ export class TwInspector {
   private renderSource(rule: MatchedRule) {
     const { source } = rule;
     const line = rule.line ? <span class="style-line">:{rule.line}</span> : null;
-    const external = source.href ? (
+    const external = source.href && /^https?:\/\//i.test(source.href) ? (
       <a class="style-href" href={source.href} target="_blank" rel="noopener noreferrer" title={source.href} aria-label={`Open ${describeHref(source.href)}`}>
         <Icon name="link" />
       </a>

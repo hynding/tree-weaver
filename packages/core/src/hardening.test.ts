@@ -10,6 +10,7 @@ import {
   isSafeAttr,
   parseVersionLog,
   renderDocument,
+  renderNodeHtml,
   sanitizeCssValue,
   saveComponent,
   text,
@@ -577,5 +578,18 @@ describe('pass 34 fixes', () => {
     const root = createBranch({ tag: 'body', type: 'root', children: [area] });
     expect(insertionProblem(root, area.id, createBranch({ tag: 'b' }))).toMatch(/only hold text/);
     expect(insertionProblem(root, area.id, text('ok'))).toBeNull();
+  });
+});
+
+describe('pass 35 fixes', () => {
+  it('drops attributes whose prefix could be rebound to XLink', () => {
+    expect(isSafeAttr('xmlns:q', 'http://www.w3.org/1999/xlink')).toBe(false);
+    expect(isSafeAttr('q:href', 'javascript:alert(1)')).toBe(false);
+    expect(isSafeAttr('xlink:href', 'javascript:alert(1)')).toBe(false);
+    expect(isSafeAttr('xlink:href', '#icon')).toBe(true);
+    expect(isSafeAttr('xmlns:xlink', 'http://www.w3.org/1999/xlink')).toBe(true);
+    expect(isSafeAttr('xml:lang', 'en')).toBe(true);
+    const svg = renderNodeHtml(createBranch({ tag: 'a', attrs: { 'xmlns:q': 'http://www.w3.org/1999/xlink', 'q:href': 'javascript:alert(1)' } }), { xml: true, inSvg: true });
+    expect(svg).not.toContain('javascript');
   });
 });

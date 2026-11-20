@@ -18,7 +18,7 @@ import {
 import type { ChildNode, Element } from 'domhandler';
 import { parseDocument } from 'htmlparser2';
 import { fromData } from './data';
-import { convertParts, readTreeCss, type Ctx } from './html';
+import { convertParts, readTreeCss, withMedia, type Ctx } from './html';
 import { FormatError, type TreeDocument } from './types';
 
 /*
@@ -128,7 +128,7 @@ export function importSvg(text: string): TreeDocument {
       else if (el.attribs['data-tw-kit-tokens'] !== undefined) kit.source = TOKENS_KIT_SOURCE;
       kits.push(kit);
     }
-    else if (css) looseCss.push(css);
+    else if (css) looseCss.push(withMedia(css, el.attribs.media));
   }
 
   const titleEl = top.children.find((c): c is Element => isElement(c) && c.name.replace(/^svg:/, '') === 'title');

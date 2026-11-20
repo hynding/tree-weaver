@@ -1201,3 +1201,20 @@ describe('pass 34 fixes', () => {
     expect(m.tokens).toEqual([{ name: '--text', value: '#111' }]);
   });
 });
+
+describe('pass 35 fixes', () => {
+  it('imports stylesheets in order, with their media, and skips ones that never apply', () => {
+    const doc = importDocument(
+      '<html><head><style>p{color:red}</style><link rel="stylesheet" href="https://x.example/theme.css"><link rel="stylesheet" media="print" href="https://x.example/print.css"><style media="print">h1{display:none}</style><link rel="alternate stylesheet" href="https://x.example/dark.css"><noscript><style>p{display:none}</style></noscript></head><body><p>Hi</p></body></html>',
+      'html',
+    );
+    const kits = doc.kits.map((k) => k.href ?? k.css);
+    expect(kits).toEqual(['p{color:red}', 'https://x.example/theme.css', '@import url("https://x.example/print.css") print;', '@media print {\nh1{display:none}\n}']);
+  });
+
+  it('keeps an inline parent’s children on one line in HTML component exports', () => {
+    const a = createBranch({ tag: 'a', attrs: { href: '#' }, children: [createBranch({ tag: 'div', children: [text('Title')] }), createLeaf('i.png', 'image', { alt: '' })] });
+    const html = exportComponent(page([createBranch({ tag: 'div', children: [a, createBranch({ tag: 'span', children: [text('after')] })] })]), { framework: 'html' }).files[0].contents;
+    expect(html).toMatch(/<a [^>]*><div[^>]*>Title<\/div><img[^>]*><\/a><span/);
+  });
+});

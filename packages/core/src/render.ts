@@ -51,9 +51,14 @@ export function safeTag(tag: string): string {
 
 export function isSafeAttr(name: string, value: string): boolean {
   const n = name.toLowerCase();
-  if (!SAFE_ATTR.test(name) || n.startsWith('on') || n === 'style' || n === 'srcdoc' || n === BRANCH_ATTR || n.startsWith(`${BRANCH_ATTR}-`)) return false;
+  // In XML (a standalone .svg) a prefix can be bound to any namespace (`xmlns:q` = XLink makes
+  // `q:href` a link), so prefixes other than the standard ones aren't kept, and checks use the local name.
+  const local = n.slice(n.lastIndexOf(':') + 1);
+  if (n.startsWith('xmlns:') && !(n === 'xmlns:xlink' && value.trim() === 'http://www.w3.org/1999/xlink')) return false;
+  if (n.includes(':') && !/^(xlink|xml|xmlns):/.test(n)) return false;
+  if (!SAFE_ATTR.test(name) || local.startsWith('on') || local === 'style' || local === 'srcdoc' || n === BRANCH_ATTR || n.startsWith(`${BRANCH_ATTR}-`)) return false;
   // Browsers drop tabs, newlines and leading control characters before reading a URL's scheme.
-  if (URL_ATTRS.has(n) && /^(javascript|vbscript|data:text\/html)/i.test(value.replace(/[\x00-\x20]/g, ''))) return false;
+  if ((URL_ATTRS.has(n) || URL_ATTRS.has(local)) && /^(javascript|vbscript|data:text\/html)/i.test(value.replace(/[\x00-\x20]/g, ''))) return false;
   return true;
 }
 
