@@ -103,7 +103,7 @@ const NAMED: Record<string, string> = {
 export function parseColor(value: string): Rgba | null {
   const v = value.trim().toLowerCase();
   if (v === 'transparent') return [0, 0, 0, 0];
-  const named = NAMED[v];
+  const named = Object.hasOwn(NAMED, v) ? NAMED[v] : undefined;
   if (named) return parseColor(named);
   let m = /^#([0-9a-f]{3,8})$/.exec(v);
   if (m) {

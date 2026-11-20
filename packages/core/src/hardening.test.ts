@@ -302,3 +302,29 @@ describe('pass 11 fixes', () => {
     expect(placementProblem(tree.root, g.root.id, createBranch({ tag: 'div' }))).toMatch(/inside an SVG/);
   });
 });
+
+describe('pass 12 fixes', () => {
+  it('does not expand huge repeat() counts', async () => {
+    const { parseTracks, countTracks } = await import('./index');
+    expect(parseTracks('repeat(99999999, 1fr)')).toBeNull();
+    expect(countTracks('repeat(99999999, 1fr)')).toBe(1000);
+  });
+
+  it('reads colours named like Object properties as unknown', async () => {
+    const { parseColor } = await import('./index');
+    for (const v of ['constructor', 'toString', '__proto__']) expect(parseColor(v)).toBeNull();
+  });
+
+  it('resolves an unclosed var() quickly', async () => {
+    const { resolveTokenValue } = await import('./index');
+    const start = Date.now();
+    resolveTokenValue(`var(--a, ${'x'.repeat(40000)}`, new Map());
+    expect(Date.now() - start).toBeLessThan(500);
+  });
+
+  it('edits a template whose <a> root holds shapes inside an <svg>', async () => {
+    const { createComponent, componentAsTree, createShape } = await import('./index');
+    const link = createComponent('Link', createBranch({ tag: 'a', children: [createShape('circle')] }));
+    expect(componentAsTree(link).root.tag).toBe('svg');
+  });
+});

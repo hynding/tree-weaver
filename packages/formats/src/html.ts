@@ -277,8 +277,30 @@ export function convertParts(tag: string, attribs: Record<string, string>, child
     classes: a.class ?? '',
     attrs,
     styles,
-    children: convertChildren(children, ctx, raw || RAW_TEXT_TAGS.has(tag), childrenInSvg({ tag }, svg)),
+    children: impliedTbody(tag, convertChildren(children, ctx, raw || RAW_TEXT_TAGS.has(tag), childrenInSvg({ tag }, svg))),
   };
+}
+
+/** Rows straight under a `<table>` go in a `<tbody>`, as browsers parse them (and frameworks require). */
+function impliedTbody(tag: string, children: RawNode[]): RawNode[] {
+  if (tag !== 'table' || !children.some((c) => c.kind === 'branch' && c.tag === 'tr')) return children;
+  const out: RawNode[] = [];
+  let body: RawNode | null = null;
+  for (const c of children) {
+    if (c.kind === 'branch' && c.tag === 'tr') {
+      if (!body) {
+        body = { kind: 'branch', id: createId('b'), tag: 'tbody', classes: '', attrs: {}, styles: {}, children: [] };
+        out.push(body);
+      }
+      (body.children as RawNode[]).push(c);
+    } else if (c.kind === 'leaf' && typeof c.value === 'string' && !c.value.trim()) {
+      if (!body) out.push(c);
+    } else {
+      body = null;
+      out.push(c);
+    }
+  }
+  return out;
 }
 
 /** The `<svg>` root of an exported SVG tree, when it is all the body holds. */

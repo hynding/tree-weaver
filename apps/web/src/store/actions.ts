@@ -1047,6 +1047,15 @@ export async function importText(text: string, format?: FormatId, fileName?: str
   return { summary: `Added tree “${tree.name}”${kitNote}` };
 }
 
+/** A forest as saved on this device, or null. */
+export async function loadStoredForest(id: string): Promise<Forest | null> {
+  try {
+    return (await store.load(id)) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Replace what is open with a document, without keeping the old forest around. Used by
  * the embed API, where the host page owns the data. A tree opens in a forest of its own.

@@ -1,4 +1,5 @@
 import {
+  canonicalSvgAttr,
   canonicalTag,
   DISPLAYS,
   escapeAttr,
@@ -284,7 +285,14 @@ interface Build {
 const PLAIN_ATTR = /^(?:(?:xlink|xml|xmlns):)?[a-zA-Z_][\w.-]*$/;
 // `is` too: Vue renders `<component is="script">` and `is="vue:script"` as the element it names.
 const isExportAttr = (name: string, value: string, defaults?: Record<string, string>) =>
-  PLAIN_ATTR.test(name) && !/^v-/i.test(name) && name.toLowerCase() !== 'is' && landsAs(name).every((n) => isSafeFilled(n, value, defaults));
+  PLAIN_ATTR.test(name) && !/^v-/i.test(name) && name.toLowerCase() !== 'is' && !isDomPropName(name) && landsAs(name).every((n) => isSafeFilled(n, value, defaults));
+/**
+ * Vue sets an attribute whose name is a property of the element (`innerHTML`) as that property,
+ * so a mixed-case name is kept only when it is an SVG attribute's own case (`viewBox`), and the
+ * HTML-setting property names are never kept.
+ */
+const isDomPropName = (name: string): boolean =>
+  /^(inner|outer)(html|text)$|^textcontent$/i.test(name) || (name !== name.toLowerCase() && !/^(xlink|xml|xmlns):/.test(name) && canonicalSvgAttr(name.toLowerCase()) !== name);
 /**
  * The names an attribute can end up as in the page: JSX camel-cases `h-ref` to `hRef`, which the
  * browser reads as `href`, and React writes `xlinkHref` as `xlink:href`, so each is checked.

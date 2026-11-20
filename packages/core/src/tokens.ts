@@ -112,8 +112,10 @@ export const tokensFromCss = (css: string): DesignToken[] => rootTokens(css);
 /** Replace `var(--name, fallback)` with token values, a few levels deep. */
 export function resolveTokenValue(value: string, tokens: ReadonlyMap<string, string>, depth = 0): string {
   if (depth > 6 || !value.includes('var(')) return value;
-  const out = value.replace(/var\(\s*(--[\w-]+)\s*(?:,\s*([^()]*(?:\([^()]*\))?[^()]*))?\)/g, (_m, name: string, fallback?: string) => tokens.get(name) ?? fallback?.trim() ?? '');
-  return resolveTokenValue(out, tokens, depth + 1);
+  // The fallback is text with any number of one-level (…) groups; no two quantifiers can match the
+  // same characters, so an unclosed `var(` can't make it backtrack.
+  const out = value.replace(/var\(\s*(--[\w-]+)\s*(?:,\s*([^()]*(?:\([^()]*\)[^()]*)*))?\)/g, (_m, name: string, fallback?: string) => tokens.get(name) ?? fallback?.trim() ?? '');
+  return out === value ? out : resolveTokenValue(out, tokens, depth + 1);
 }
 
 const LENGTH = /^-?\d*\.?\d+(px|rem|em|pt|%|vw|vh|ch)?$/;

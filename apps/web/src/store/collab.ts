@@ -3,7 +3,8 @@ import { createRecordStore, type RecordStore } from '@tree-weaver/storage';
 import { WebrtcProvider } from 'y-webrtc';
 import { COLLAB_ENABLED, COLLAB_ICE_SERVERS, COLLAB_SIGNALING } from '../config';
 import { diffForests, isEditableKit, type Forest } from '@tree-weaver/core';
-import { commit, openDocument, saveNow, setHistoryOverride, toast, withCurrentBreakpoints } from './actions';
+import { commit, loadStoredForest, openDocument, saveNow, setHistoryOverride, toast, withCurrentBreakpoints } from './actions';
+import { saveForestVersion } from './versions';
 import { onChange, state, type CollabPeer } from './editor';
 import { isEmbedded } from './embed-flags';
 
@@ -257,11 +258,20 @@ async function openShared(s: Session): Promise<void> {
     const read = readForest(s.doc);
     if (!read) return;
     const forest = withCurrentBreakpoints(read);
-    s.synced = forest;
+    // This device may already hold the forest (an earlier join, edits made after leaving, or the
+    // same file imported): keep that copy as a version before the room's replaces it.
+    const local = state.forest?.id === forest.id ? state.forest : await loadStoredForest(forest.id);
+    if (session !== s) return;
+    if (local && !diffForests(local, forest).empty) await saveForestVersion(local, 'Before joining the shared forest', { source: 'collab', auto: true });
+    if (session !== s) return;
+    const latest = readForest(s.doc);
+    if (!latest) return;
+    const current = withCurrentBreakpoints(latest);
+    s.synced = current;
     state.collabStatus = 'live';
     // Everything is saved, so this opens the forest without waiting.
-    await openDocument({ kind: 'forest', forest });
-    finishJoin(s, forest);
+    await openDocument({ kind: 'forest', forest: current });
+    finishJoin(s, current);
   } catch (err) {
     if (session === s) stopSharing(`Could not join: ${(err as Error).message}`);
   } finally {

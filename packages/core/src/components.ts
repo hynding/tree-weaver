@@ -334,6 +334,18 @@ function withVariant(def: ComponentDef, variantName: string | null | undefined):
   return visit(def.root) as Branch;
 }
 
+/** A template that only works inside an SVG: SVG-only itself, or (an `<a>`, a `<title>`) holding SVG-only content. */
+function drawsInSvg(root: Branch): boolean {
+  let svg = false;
+  const visit = (n: TreeNode): void => {
+    if (svg) return;
+    if (isSvgOnly(n)) svg = true;
+    else if (isBranch(n) && n.tag !== 'foreignObject') n.children.forEach(visit);
+  };
+  visit(root);
+  return svg;
+}
+
 /**
  * A component's template as a tree, so the editor can open it like any other: a `<body>`
  * holding the template, with `variant`'s styles laid over when one is given.
@@ -345,7 +357,7 @@ export function componentAsTree(def: ComponentDef, variant?: string | null): Tre
     name: def.name,
     // An SVG-only template (a `<g>`, a shape group) is edited inside an `<svg>`, so it is drawn and
     // the SVG placement rules apply to it.
-    root: { kind: 'branch', id: `${BODY_PREFIX}${def.id}`, tag: isSvgOnly(def.root) ? 'svg' : 'body', type: 'root', name: def.name, classes: [], attrs: {}, styles: {}, children: [withVariant(def, variant)] },
+    root: { kind: 'branch', id: `${BODY_PREFIX}${def.id}`, tag: drawsInSvg(def.root) ? 'svg' : 'body', type: 'root', name: def.name, classes: [], attrs: {}, styles: {}, children: [withVariant(def, variant)] },
     createdAt: ts,
     updatedAt: ts,
   };

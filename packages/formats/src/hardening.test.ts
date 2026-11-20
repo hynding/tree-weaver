@@ -418,3 +418,27 @@ describe('pass 11 fixes', () => {
     expect(exportTree(tree, 'xml')).not.toMatch(/\u000b/);
   });
 });
+
+describe('pass 12 fixes', () => {
+  it('ignores XML style displays that are not displays (no prototype pollution)', () => {
+    importDocument('<tree-weaver version="1"><tree id="t1" name="T"><branch id="b_body" tag="body" type="root"><style display="__proto__"><declaration property="polluted" value="yes"/></style><style display="constructor"><declaration property="assign" value="x"/></style></branch></tree></tree-weaver>', 'xml');
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(typeof Object.assign).toBe('function');
+  });
+
+  it('drops attribute names Vue would set as HTML-setting properties', () => {
+    const doc = importDocument(JSON.stringify({ tree: { name: 'T', root: { tag: 'body', children: [{ tag: 'div', attrs: { innerHTML: '<img src=x onerror=alert(1)>' } }, { tag: 'svg', attrs: { viewBox: '0 0 1 1' } }] } } }), 'json');
+    if (doc.kind !== 'tree') throw new Error('expected a tree');
+    const vue = exportComponent(doc.tree, { framework: 'vue' }).files.map((f) => f.contents).join('\n');
+    expect(vue).not.toMatch(/innerHTML/i);
+    expect(vue).toContain('viewBox="0 0 1 1"');
+  });
+
+  it('puts rows straight under an imported table in a tbody', () => {
+    const doc = importDocument('<table><tr><th>Plan</th></tr><tr><td>Basic</td></tr></table>', 'html');
+    if (doc.kind !== 'tree') throw new Error('expected a tree');
+    const table = doc.tree.root.children.find((c) => c.kind === 'branch') as Branch;
+    expect(table.children.map((c) => (c as Branch).tag)).toEqual(['tbody']);
+    expect((table.children[0] as Branch).children).toHaveLength(2);
+  });
+});

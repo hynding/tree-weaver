@@ -131,9 +131,13 @@ function readNode(el: Element): Record<string, unknown> {
     const leafAttrs = Object.fromEntries(elements(el, 'attr').map((x) => [x.attribs.name ?? '', x.attribs.value ?? '']));
     return { kind: 'leaf', id: a.id, type: a.type, value: a.type === 'image' || a.type === 'shape' ? a.value : (a.value ?? textOf(el)), attrs: leafAttrs };
   }
-  const styles: Record<string, Record<string, string>> = {};
+  // Keys come from the file: only known displays, and maps without a prototype, so a display or
+  // property named `__proto__` can't reach Object.prototype.
+  const styles: Record<string, Record<string, string>> = Object.create(null);
   for (const style of elements(el, 'style')) {
-    const map = (styles[style.attribs.display] ??= {});
+    const display = style.attribs.display;
+    if (!(DISPLAY_IDS as readonly string[]).includes(display)) continue;
+    const map = (styles[display] ??= Object.create(null) as Record<string, string>);
     for (const decl of elements(style, 'declaration')) map[decl.attribs.property ?? ''] = decl.attribs.value ?? '';
   }
   return {
