@@ -211,10 +211,15 @@ const VALUE_UTILITIES: Record<string, string> = {
   'z-index': 'z',
 };
 
-/** A CSS value inside Tailwind's brackets: spaces become `_`, literal underscores are escaped. */
+/**
+ * A CSS value inside Tailwind's brackets: spaces become `_`, literal underscores are escaped.
+ * Double-quoted strings become single-quoted (the same to CSS): a `"` would be escaped in the
+ * markup, and Tailwind, which reads class names from the source text, would miss the class.
+ */
 const bracket = (value: string): string =>
   value
     .trim()
+    .replace(/"((?:[^"\\]|\\.)*)"/g, (_, inner: string) => `'${inner.replace(/\\"/g, '"').replace(/(^|[^\\])'/g, "$1\\'")}'`)
     // Tailwind leaves `url(…)` as written, so spaces there are percent-encoded instead.
     .split(/(url\(\s*(?:"[^"]*"|'[^']*'|[^)]*?)\s*\))/i)
     .map((part, i) =>
@@ -807,7 +812,11 @@ function writeJsx(el: El, depth: number, props: false | ReadonlySet<string> = fa
       // React's types take numbers for these.
       if (numeric && /^-?\d{1,15}$/.test(v.trim())) return ` ${name}={${Number(v.trim())}}`;
       // `&` only where it could start a reference: Tailwind reads `[&&]:` classes from the source text.
-      return /["\\{}<>\n]/.test(v) ? ` ${name}={${jsxString(v)}}` : ` ${name}="${v.replace(/&(?=[#A-Za-z0-9])/g, '&amp;')}"`;
+      // JSX attribute strings are literal (backslashes and braces included), so a JS string is only
+      // needed for a value holding both quote kinds or a line break; Tailwind reads classes as written.
+      const amp = v.replace(/&(?=[#A-Za-z0-9])/g, '&amp;');
+      if (/[\n\r]/.test(v) || (v.includes('"') && v.includes("'"))) return ` ${name}={${jsxString(v)}}`;
+      return v.includes('"') ? ` ${name}='${amp}'` : ` ${name}="${amp}"`;
     })
     .join('');
   // React takes one child at most in a <textarea> (props split the text into several), and

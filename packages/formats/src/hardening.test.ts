@@ -795,7 +795,7 @@ describe('pass 21 fixes', () => {
   it('drops padding inside url() in Tailwind classes', () => {
     const tree = createTree('Home', createBranch({ tag: 'body', type: 'root', children: [createBranch({ tag: 'div', styles: { lg: { 'background-image': 'url( "hero.png" )' } } })] }));
     const out = exportComponent(tree, { framework: 'react', styling: 'tailwind' }).files[0].contents;
-    expect(out).toContain('[background-image:url(\\"hero.png\\")]');
+    expect(out).toContain("[background-image:url('hero.png')]");
     expect(out).not.toContain('%20');
   });
 
@@ -937,5 +937,25 @@ describe('pass 24 fixes', () => {
     expect(swift).toContain('Text(verbatim: "6.")');
     const dart = exportComponent(tree, { framework: 'flutter' }).files[0].contents;
     expect(dart).toContain("Text('5. ')");
+  });
+});
+
+describe('pass 25 fixes', () => {
+  it('writes quoted CSS values in Tailwind classes so Tailwind can read them', async () => {
+    const tree = page([createBranch({ tag: 'div', styles: { lg: { 'grid-template-areas': '"sidebar main"', 'font-family': '"Open Sans", serif', width: 'var(--side_width)' } } })]);
+    const react = exportComponent(tree, { framework: 'react', styling: 'tailwind' }).files[0].contents;
+    expect(react).toContain("[grid-template-areas:'sidebar_main']");
+    expect(react).toContain("[font-family:'Open_Sans',serif]");
+    expect(react).toContain('w-[var(--side\\_width)]');
+    expect(react).not.toContain('className={');
+    const vue = exportComponent(tree, { framework: 'vue', styling: 'tailwind' }).files[0].contents;
+    expect(vue).not.toContain('&quot;');
+  });
+
+  it('absolutizes quoted url() paths holding parentheses', async () => {
+    const { absolutizeCssUrls } = await import('./storybook-import');
+    expect(absolutizeCssUrls('.a{background:url("img/a(1).png")} .b{background:url(img/b.png)} .c{background:url("")}', 'https://sb.example/assets/main.css')).toBe(
+      '.a{background:url("https://sb.example/assets/img/a(1).png")} .b{background:url("https://sb.example/assets/img/b.png")} .c{background:url("")}',
+    );
   });
 });

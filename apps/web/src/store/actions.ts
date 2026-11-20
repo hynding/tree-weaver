@@ -57,6 +57,7 @@ import {
   type Tree,
   type TreeNode,
   addKitsBeforeTokens,
+  isTokenKit,
   resetToken,
   setToken,
   type DesignToken,
@@ -229,7 +230,16 @@ function editTree(fn: (root: Branch) => Branch): void {
   const forest = state.forest;
   if (!forest || !state.treeId) return;
   try {
-    commit(updateTreeRoot(forest, state.treeId, fn, state.componentVariant));
+    const next = updateTreeRoot(forest, state.treeId, fn, state.componentVariant);
+    // An edit to a component instance is undone by the instance, which is redrawn from its
+    // component; say so rather than seem to accept it.
+    // (A no-op edit leaves the forest as it was too, so the change is checked by content.)
+    const tree = next === forest ? currentTree() : null;
+    if (tree && JSON.stringify(fn(tree.root)) !== JSON.stringify(tree.root)) {
+      toast(INSTANCE_EDIT, 'error');
+      return;
+    }
+    commit(next);
   } catch (err) {
     toast((err as Error).message, 'error');
   }
@@ -425,6 +435,7 @@ function placement(root: Branch, targetId: string, position: DropPosition): { pa
 
 /** Shapes and SVG groups only go inside an `<svg>`, and HTML can't be drawn inside one. Says why with a toast. */
 /** Said when an edit would change what an instance holds, which comes from its component. */
+export const INSTANCE_EDIT = 'This is a component instance: it follows its component. Edit the component, or detach the instance, to change it';
 export const INSIDE_INSTANCE = 'This is part of a component instance: edit the component, or detach the instance, to change it';
 
 /** The instance a node is part of (itself, or its nearest instance ancestor). */
@@ -966,6 +977,20 @@ function editRules(forest: Forest, kitId: string, fn: (rules: StyleRule[]) => St
 }
 
 /** The forest with an editable kit to add rules to, created (last, so it wins over other kits) when missing. */
+/**
+ * An editable kit no other kit loads after (tokens kits aside), for styles moved off a branch:
+ * they came after every kit as the branch's own styles, and must still beat the kits it matches.
+ */
+function withLastCustomKit(forest: Forest): { forest: Forest; kitId: string } {
+  const kits = forest.kits;
+  for (let i = kits.length - 1; i >= 0; i--) {
+    if (isEditableKit(kits[i])) return { forest, kitId: kits[i].id };
+    if (!isTokenKit(kits[i])) break;
+  }
+  const kit = createCustomKit();
+  return { forest: { ...forest, kits: addKitsBeforeTokens(kits, [kit]) }, kitId: kit.id };
+}
+
 function withCustomKit(forest: Forest): { forest: Forest; kitId: string } {
   const existing = forest.kits.find(isEditableKit);
   if (existing) return { forest, kitId: existing.id };
@@ -1087,7 +1112,7 @@ export function extractClass(branchId: string, className: string): void {
     return;
   }
   const rule = createRule(selector, node.styles);
-  const { forest: withKit, kitId } = withCustomKit(forest);
+  const { forest: withKit, kitId } = withLastCustomKit(forest);
   const next = updateTreeRoot(editRules(withKit, kitId, (rules) => [...rules, rule]), tree.id, (root) =>
     updateNode(root, branchId, (n) => (isBranch(n) ? { ...n, classes: [...new Set([...n.classes, className])], styles: {} } : n)),
   );

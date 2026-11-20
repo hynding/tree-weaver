@@ -139,7 +139,7 @@ describe('Tailwind helpers', () => {
     expect(tailwindClass('text-align', 'center')).toBe('text-center');
     expect(tailwindClass('padding', '1rem')).toBe('p-[1rem]');
     expect(tailwindClass('padding', '1rem 2rem')).toBe('p-[1rem_2rem]');
-    expect(tailwindClass('font-family', '"Open Sans", serif')).toBe('[font-family:"Open_Sans",serif]');
+    expect(tailwindClass('font-family', '"Open Sans", serif')).toBe("[font-family:'Open_Sans',serif]");
   });
 
   it('renames attributes for JSX', () => {
