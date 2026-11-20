@@ -531,10 +531,19 @@ export function nudge(id: string, delta: -1 | 1): void {
   editTree((root) => moveNode(root, id, parent.id, delta > 0 ? to + 1 : to));
 }
 
+/** In a component's view, the template's root stands for the whole component. */
+function isTemplateRoot(tree: Tree, id: string): boolean {
+  return isComponentTreeId(tree.id) && tree.root.children.some((c) => c.id === id);
+}
+
 export function removeSelected(): void {
   const id = state.selectedId;
   const tree = currentTree();
   if (!id || !tree || id === tree.root.id) return;
+  if (isTemplateRoot(tree, id)) {
+    toast('This is the component itself: delete it from the Components list instead', 'error');
+    return;
+  }
   const parent = parentOf(id);
   editTree((root) => removeNode(root, id));
   state.selectedId = parent && parent.id !== tree.root.id ? parent.id : null;
@@ -543,7 +552,7 @@ export function removeSelected(): void {
 export function duplicateSelected(): void {
   const id = state.selectedId;
   const tree = currentTree();
-  if (!id || !tree || id === tree.root.id) return;
+  if (!id || !tree || id === tree.root.id || isTemplateRoot(tree, id)) return;
   let newId = id;
   const dup = (root: Branch) => {
     const res = duplicateNode(root, id);
@@ -565,7 +574,7 @@ export function duplicateSelected(): void {
 export function wrapSelected(tag = 'div', type = 'box'): void {
   const id = state.selectedId;
   const tree = currentTree();
-  if (!id || !tree || id === tree.root.id) return;
+  if (!id || !tree || id === tree.root.id || isTemplateRoot(tree, id)) return;
   // Inside a drawing the wrapper is an SVG group.
   const parent = parentOf(id);
   const svg = !!parent && inSvgContext(tree.root, parent.id);

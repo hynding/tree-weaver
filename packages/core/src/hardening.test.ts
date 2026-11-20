@@ -434,3 +434,15 @@ describe('pass 19 fixes', () => {
     expect(renderNodeHtml(ta, { designer: true })).not.toContain('<span');
   });
 });
+
+describe('pass 20 fixes', () => {
+  it('refuses a grid layout on a void element or an SVG', async () => {
+    const { applyGridLayout, GRID_LAYOUTS } = await import('./index');
+    const layout = GRID_LAYOUTS.find((l: { boxes?: number; areas?: unknown }) => l.boxes || l.areas)!;
+    const hr = createBranch({ tag: 'hr' });
+    const svg = createBranch({ tag: 'svg' });
+    const root = createBranch({ tag: 'body', type: 'root', children: [hr, svg] });
+    expect(() => applyGridLayout(root, hr.id, 'lg', layout)).toThrow(/can't hold children/);
+    expect(() => applyGridLayout(root, svg.id, 'lg', layout)).toThrow();
+  });
+});

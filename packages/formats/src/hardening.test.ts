@@ -744,3 +744,40 @@ describe('pass 19 fixes', () => {
     expect(exportComponentDef(def, { framework: 'vue' }).files[0].contents).toContain('{{ name }}{{ ",\\n    thanks!" }}');
   });
 });
+
+describe('pass 20 fixes', () => {
+  const imported = (html: string) => {
+    const doc = importDocument(`<body>${html}</body>`, 'html');
+    return doc.kind === 'tree' ? doc.tree : doc.forest.trees[0];
+  };
+  const roundTrip = (html: string) => {
+    const back = importDocument(exportTree(imported(html), 'markdown'), 'markdown');
+    return back.kind === 'tree' ? back.tree.root : back.forest.trees[0].root;
+  };
+  const shape = (n: TreeNode): unknown => ('children' in n ? { [n.tag]: n.children.map(shape) } : n.type === 'text' ? n.value : n.type);
+
+  it('keeps headings and paragraphs holding custom or media elements', () => {
+    const out = exportComponent(imported('<h2>Pricing <x-badge>new</x-badge></h2><p><picture><img src="a.png" alt="Logo"></picture></p>'), { framework: 'react' }).files[0].contents;
+    expect(out).toMatch(/<h2[ >]/);
+    expect(out).toMatch(/<p[ >]/);
+  });
+
+  it('writes emphasis and code Markdown can read back', () => {
+    for (const html of ['<p><strong>a</strong><strong>b</strong></p>', '<p><em>a</em><em>b</em></p>', '<p>foo<strong>(bar)</strong></p>', '<p><s>x</s><del>y</del></p>', '<p><code>a</code><code>b</code></p>', '<p>x<code> a </code></p>']) {
+      expect(JSON.stringify(shape(roundTrip(html)))).toBe(JSON.stringify(shape(imported(html).root)));
+    }
+    expect(exportTree(imported('<p>a <strong>b</strong> c</p>'), 'markdown')).toContain('a **b** c');
+  });
+
+  it('keeps non-breaking-space paragraphs and edges in Markdown', () => {
+    expect(JSON.stringify(shape(roundTrip('<p>&nbsp;</p><p>x</p>')))).toBe(JSON.stringify(shape(imported('<p>&nbsp;</p><p>x</p>').root)));
+    expect(JSON.stringify(shape(roundTrip('<p>&nbsp;Hello&nbsp;</p>')))).toContain(' Hello ');
+    expect(JSON.stringify(shape(roundTrip('<h2>&nbsp;Hi</h2>')))).toContain(' Hi');
+  });
+
+  it('percent-encodes spaces inside url() in Tailwind classes', () => {
+    const tree = createTree('Home', createBranch({ tag: 'body', type: 'root', children: [createBranch({ tag: 'div', styles: { lg: { 'background-image': 'url("a b.png")' } } })] }));
+    const out = exportComponent(tree, { framework: 'react', styling: 'tailwind' }).files[0].contents;
+    expect(out).toContain('a%20b.png');
+  });
+});

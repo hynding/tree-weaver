@@ -103,7 +103,7 @@ function inline(node: TreeNode, first: boolean): string {
     return escapeMarkdown(oneLine(node.value), first);
   }
   const tag = node.tag;
-  const content = () => node.children.map((c) => inline(c, false)).join('');
+  const content = () => inlineList(node.children, false);
   if (Object.hasOwn(MARK_INLINE, tag) && !needsMeta(node) && node.children.length) return wrapTrimmed(content(), MARK_INLINE[tag]);
   if (tag === 'code' && !needsMeta(node) && node.children.every((c) => !isBranch(c) && c.type === 'text')) {
     // Markdown turns line breaks in a code span into spaces anyway; a blank line would end the paragraph.
@@ -112,7 +112,10 @@ function inline(node: TreeNode, first: boolean): string {
     // A fence longer than any run of backticks in the code, padded with spaces when the code has any.
     const longest = Math.max(0, ...(code.match(/`+/g) ?? []).map((r) => r.length));
     const ticks = '`'.repeat(longest + 1);
-    return longest ? `${ticks} ${code} ${ticks}` : `${ticks}${code}${ticks}`;
+    // An empty span has no Markdown form; CommonMark strips one space from each end when both have one.
+    if (!code) return inlineHtml(renderNodeHtml(node));
+    const pad = longest || (code.startsWith(' ') && code.endsWith(' ') && code.trim() !== '') || /^`|`$/.test(code);
+    return pad ? `${ticks} ${code} ${ticks}` : `${ticks}${code}${ticks}`;
   }
   // A script link is dropped, as in every other export; its text stays.
   if (tag === 'a' && node.attrs.href !== undefined && !safeUrl('href', node.attrs.href)) return content();
@@ -140,14 +143,54 @@ function image(leaf: Leaf): string {
   return `![${alt}](${escapeUrl(leaf.value)}${titleOf(leaf.attrs?.title)})`;
 }
 
-const inlineRun = (nodes: TreeNode[]): string => nodes.map((n, i) => inline(n, i === 0)).join('');
+const inlineRun = (nodes: TreeNode[]): string => inlineList(nodes, true);
+
+/**
+ * Inline nodes written side by side. Emphasis (`**`, `*`, `~~`) and code spans only read back when
+ * their delimiters can open and close where they land (CommonMark's flanking rules) and don't
+ * run into a neighbour's; otherwise the element is written as inline HTML.
+ */
+function inlineList(nodes: TreeNode[], first: boolean): string {
+  const parts = nodes.map((n, i) => inline(n, first && i === 0));
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    if (!isBranch(n) || needsMeta(n)) continue;
+    const before = parts.slice(0, i).join('');
+    const after = parts.slice(i + 1).join('');
+    const mark = Object.hasOwn(MARK_INLINE, n.tag) ? MARK_INLINE[n.tag] : n.tag === 'code' && parts[i].startsWith('`') ? '`' : null;
+    if (mark && !delimitersFit(before, parts[i], after, mark)) parts[i] = inlineHtml(renderNodeHtml(n));
+  }
+  return parts.join('');
+}
+
+const isPunct = (c: string) => /[\p{P}\p{S}]/u.test(c);
+const isSpace = (c: string) => c === '' || /\s/.test(c);
+
+function delimitersFit(before: string, out: string, after: string, mark: string): boolean {
+  const lead = /^\s*/.exec(out)![0];
+  const trail = /\s*$/.exec(out)![0];
+  const core = out.slice(lead.length, out.length - trail.length);
+  if (!core.startsWith(mark[0])) return true;
+  const prev = lead ? ' ' : before.slice(-1);
+  const next = trail ? ' ' : after.charAt(0);
+  // `**a****b**`, `a``b`: the delimiters would join a neighbour's.
+  if (prev === mark[0] || next === mark[0]) return false;
+  if (mark[0] === '`') return true;
+  const open = mark.length;
+  const first = core.charAt(open);
+  const last = core.charAt(core.length - open - 1);
+  if (isPunct(first) && !isSpace(prev) && !isPunct(prev)) return false;
+  if (isPunct(last) && !isSpace(next) && !isPunct(next)) return false;
+  return true;
+}
 /**
  * An inline run as one trimmed line, with block syntax at its start escaped: trimming can bring
  * any child (not just the first) to the start, where `#`, `-` or `1.` would start a block.
  */
 const inlineLine = (nodes: TreeNode[]): string =>
   inlineRun(nodes)
-    .trim()
+    // HTML whitespace only: a non-breaking space is content.
+    .replace(/^[ \t\n\r\f]+|[ \t\n\r\f]+$/g, '')
     .replace(/^([#+-])/, '\\$1')
     .replace(/^(\d+)([.)])/, '$1\\$2');
 
@@ -246,7 +289,8 @@ function table(b: Branch): string | null {
     if (!c) return '';
     inTable = true;
     try {
-      return inlineLine((c as Branch).children);
+      // Cells are trimmed of every kind of space when read, like headings.
+      return inlineLine((c as Branch).children).replace(/^\u00a0+|\u00a0+$/g, (m) => '&#160;'.repeat(m.length));
     } finally {
       inTable = false;
     }
@@ -263,8 +307,12 @@ function block(b: Branch): string {
   if (b.tag === 'svg') return inlineHtml(renderNodeHtml(b)).replace(/^(<svg\b[^>]*>)/, '$1\n');
   const allInline = b.children.every(isInlineNode);
   const heading = HEADING.exec(b.tag);
-  if (heading && allInline && b.children.length) return withMeta(b, `${'#'.repeat(Number(heading[1]))} ${inlineLine(b.children)}`);
-  if (b.tag === 'p' && allInline && b.children.length) return withMeta(b, inlineLine(b.children));
+  // A heading's text is trimmed of every kind of space when read, so edge non-breaking spaces are written as references.
+  const nbspRef = (m: string) => '&#160;'.repeat(m.length);
+  const headingText = heading && allInline ? inlineLine(b.children).replace(/^\u00a0+/, nbspRef).replace(/\u00a0+$/, nbspRef) : '';
+  if (heading && headingText) return withMeta(b, `${'#'.repeat(Number(heading[1]))} ${headingText}`);
+  const paragraph = b.tag === 'p' && allInline ? inlineLine(b.children) : '';
+  if (paragraph) return withMeta(b, paragraph);
   if (b.tag === 'hr' && !needsMeta(b)) return '---';
   if ((b.tag === 'ul' || b.tag === 'ol') && b.children.length) {
     const allowed = new Set(b.tag === 'ol' ? ['start'] : []);

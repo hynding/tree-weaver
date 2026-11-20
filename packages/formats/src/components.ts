@@ -6,7 +6,6 @@ import {
   DISPLAYS,
   escapeAttr,
   escapeHtml,
-  INLINE_TAGS,
   isBranch,
   isSafeAttr,
   isSafeCssProp,
@@ -214,9 +213,17 @@ const VALUE_UTILITIES: Record<string, string> = {
 const bracket = (value: string): string =>
   value
     .trim()
-    .replace(/_/g, '\\_')
-    .replace(/\s*,\s*/g, ',')
-    .replace(/\s+/g, '_');
+    // Tailwind leaves `url(…)` as written, so spaces there are percent-encoded instead.
+    .split(/(url\((?:"[^"]*"|'[^']*'|[^)]*)\))/i)
+    .map((part, i) =>
+      i % 2
+        ? part.replace(/\s/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`)
+        : part
+            .replace(/_/g, '\\_')
+            .replace(/\s*,\s*/g, ',')
+            .replace(/\s+/g, '_'),
+    )
+    .join('');
 
 /**
  * One declaration as a Tailwind class (without the display variant). With the forest's token
@@ -368,7 +375,7 @@ function blockBelow(node: Branch, inSvg = false): boolean {
     const lower = c.tag.toLowerCase();
     if (inSvg) return blockBelow(c, lower !== 'foreignobject');
     if (lower === 'svg') return blockBelow(c, true);
-    return !INLINE_TAGS.has(lower) || blockBelow(c);
+    return !isInlineTag(lower) || blockBelow(c);
   });
 }
 
