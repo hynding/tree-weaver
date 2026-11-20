@@ -264,3 +264,14 @@ describe('peer kits and components', () => {
     expect(f.kits.some((k) => k.id === 'bad')).toBe(false);
   });
 });
+
+describe('malformed order keys from peers', () => {
+  it('makes fresh keys instead of looping forever', () => {
+    expect(keyBetween(undefined, '0')).toMatch(/^[0-9a-z]*[1-9a-z]$/);
+    expect(keyBetween('a', 'A')).toMatch(/^[0-9a-z]*[1-9a-z]$/);
+    const keys = orderKeys(['x', 'y', 'z'], (id) => ({ y: '0', z: 'A' })[id]);
+    const list = ['x', 'y', 'z'].map((id) => keys.get(id)!);
+    expect([...list].sort()).toEqual(list);
+    expect(new Set(list).size).toBe(3);
+  });
+});

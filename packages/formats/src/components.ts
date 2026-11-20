@@ -284,7 +284,15 @@ interface Build {
 const PLAIN_ATTR = /^(?:(?:xlink|xml|xmlns):)?[a-zA-Z_][\w.-]*$/;
 // `is` too: Vue renders `<component is="script">` and `is="vue:script"` as the element it names.
 const isExportAttr = (name: string, value: string, defaults?: Record<string, string>) =>
-  PLAIN_ATTR.test(name) && !/^v-/i.test(name) && name.toLowerCase() !== 'is' && isSafeFilled(name, value, defaults);
+  PLAIN_ATTR.test(name) && !/^v-/i.test(name) && name.toLowerCase() !== 'is' && landsAs(name).every((n) => isSafeFilled(n, value, defaults));
+/**
+ * The names an attribute can end up as in the page: JSX camel-cases `h-ref` to `hRef`, which the
+ * browser reads as `href`, and React writes `xlinkHref` as `xlink:href`, so each is checked.
+ */
+function landsAs(name: string): string[] {
+  const jsx = jsxAttrName(name).toLowerCase();
+  return [name, jsx, jsx === 'xlinkhref' ? 'xlink:href' : jsx];
+}
 /**
  * `isSafeAttr` for a value as it will be at run time: with its `{{prop}}` placeholders empty and
  * filled with the props' defaults too (`java{{x}}script:` or a `javascript:` default would

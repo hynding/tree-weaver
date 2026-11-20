@@ -47,14 +47,17 @@ export function sharedTypes(doc: Y.Doc): Y.AbstractType<unknown>[] {
 
 const DIGITS = '0123456789abcdefghijklmnopqrstuvwxyz';
 const BASE = DIGITS.length;
+/** A well-formed order key: base-36 digits, never ending in "0". */
+const isKey = (k: string): boolean => /^[0-9a-z]*[1-9a-z]$/.test(k);
 
 /**
  * A key that sorts between `a` and `b` (either may be missing: the start or the end of the
  * list). Keys never end in "0", so there is always room for another key before one.
  */
 export function keyBetween(a: string | undefined, b: string | undefined): string {
-  const lo = a ?? '';
-  let hi = b;
+  // A key that isn't one this module makes (a peer's) would never let the loop finish; treat it as missing.
+  const lo = a !== undefined && isKey(a) ? a : '';
+  let hi = b !== undefined && isKey(b) ? b : undefined;
   if (hi !== undefined && lo >= hi) hi = undefined;
   let out = '';
   for (let i = 0; ; i++) {
@@ -72,7 +75,11 @@ export function keyBetween(a: string | undefined, b: string | undefined): string
  * already in order) and making new keys for the rest, so a move changes only the moved item.
  */
 export function orderKeys(ids: string[], existing: (id: string) => string | undefined): Map<string, string> {
-  const keys = ids.map(existing);
+  // Keys from peers that aren't well formed get fresh ones.
+  const keys = ids.map((id) => {
+    const k = existing(id);
+    return typeof k === 'string' && isKey(k) ? k : undefined;
+  });
   // Longest strictly increasing run of existing keys.
   const tails: number[] = [];
   const prev = new Array<number>(ids.length).fill(-1);

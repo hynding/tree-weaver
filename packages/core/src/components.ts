@@ -2,6 +2,7 @@ import { cloneNode, createId } from './create';
 import { DISPLAY_IDS, getDisplay, resolveStyles } from './displays';
 import type { Branch, DisplayId, DisplayStyles, Forest, StyleMap, Tree, TreeNode } from './model';
 import { isBranch } from './model';
+import { isSvgOnly } from './svg';
 
 /**
  * Reusable components: a branch saved once in the forest, with props and variants, and used
@@ -342,7 +343,9 @@ export function componentAsTree(def: ComponentDef, variant?: string | null): Tre
   return {
     id: componentTreeId(def.id),
     name: def.name,
-    root: { kind: 'branch', id: `${BODY_PREFIX}${def.id}`, tag: 'body', type: 'root', name: def.name, classes: [], attrs: {}, styles: {}, children: [withVariant(def, variant)] },
+    // An SVG-only template (a `<g>`, a shape group) is edited inside an `<svg>`, so it is drawn and
+    // the SVG placement rules apply to it.
+    root: { kind: 'branch', id: `${BODY_PREFIX}${def.id}`, tag: isSvgOnly(def.root) ? 'svg' : 'body', type: 'root', name: def.name, classes: [], attrs: {}, styles: {}, children: [withVariant(def, variant)] },
     createdAt: ts,
     updatedAt: ts,
   };

@@ -67,6 +67,7 @@ import {
   findComponent,
   findTree,
   instancesOf,
+  instanceRoleIn,
   instantiateComponent,
   isComponentTreeId,
   updateComponent,
@@ -632,6 +633,10 @@ export function saveAsComponent(branchId: string, name: string): ComponentDef | 
   if (!forest || !tree || isComponentTreeId(tree.id)) return null;
   const node = findNode(tree.root, branchId);
   if (!node || !isBranch(node)) return null;
+  if (instanceRoleIn(tree.root, node.id) === 'inside') {
+    toast('This branch is part of a component instance. Edit the component, or detach the instance first.', 'error');
+    return null;
+  }
   // The branch itself becomes an instance, so it follows the component from now on.
   const saved = saveComponent(forest, tree.id, node.id, name);
   if (!saved) return null;

@@ -194,7 +194,7 @@ describe('markdown', () => {
     expect(md).toContain('# Welcome');
     expect(md).toContain('## One');
     expect(md).toContain('Read the **docs** or [visit us](https://example.com/a?b=1&c=2)');
-    expect(md).toContain('1 \\* 2 &amp; \\<tags\\>');
+    expect(md).toContain('1 \\* 2 &amp; &lt;tags&gt;');
     expect(md).toContain('![A cat](https://example.com/cat.png)');
     expect(md).toContain('- First\n- Second\n  1. Nested');
     expect(md).toContain('| Heading 1 | Heading 2 |\n| --- | --- |');

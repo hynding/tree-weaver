@@ -7,6 +7,7 @@ import {
   applyPatch,
   idsOutside,
   insertionProblem,
+  instanceRoleIn,
   saveComponent,
   findComponent,
   instantiateComponent,
@@ -1068,6 +1069,7 @@ async function cmdComponents(cli: Cli, args: string[]): Promise<number> {
       const tree = pickTree(cli, doc, values.tree, '');
       const { node } = resolveRef(tree.root, ref);
       if (!isBranch(node)) throw new Error(`"${ref}" is a leaf; save a branch`);
+      if (instanceRoleIn(tree.root, node.id) === 'inside') throw new Error(`"${ref}" is inside a component instance; edit the component, or detach the instance first`);
       const saved = saveComponent({ ...doc.forest, updatedAt: now() }, tree.id, node.id, values.name ?? node.name ?? 'Component');
       if (!saved) throw new Error(`Could not save "${ref}"`);
       const { forest, component: def } = saved;

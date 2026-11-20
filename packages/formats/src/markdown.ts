@@ -57,7 +57,13 @@ function metaOf(b: Branch, allowedAttrs: Set<string> = new Set()): Record<string
 const isInlineNode = (n: TreeNode): boolean => (isBranch(n) ? INLINE_TAGS.has(n.tag) : n.type !== 'shape');
 
 export function escapeMarkdown(text: string, atLineStart = false): string {
-  let out = text.replace(/\\/g, '\\\\').replace(/&/g, '&amp;').replace(/([`*_[\]<>|~])/g, '\\$1');
+  // Brackets and angle brackets as entities: a backslash escape can be taken apart (a link that
+  // fails to parse, an autolink swallowing the backslash), an entity is always literal text.
+  let out = text
+    .replace(/\\/g, '\\\\')
+    .replace(/&/g, '&amp;')
+    .replace(/[[\]<>]/g, (c) => ({ '[': '&#91;', ']': '&#93;', '<': '&lt;', '>': '&gt;' })[c] as string)
+    .replace(/([`*_|~])/g, '\\$1');
   if (atLineStart) out = out.replace(/^(\s*)([#+-])/, '$1\\$2').replace(/^(\s*)(\d+)([.)])/, '$1$2\\$3');
   // A `!` right before a link would turn it into an image.
   out = out.replace(/!$/, '\\!');
@@ -75,7 +81,8 @@ let inTable = false;
 const escapeUrl = (url: string): string =>
   url.replace(inTable ? /[ <>\t\n\r|]/g : /[ <>\t\n\r]/g, (c) => encodeURIComponent(c)).replace(/[\\()]/g, '\\$&');
 /** A one-line title, quoted: a line break would end the paragraph, and a backslash could escape the closing quote. */
-const titleOf = (title: string | undefined): string => (title ? ` "${oneLine(title).replace(inTable ? /[\\"|]/g : /[\\"]/g, '\\$&')}"` : '');
+// Every ASCII punctuation mark is backslash-escaped, so nothing in a title reads as Markdown.
+const titleOf = (title: string | undefined): string => (title ? ` "${oneLine(title).replace(/[!-/:-@[-`{-~]/g, '\\$&')}"` : '');
 const oneLine = (text: string): string => text.replace(/\s*[\n\r]\s*/g, ' ');
 /**
  * Inline HTML on one line (a blank line inside it would end the paragraph and start a new block),
@@ -109,7 +116,11 @@ function inline(node: TreeNode, first: boolean): string {
   }
   // A script link is dropped, as in every other export; its text stays.
   if (tag === 'a' && node.attrs.href !== undefined && !safeUrl('href', node.attrs.href)) return content();
-  if (tag === 'a' && !needsMeta(node, LINK_ATTRS) && node.attrs.href !== undefined) {
+  // A link inside a link has no Markdown form.
+  const nestsLink = node.children.some(function has(c: TreeNode): boolean {
+    return isBranch(c) && (c.tag === 'a' || c.children.some(has));
+  });
+  if (tag === 'a' && !needsMeta(node, LINK_ATTRS) && node.attrs.href !== undefined && !nestsLink) {
     return `[${content()}](${escapeUrl(node.attrs.href)}${titleOf(node.attrs.title)})`;
   }
   if (tag === 'br' && !needsMeta(node)) return '<br>';
@@ -297,8 +308,11 @@ export function exportMarkdown(tree: Tree, opts: MarkdownExportOptions = {}): st
   const body = blocks(isSvgRoot(tree.root) ? [tree.root] : tree.root.children).join('\n\n');
   // Renderers without front matter show it as text, where HTML in a name or CSS would be live:
   // then every string is double-quoted with `<` escaped (YAML reads `\x3C` back as `<`).
+  // Only inside strings: an empty list is written `[]`.
   let yaml = stringifyYaml(front, { lineWidth: 0 });
-  if (yaml.includes('<')) yaml = stringifyYaml(front, { lineWidth: 0, defaultStringType: 'QUOTE_DOUBLE', defaultKeyType: 'QUOTE_DOUBLE' }).replace(/</g, '\\x3C');
+  // Link syntax too: front matter shown as Markdown would make `[x](javascript:…)` a live link.
+  if (/[<[\]`]/.test(yaml))
+    yaml = stringifyYaml(front, { lineWidth: 0, defaultStringType: 'QUOTE_DOUBLE', defaultKeyType: 'QUOTE_DOUBLE' }).replace(/"(?:[^"\\]|\\.)*"/g, (q) => q.replace(/[<[\]`]/g, (c) => `\\x${c.charCodeAt(0).toString(16).toUpperCase()}`));
   return `---\n${yaml}---\n\n${body}\n`;
 }
 

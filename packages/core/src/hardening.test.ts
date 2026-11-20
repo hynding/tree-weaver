@@ -284,3 +284,21 @@ describe('pass 10 fixes', () => {
     expect(insertionProblem(root, root.id, instantiateComponent(card))).toBeNull();
   });
 });
+
+describe('pass 11 fixes', () => {
+  it('reports style values that rendering would drop', () => {
+    const doc = { kind: 'branch', tag: 'body', children: [{ tag: 'div', styles: { lg: { 'grid-template-columns': 'repeat(3, minmax(0, 1fr)' } } }] };
+    const result = validateDocument(doc);
+    expect(result.valid).toBe(false);
+    expect(result.errors[0].message).toMatch(/unbalanced/);
+  });
+
+  it('edits an SVG-only component template inside an <svg>', async () => {
+    const { createComponent, componentAsTree, placementProblem, createShape } = await import('./index');
+    const g = createComponent('Group', createBranch({ tag: 'g' }));
+    const tree = componentAsTree(g);
+    expect(tree.root.tag).toBe('svg');
+    expect(placementProblem(tree.root, g.root.id, createShape('rect'))).toBeNull();
+    expect(placementProblem(tree.root, g.root.id, createBranch({ tag: 'div' }))).toMatch(/inside an SVG/);
+  });
+});

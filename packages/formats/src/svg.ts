@@ -1,4 +1,5 @@
 import {
+  CONTROL_CHARS,
   createId,
   isBranch,
   isSvgRoot,
@@ -64,7 +65,9 @@ export function exportSvg(tree: Tree, opts: SvgExportOptions = {}): string {
   const marks = ` data-tw-tree-name="${xmlAttr(tree.name)}"${svg.attrs.xmlns === undefined ? ' data-tw-added-xmlns=""' : ''}`;
   const markup = renderNodeHtml(svg, { pretty: true, xml: true, designer: true }).replace(/^<svg\b/, `$&${marks}`);
   const body = styles.length ? markup.replace(/^(<svg\b[^>]*>)/, `$1\n  ${styles.join('\n  ')}`) : markup;
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<!-- ${tree.name.replace(/-(?=-)/g, '- ')} · made with Tree Weaver -->\n${body}\n`;
+  const out = `<?xml version="1.0" encoding="UTF-8"?>\n<!-- ${tree.name.replace(/-(?=-)/g, '- ')} · made with Tree Weaver -->\n${body}\n`;
+  // XML 1.0 can't hold these even as references.
+  return out.replace(CONTROL_CHARS, '');
 }
 
 /* ----------------------------------------------------------------- import */

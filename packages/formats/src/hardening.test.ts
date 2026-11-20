@@ -385,3 +385,36 @@ describe('pass 10 fixes', () => {
     expect(out).toContain('href="https://e.com"');
   });
 });
+
+describe('pass 11 fixes', () => {
+  it('checks URL attributes under the names JSX gives them', () => {
+    const doc = importDocument('<a h-ref="javascript:alert(1)">click</a><button form-action="javascript:alert(2)">go</button><svg><a xlink-href="javascript:alert(3)"><circle r="1"/></a></svg>', 'html');
+    if (doc.kind !== 'tree') throw new Error('expected a tree');
+    const out = exportComponent(doc.tree, { framework: 'react' }).files.map((f) => f.contents).join('\n');
+    expect(out).not.toMatch(/javascript/);
+  });
+
+  it('keeps link-like link text and titles from breaking out of Markdown', () => {
+    const a = createBranch({ tag: 'a', attrs: { href: 'https://example.com/', title: '[click](javascript:alert(1))' }, children: [text('[x](j)')] });
+    const tree = page([createBranch({ tag: 'p', children: [a, text('<img src=x onerror=alert(1)//>')] })]);
+    const back = importDocument(exportTree(tree, 'markdown'), 'markdown');
+    if (back.kind !== 'tree') throw new Error('expected a tree');
+    const p = back.tree.root.children[0] as Branch;
+    expect(p.children[0]).toMatchObject({ tag: 'a', attrs: { href: 'https://example.com/', title: '[click](javascript:alert(1))' } });
+    expect(JSON.stringify(p)).not.toContain('"type":"image"');
+  });
+
+  it('escapes link syntax in front matter, which reads back unchanged', () => {
+    const tree = createTree('[click me](javascript:alert(1))', createBranch({ tag: 'body', type: 'root', children: [createBranch({ tag: 'p', children: [text('hi')] })] }));
+    const md = exportTree(tree, 'markdown');
+    expect(md.split('---')[1]).not.toMatch(/\[click/);
+    const back = importDocument(md, 'markdown');
+    expect(back.kind === 'tree' && back.tree.name).toBe('[click me](javascript:alert(1))');
+  });
+
+  it('writes well-formed XML and SVG when text holds control characters', () => {
+    const tree = createTree('T', createBranch({ tag: 'svg', type: 'root', children: [createBranch({ tag: 'text', children: [text('line one\u000bline two')] })] }));
+    expect(exportTree(tree, 'svg')).not.toMatch(/\u000b/);
+    expect(exportTree(tree, 'xml')).not.toMatch(/\u000b/);
+  });
+});

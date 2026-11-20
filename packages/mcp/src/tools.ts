@@ -18,6 +18,7 @@ import {
   applyPatch,
   idsOutside,
   insertionProblem,
+  instanceRoleIn,
   findVersion,
   formatDiff,
   parseVersionLog,
@@ -573,6 +574,7 @@ export class Tools {
     const tree = pickTree(loaded.doc, args.tree);
     const { node } = resolveRef(tree.root, args.branch);
     if (!isBranch(node)) throw new ToolError(`"${args.branch}" is a leaf; save a branch`);
+    if (instanceRoleIn(tree.root, node.id) === 'inside') throw new ToolError(`"${args.branch}" is inside a component instance; edit the component, or detach the instance first`);
     const saved = saveComponent({ ...forest, updatedAt: new Date().toISOString() }, tree.id, node.id, args.name ?? node.name ?? 'Component', args.description ? { description: args.description } : {});
     if (!saved) throw new ToolError(`Could not find "${args.branch}" in "${tree.name}"`);
     const def = saved.component;

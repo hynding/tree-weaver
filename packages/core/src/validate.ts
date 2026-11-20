@@ -1,7 +1,7 @@
 import { DISPLAY_IDS, isDisplayId } from './displays';
 import { SCHEMA_VERSION } from './model';
 import { VOID_TAGS } from './ops';
-import { isSafeAttr, isSafeCssProp } from './render';
+import { isSafeAttr, isSafeCssProp, sanitizeCssValue } from './render';
 import { BLOCKED_TAGS } from './schema';
 import { canonicalTag, childrenInSvg, isShapeTag, isSvgBranchTag, isSvgOnlyTag, SHAPES } from './svg';
 
@@ -395,6 +395,10 @@ class Checker {
         this.warn(at, 'Braces and semicolons are stripped from CSS values', 'Give one value per property, without a trailing ";"');
       } else if (v.trim() === '') {
         this.warn(at, 'Empty value; the declaration is skipped');
+      } else if (sanitizeCssValue(v) === '') {
+        this.error(at, `"${v}" has unbalanced brackets or quotes, so it is dropped when rendered`, 'Close every (, [ and quote');
+      } else if (/<\/?(style|script)|\/\*|\*\//i.test(v)) {
+        this.warn(at, 'Comment markers and style or script tags are stripped from CSS values');
       }
     }
   }

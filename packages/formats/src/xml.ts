@@ -1,5 +1,5 @@
 import type { DesignKit, Forest, Tree, TreeNode } from '@tree-weaver/core';
-import { DISPLAY_IDS } from '@tree-weaver/core';
+import { CONTROL_CHARS, DISPLAY_IDS } from '@tree-weaver/core';
 import type { Element } from 'domhandler';
 import { parseDocument } from 'htmlparser2';
 import { fromData } from './data';
@@ -102,7 +102,8 @@ export function exportXml(doc: TreeDocument): string {
     lines.push(...kitsXml(doc.kits, '  '), ...treeXml(doc.tree, '  '));
   }
   lines.push('</tree-weaver>', '');
-  return lines.join('\n');
+  // XML 1.0 can't hold these even as references; import drops them from every format.
+  return lines.join('\n').replace(CONTROL_CHARS, '');
 }
 
 /* ----------------------------------------------------------------- import */
