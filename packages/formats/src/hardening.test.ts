@@ -1462,3 +1462,45 @@ describe('pass 44 fixes', () => {
     expect(JSON.stringify(importDocument(xml, 'xml'))).toContain('if (a < b) {}');
   });
 });
+
+describe('pass 45 fixes', () => {
+  const textOf = (doc: ReturnType<typeof importDocument>) => JSON.stringify(doc.kind === 'tree' ? doc.tree : doc.forest);
+
+  it('keeps whitespace that white-space-collapse, "preserve" or a kit class keeps', () => {
+    const kits = [createKit('Mono', '.mono { white-space: pre }')];
+    const a = createBranch({ tag: 'div', styles: { lg: { 'white-space-collapse': 'preserve' } }, children: [text('line1\n    indented')] });
+    const b = createBranch({ tag: 'div', styles: { lg: { 'white-space': 'preserve nowrap' } }, children: [text('a\n  b')] });
+    const c = createBranch({ tag: 'div', classes: ['mono'], children: [text('c\n    d')] });
+    const tree = page([a, b, c]);
+    for (const format of ['html', 'markdown'] as const) {
+      const back = textOf(importDocument(exportTree(tree, format, kits), format));
+      expect(back, format).toContain('line1\\n    indented');
+      expect(back, format).toContain('a\\n  b');
+      expect(back, format).toContain('c\\n    d');
+    }
+    const vue = exportComponent(tree, { framework: 'vue', kits }).files[0].contents;
+    expect(vue).toContain('"c\\n    d"');
+  });
+
+  it('names the component stylesheet apart from kits.css and base.css', () => {
+    const kits = [createKit('K', '.x { color: red }')];
+    for (const name of ['Kits', 'Base']) {
+      const tree = { ...page([createBranch({ tag: 'p', styles: { lg: { color: 'red' } }, children: [text('x')] })]), name };
+      for (const framework of ['react', 'html'] as const) {
+        const paths = exportComponent(tree, { framework, kits }).files.map((f) => f.path.toLowerCase());
+        expect(new Set(paths).size, `${name} ${framework}`).toBe(paths.length);
+      }
+    }
+  });
+
+  it('writes ismap as a string in React', () => {
+    const tree = page([createBranch({ tag: 'img', attrs: { src: 'https://x/a.png', ismap: '' } })]);
+    expect(exportComponent(tree, { framework: 'react' }).files[0].contents).toContain('ismap=""');
+  });
+
+  it('keeps every space inside a quoted string in Tailwind brackets', () => {
+    const tree = page([createBranch({ tag: 'ul', styles: { lg: { 'list-style-type': '"a  b"' } }, children: [] })]);
+    const jsx = exportComponent(tree, { framework: 'react', styling: 'tailwind' }).files[0].contents;
+    expect(jsx).toContain("'a__b'");
+  });
+});

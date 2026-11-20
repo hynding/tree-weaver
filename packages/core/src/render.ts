@@ -205,6 +205,8 @@ export interface HtmlOptions {
   inForeign?: boolean;
   /** Set while rendering MathML content outside its text points (`<mi>`, `<mtext>` …), where an HTML <span> would end the formula. */
   inMath?: boolean;
+  /** Classes the design kits make keep their whitespace (see `whitespaceClasses`); such branches aren't pretty printed. */
+  keepClasses?: ReadonlySet<string>;
 }
 
 const XHTML = ' xmlns="http://www.w3.org/1999/xhtml"';
@@ -258,13 +260,50 @@ function renderLeaf(leaf: Leaf, opts: HtmlOptions): string {
   return opts.inSvg ? `<tspan ${LEAF_ATTR}="${escapeAttr(leaf.id)}">${content}</tspan>` : `<span${opts.inForeign ? XHTML : ''} ${LEAF_ATTR}="${escapeAttr(leaf.id)}">${content}</span>`;
 }
 
+/** Whether a declaration shows whitespace as written (`white-space: pre`, `white-space-collapse: preserve` …). */
+export function keepsWhitespaceDecl(prop: string, value: string | undefined): boolean {
+  const p = prop.trim().toLowerCase();
+  if (p === 'white-space') return /^\s*(pre|pre-wrap|pre-line|break-spaces|preserve)\b/i.test(value ?? '') || /\b(preserve|break-spaces)\b/i.test(value ?? '');
+  if (p === 'white-space-collapse') return /^\s*(preserve|preserve-breaks|preserve-spaces|break-spaces)\b/i.test(value ?? '');
+  return false;
+}
+
 /**
- * Whether a branch shows its whitespace as written: a `<pre>` or `<textarea>`, or `white-space:
- * pre`, `pre-wrap`, `pre-line` or `break-spaces` on any display. Pretty printing would add to it.
+ * Classes that design kits make keep their whitespace: a rule whose selector ends in a plain
+ * class (`.mono`, `pre.code`, `.card .mono`) and sets `white-space: pre` or the like.
  */
-export function keepsWhitespace(node: Branch): boolean {
+export function whitespaceClasses(kits: readonly { css?: string; enabled?: boolean }[] = []): Set<string> {
+  const out = new Set<string>();
+  for (const kit of kits) {
+    if (kit.enabled === false || !kit.css) continue;
+    const css = kit.css.replace(/\/\*[\s\S]*?\*\//g, '');
+    for (const m of css.matchAll(/([^{};]+)\{([^{}]*)\}/g)) {
+      const keeps = m[2].split(';').some((d) => {
+        const i = d.indexOf(':');
+        return i > 0 && keepsWhitespaceDecl(d.slice(0, i), d.slice(i + 1).replace(/!important/i, ''));
+      });
+      if (!keeps) continue;
+      for (const sel of m[1].split(',')) {
+        const last = sel.trim().split(/[\s>+~]+/).pop() ?? '';
+        if (last.includes(':') || last.includes('[')) continue;
+        for (const c of last.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)) out.add(c[1]);
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Whether a branch shows its whitespace as written: a `<pre>` or `<textarea>`, a declaration such
+ * as `white-space: pre` or `white-space-collapse: preserve` on any display, or one of
+ * `keepClasses` (from `whitespaceClasses`). Pretty printing would add to it.
+ */
+export function keepsWhitespace(node: Pick<Branch, 'tag' | 'styles'> & { classes?: readonly string[] | string }, keepClasses?: ReadonlySet<string>): boolean {
   if (/^(pre|textarea|listing|xmp|plaintext)$/i.test(node.tag)) return true;
-  return Object.values(node.styles ?? {}).some((map) => /^\s*(pre|pre-wrap|pre-line|break-spaces)\b/i.test(map?.['white-space'] ?? ''));
+  if (Object.values(node.styles ?? {}).some((map) => Object.entries(map ?? {}).some(([p, v]) => keepsWhitespaceDecl(p, v)))) return true;
+  if (!keepClasses?.size || !node.classes) return false;
+  const classes = typeof node.classes === 'string' ? node.classes.split(/\s+/) : node.classes;
+  return classes.some((c) => keepClasses.has(c));
 }
 
 /** Whether a branch's own styles make it `inline`, `inline-block`, `inline-flex` … on any display. */
@@ -284,7 +323,7 @@ export function renderNodeHtml(node: TreeNode, opts: HtmlOptions = {}, depth = 0
   const open = `<${tag}${svgRoot} ${renderAttrs(node, opts.xml)}>`;
   if (VOID_TAGS.has(tag) && !opts.inSvg) return opts.xml ? `${open.slice(0, -1)}/>` : open;
   if (!node.children.length) return `${open}</${tag}>`;
-  const keep = keepsWhitespace(node);
+  const keep = keepsWhitespace(node, opts.keepClasses);
   // Text in a <textarea> or <title> isn't markup, so the designer's leaf spans would show as text.
   const rawText = !opts.inSvg && /^(textarea|title)$/i.test(tag);
   const lower = tag.toLowerCase();
@@ -310,8 +349,8 @@ export function renderNodeHtml(node: TreeNode, opts: HtmlOptions = {}, depth = 0
 export function renderTreeBody(root: Branch, opts: HtmlOptions = {}): string {
   if (isSvgRoot(root)) return renderNodeHtml(root, opts, opts.pretty ? 1 : 0);
   // Line breaks between inline children would show as spaces, as inside any other branch.
-  const pretty = opts.pretty && !keepsWhitespace(root) && !root.children.some((c) => isInline(c) || (isBranch(c) && hasInlineDisplay(c)));
-  const inner = { ...opts, pretty: opts.pretty && !keepsWhitespace(root) };
+  const pretty = opts.pretty && !keepsWhitespace(root, opts.keepClasses) && !root.children.some((c) => isInline(c) || (isBranch(c) && hasInlineDisplay(c)));
+  const inner = { ...opts, pretty: opts.pretty && !keepsWhitespace(root, opts.keepClasses) };
   return root.children.map((c) => renderNodeHtml(c, inner, opts.pretty ? 1 : 0)).join(pretty ? '\n  ' : '');
 }
 
@@ -341,7 +380,8 @@ export function renderDocument(tree: Tree, opts: DocumentOptions = {}): string {
       return `<style ${attrs}>\n${styleText(k.css)}\n</style>`;
     })
     .join('\n');
-  const body = renderTreeBody(tree.root, { ...opts, pretty: opts.pretty ?? true });
+  const keepClasses = whitespaceClasses(kits);
+  const body = renderTreeBody(tree.root, { ...opts, keepClasses, pretty: opts.pretty ?? true });
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -357,7 +397,7 @@ ${kitStyles ? `${kitStyles}\n` : ''}<style data-tw-styles>
 ${styleText(renderTreeCss(tree.root))}
 </style>${opts.extraCss ? `\n<style>${styleText(opts.extraCss)}</style>` : ''}
 </head>
-<body${isSvgRoot(tree.root) ? '' : ` ${rootAttrs(tree.root)}`}>${!isSvgRoot(tree.root) && keepsWhitespace(tree.root) ? body : `\n  ${body}\n`}</body>
+<body${isSvgRoot(tree.root) ? '' : ` ${rootAttrs(tree.root)}`}>${!isSvgRoot(tree.root) && keepsWhitespace(tree.root, keepClasses) ? body : `\n  ${body}\n`}</body>
 </html>
 `;
 }

@@ -5,6 +5,7 @@ import {
   isSvgRoot,
   renderNodeHtml,
   keepsWhitespace,
+  whitespaceClasses,
   walk,
   type Branch,
   type DesignKit,
@@ -112,7 +113,7 @@ function inline(node: TreeNode, first: boolean): string {
   }
   const tag = node.tag;
   // Its whitespace shows, and Markdown would collapse it: HTML, with line breaks as references.
-  if (keepsWhitespace(node) && hasLineBreakOrRun(node)) return inlineHtml(renderNodeHtml(node));
+  if (keepsWhitespace(node, keepClasses) && hasLineBreakOrRun(node)) return inlineHtml(renderNodeHtml(node));
   const content = () => inlineList(node.children, false);
   if (Object.hasOwn(MARK_INLINE, tag) && !needsMeta(node) && node.children.length) {
     const mark = MARK_INLINE[tag];
@@ -376,7 +377,7 @@ function block(b: Branch): string {
   // Text whose whitespace shows (`<pre>`, `white-space: pre*`) as one line of HTML, its line breaks
   // as references: Markdown would join its lines and collapse its spaces. (A fenced code block
   // covers `pre > code` holding only text.) Only tags that start an HTML block mid-line qualify.
-  if (keepsWhitespace(b) && HTML_BLOCK_TAGS.has(b.tag) && !fencedCode(b)) return inlineHtml(renderNodeHtml(b));
+  if (keepsWhitespace(b, keepClasses) && HTML_BLOCK_TAGS.has(b.tag) && !fencedCode(b)) return inlineHtml(renderNodeHtml(b));
   const allInline = b.children.every(isInlineNode);
   const heading = HEADING.exec(b.tag);
   // A heading's text is trimmed of every kind of space when read, so edge non-breaking spaces are written as references.
@@ -416,6 +417,9 @@ function block(b: Branch): string {
   return container(b);
 }
 
+/** Classes the kits being exported make keep their whitespace; set while `exportMarkdown` runs. */
+let keepClasses: ReadonlySet<string> | undefined;
+
 export function exportMarkdown(tree: Tree, opts: MarkdownExportOptions = {}): string {
   const styles: Record<string, DisplayStyles> = {};
   walk(tree.root, (n) => {
@@ -428,7 +432,13 @@ export function exportMarkdown(tree: Tree, opts: MarkdownExportOptions = {}): st
   if (Object.keys(styles).length) front.styles = styles;
   if (opts.kits?.length) front.kits = opts.kits;
   // Markdown is a page format: an SVG tree's drawing goes in as inline SVG.
-  const body = blocks(isSvgRoot(tree.root) ? [tree.root] : tree.root.children).join('\n\n');
+  keepClasses = whitespaceClasses(opts.kits);
+  let body: string;
+  try {
+    body = blocks(isSvgRoot(tree.root) ? [tree.root] : tree.root.children).join('\n\n');
+  } finally {
+    keepClasses = undefined;
+  }
   // Renderers without front matter show it as text, where HTML in a name or CSS would be live:
   // then every string is double-quoted with `<` escaped (YAML reads `\x3C` back as `<`).
   // Only inside strings: an empty list is written `[]`.
@@ -468,7 +478,7 @@ export function importMarkdown(text: string): TreeDocument {
   if (data.styles && typeof data.styles === 'object') {
     for (const [id, s] of Object.entries(data.styles as Record<string, DisplayStyles>)) styles.set(id, s);
   }
-  const ctx: Ctx = { styles };
+  const ctx: Ctx = { styles, keepClasses: whitespaceClasses(Array.isArray(data.kits) ? (data.kits as { css?: string }[]) : []) };
   let root = convertParts('body', {}, dom.children, ctx, false);
   // An SVG tree comes back as its drawing: the one root SVG the body holds.
   const kids = root.children as Record<string, unknown>[];

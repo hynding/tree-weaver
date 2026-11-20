@@ -1,5 +1,6 @@
 import {
   keepsWhitespace,
+  whitespaceClasses,
   BRANCH_ATTR,
   canonicalSvgAttr,
   canonicalTag,
@@ -14,7 +15,6 @@ import {
   parseCss,
   parseDeclarations,
   renderDocument,
-  type Branch,
   type CssNode,
   type DesignKit,
   type DisplayId,
@@ -109,6 +109,8 @@ export interface Ctx {
   styles: Map<string, DisplayStyles>;
   /** Parsed as XML (a standalone .svg), which keeps whitespace the HTML parser drops. */
   xml?: boolean;
+  /** Classes the document's styles make keep their whitespace (see `whitespaceClasses`). */
+  keepClasses?: ReadonlySet<string>;
 }
 
 export type RawNode = Record<string, unknown>;
@@ -328,7 +330,7 @@ export function convertParts(tag: string, attribs: Record<string, string>, child
     attrs,
     styles,
     // An XML parse (a standalone .svg) keeps the newline after `<pre>`; only the HTML parser drops it.
-    children: (ctx.xml ? (_: string, c: RawNode[]) => c : dropLeadingNewline)(tag, impliedTbody(tag, convertChildren(children, ctx, raw || RAW_TEXT_TAGS.has(tag) || keepsWhitespace({ tag, styles } as Branch) || (inSvg && a['xml:space'] === 'preserve'), childrenInSvg({ tag }, svg), childrenInSvg({ tag }, svg) ? /^(text|tspan|textPath)$/.test(tag) : !svg && isInlineTag(tag)))),
+    children: (ctx.xml ? (_: string, c: RawNode[]) => c : dropLeadingNewline)(tag, impliedTbody(tag, convertChildren(children, ctx, raw || RAW_TEXT_TAGS.has(tag) || keepsWhitespace({ tag, styles, classes: a.class ?? '' }, ctx.keepClasses) || (inSvg && a['xml:space'] === 'preserve'), childrenInSvg({ tag }, svg), childrenInSvg({ tag }, svg) ? /^(text|tspan|textPath)$/.test(tag) : !svg && isInlineTag(tag)))),
   };
 }
 
@@ -441,7 +443,7 @@ export function importHtml(text: string): TreeDocument {
   // Named after the page once the title is known.
   for (const k of kits) if (title && (k as { source?: string; name?: string }).source === 'html' && (k as { name?: string }).name === 'Imported styles') (k as { name: string }).name = `${title} styles`;
 
-  const ctx: Ctx = { styles };
+  const ctx: Ctx = { styles, keepClasses: whitespaceClasses(kits as { css?: string }[]) };
   // An exported SVG tree: the body holds just the drawing, which is the tree's root.
   const drawing = body && body.attribs[BRANCH_ATTR] === undefined ? soleSvgRoot(body) : undefined;
   if (drawing) {

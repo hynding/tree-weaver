@@ -691,3 +691,14 @@ describe('pass 44 fixes', async () => {
     expect(() => add('span')).not.toThrow();
   });
 });
+
+describe('pass 45 fixes', async () => {
+  const core = await import('./index');
+  it('finds kit classes that keep whitespace, and the newer white-space forms', () => {
+    const kits = [{ css: '/* x */ .mono { white-space: pre } .a .wrap{white-space-collapse:preserve} .x:hover{white-space:pre} .n{white-space:nowrap}', enabled: true }];
+    expect([...core.whitespaceClasses(kits)].sort()).toEqual(['mono', 'wrap']);
+    expect(core.keepsWhitespace({ tag: 'div', styles: { lg: { 'white-space': 'preserve nowrap' } } })).toBe(true);
+    expect(core.keepsWhitespace({ tag: 'div', styles: { lg: { 'white-space': 'nowrap' } } })).toBe(false);
+    expect(core.keepsWhitespace({ tag: 'div', styles: {}, classes: ['mono'] }, new Set(['mono']))).toBe(true);
+  });
+});

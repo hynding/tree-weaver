@@ -13,7 +13,7 @@ import { createRecordStore, type RecordStore } from '@tree-weaver/storage';
 import { ENV_STORYBOOK_INCLUDE, ENV_STORYBOOK_URLS, STORYBOOK_IMPORT_ENABLED } from '../config';
 import { isSameOrigin, loadCatalog, snapshotStories, storybookBase } from '../utils/storybook';
 import { removeUploadedStorybook } from '../utils/storybook-upload';
-import { addTreesWithKits, insertWithKits, setDisplaySizes, toast, type DropPosition } from './actions';
+import { addTreesWithKits, forestsMention, insertWithKits, setDisplaySizes, toast, type DropPosition } from './actions';
 import { state, type StorybookLibrary } from './editor';
 
 /**
@@ -183,8 +183,10 @@ export function insertLibraryBranch(libraryId: string, storyId: string, targetId
 export async function removeLibrary(id: string): Promise<void> {
   const lib = state.libraries.find((l) => l.id === id);
   await (await libraryStore()).remove(id);
-  // An uploaded Storybook's files go too; branches already in trees keep working (their styles were copied).
-  if (lib?.uploaded) await removeUploadedStorybook(lib.source).catch((err) => console.warn(err));
+  // An uploaded Storybook's files go too, unless a forest still uses them (its images and
+  // `url()` assets are served from there).
+  if (lib?.uploaded && !(await forestsMention(new URL(lib.source, location.href).pathname).catch(() => true)))
+    await removeUploadedStorybook(lib.source).catch((err) => console.warn(err));
   state.libraries = state.libraries.filter((l) => l.id !== id);
 }
 
