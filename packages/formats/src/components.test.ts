@@ -38,7 +38,7 @@ describe('exportComponent', () => {
     expect(jsx).toContain(`import './kits.css';`);
     expect(jsx).toContain(`import './LandingPage.css';`);
     expect(jsx).toContain('export default function LandingPage()');
-    expect(jsx).toContain('<div className="landing-page">');
+    expect(jsx).toContain('<div className="landing-page__root">');
     expect(jsx).toContain('className="landing-page__hero"');
     expect(jsx).toContain('className="landing-page__card-2"');
     expect(jsx).toContain('htmlFor="email"');
@@ -99,7 +99,7 @@ describe('exportComponent', () => {
     const tree = pageTree('3 columns', [createBranch({ tag: 'div', styles: { lg: { gap: '1rem' } } })]);
     const out = exportComponent(tree, { framework: 'react' });
     expect(out.name).toBe('Layout3Columns');
-    expect(file(out, 'Layout3Columns.jsx')).toContain('className="layout-3-columns"');
+    expect(file(out, 'Layout3Columns.jsx')).toContain('className="layout-3-columns__root"');
     expect(file(out, 'Layout3Columns.css')).toContain('.layout-3-columns__div {');
   });
 

@@ -92,7 +92,7 @@ import {
   type FormatId,
   type TreeDocument,
 } from '@tree-weaver/formats';
-import { createEnvKits, createStarterKit, fetchKitCss, isEnvKit } from '@tree-weaver/kits';
+import { createEnvKits, createStarterKit, fetchKitCss, isEnvKit, kitClasses } from '@tree-weaver/kits';
 import { DISPLAYS_LOCKED, ENV_CSS_URLS, ENV_DISPLAYS } from '../config';
 import { createForestStore, MemoryForestStore, Preferences, type ForestStore } from '@tree-weaver/storage';
 import { isEmbedded } from './embed-flags';
@@ -1055,8 +1055,25 @@ export function extractClass(branchId: string, className: string): void {
   const tree = currentTree();
   const node = tree ? findNode(tree.root, branchId) : null;
   if (!forest || !tree || !isBranch(node)) return;
-  if (instanceRoleIn(tree.root, branchId) === 'inside') {
-    toast(INSIDE_INSTANCE, 'error');
+  // An instance (its root too) is redrawn from its component, which would undo the change.
+  const role = instanceRoleIn(tree.root, branchId);
+  if (role === 'inside' || role === 'root') {
+    toast(role === 'inside' ? INSIDE_INSTANCE : 'This is a component instance: edit the component to save its styles as a class', 'error');
+    return;
+  }
+  // A class a kit defines, or another branch already wears, would pick up these styles too.
+  const inUse =
+    kitClasses(allKits()).includes(className) ||
+    [...forest.trees.map((t) => t.root), ...(forest.components ?? []).map((c) => c.root)].some((root) => {
+      let found = false;
+      walk(root, (n) => {
+        if (found) return false;
+        if (isBranch(n) && n.id !== branchId && n.classes.includes(className)) found = true;
+      });
+      return found;
+    });
+  if (inUse) {
+    toast(`“.${className}” is already used, so these styles would restyle everything with it. Pick another name.`, 'error');
     return;
   }
   // A variant view shows base and variant styles merged; moving those into a class would lose the base.

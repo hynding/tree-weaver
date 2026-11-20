@@ -72,6 +72,9 @@ Common keyword values map to named utilities (`display: flex` → `flex`, `text-
 (`[border:1px_solid]`). Tailwind orders arbitrary properties by name, so when a branch sets a
 shorthand and then a longhand it covers (`border`, then `border-top`), the longhand gets more
 specificity (`[&&]:[border-top:2px_solid_red]`) to keep winning, as it does in CSS.
+With Tailwind, `kits.css` puts the design kits in the `components` cascade layer, below Tailwind's
+utilities, so a branch's own styles override its kit classes. In v3, whose utilities aren't in a
+layer, add the kit CSS to your Tailwind input after `@tailwind components` instead.
 This needs Tailwind CSS v3.4 or later (for `max-*` variants), or v4. Make sure Tailwind scans the
 exported files. If the forest's display settings use other breakpoints, the variants follow them.
 

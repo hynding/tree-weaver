@@ -909,3 +909,33 @@ describe('pass 23 fixes', () => {
     expect(exportComponent(tree, { framework: 'svelte' }).files[0].contents).toMatch(/<tbody[^>]*>\s*<tr[^>]*>\s*<td[^>]*>\s*<p/);
   });
 });
+
+describe('pass 24 fixes', () => {
+  it('puts kits in the components layer for Tailwind', () => {
+    const tree = page([createBranch({ tag: 'article', classes: ['card'], styles: { lg: { padding: '2px' } } })]);
+    const out = exportComponent(tree, { framework: 'react', styling: 'tailwind', kits: [createKit('Basic', '.card { padding: 24px }'), { ...createKit('Remote', ''), href: 'https://cdn.example.com/k.css' }] });
+    const kits = out.files.find((f) => f.path === 'kits.css')!.contents;
+    expect(kits).toContain('@layer theme, base, components, utilities;');
+    expect(kits).toContain('@import url("https://cdn.example.com/k.css") layer(components);');
+    expect(kits).toMatch(/@import url\("\.\/kits\/basic\.css"\) layer\(components\);/);
+    const css = exportComponent(tree, { framework: 'react', kits: [createKit('Basic', '.card { padding: 24px }')] }).files.find((f) => f.path === 'kits.css')!.contents;
+    expect(css).not.toContain('@layer');
+  });
+
+  it('namespaces the wrapper class', () => {
+    const tree = createTree('Hidden', createBranch({ tag: 'body', type: 'root', children: [createBranch({ tag: 'p', children: [text('x')] })] }));
+    expect(exportComponent(tree, { framework: 'react', styling: 'tailwind' }).files[0].contents).toContain('className="hidden__root"');
+  });
+
+  it('keeps code indentation and list numbering in native exports', () => {
+    const tree = page([
+      createBranch({ tag: 'pre', children: [createBranch({ tag: 'code', children: [text('if (x) {\n    return 1;\n}\n')] })] }),
+      createBranch({ tag: 'ol', attrs: { start: '5' }, children: [createBranch({ tag: 'li', children: [text('Five')] }), createBranch({ tag: 'li', children: [text('Six')] })] }),
+    ]);
+    const swift = exportComponent(tree, { framework: 'swiftui' }).files[0].contents;
+    expect(swift).toContain('if (x) {\\n    return 1;\\n}"');
+    expect(swift).toContain('Text(verbatim: "6.")');
+    const dart = exportComponent(tree, { framework: 'flutter' }).files[0].contents;
+    expect(dart).toContain("Text('5. ')");
+  });
+});

@@ -3,6 +3,7 @@ import {
   isBranch,
   isSafeAttr,
   isSvgRoot,
+  keepsWhitespace,
   parseAutoColumns,
   parseColor,
   parseRulesCss,
@@ -180,7 +181,7 @@ type NView =
   | { kind: 'divider' }
   | { kind: 'field'; placeholder: string; multiline: boolean; look: Tiered<Look> }
   | { kind: 'box'; layout: Tiered<Layout>; children: NView[]; look: Tiered<Look>; note?: string }
-  | { kind: 'list'; ordered: boolean; items: NView[]; look: Tiered<Look> }
+  | { kind: 'list'; ordered: boolean; items: NView[]; look: Tiered<Look>; /** The first number, and +1 or -1 (`reversed`). */ start: number; step: number }
   | { kind: 'table'; rows: { header: boolean; cells: NView[] }[]; look: Tiered<Look> }
   | { kind: 'placeholder'; note: string };
 
@@ -462,7 +463,10 @@ function toView(node: TreeNode, ctx: Ctx): NView | null {
     case 'ul':
     case 'ol': {
       const items = b.children.map((c) => toView(c, ctx)).filter((v): v is NView => !!v);
-      return { kind: 'list', ordered: b.tag === 'ol', items, look };
+      // `<ol start="5">` counts from 5, and `reversed` counts down (from the item count unless `start` is set).
+      const reversed = b.attrs.reversed !== undefined;
+      const given = /^\s*-?\d{1,9}\s*$/.test(b.attrs.start ?? '') ? Number(b.attrs.start) : null;
+      return { kind: 'list', ordered: b.tag === 'ol', items, look, start: given ?? (reversed ? items.length : 1), step: reversed ? -1 : 1 };
     }
     case 'table': {
       const rows: { header: boolean; cells: NView[] }[] = [];
@@ -480,7 +484,8 @@ function toView(node: TreeNode, ctx: Ctx): NView | null {
   const text = TEXT_BLOCKS.has(b.tag) || !b.children.some(isBranch) ? inlineText(b) : null;
   if (text !== null && (b.children.length > 0 || b.tag === 'button' || b.tag === 'a')) {
     const role: TextRole = (Object.hasOwn(HEADING, b.tag) && HEADING[b.tag]) || 'body';
-    const label = tidy(text) || b.attrs['aria-label'] || '';
+    // A code block (`<pre>`, `white-space: pre`) keeps its indentation; only a trailing newline goes.
+    const label = (keepsWhitespace(b) ? text.replace(/\r\n?/g, '\n').replace(/\n$/, '') : tidy(text)) || b.attrs['aria-label'] || '';
     if (!label && b.tag !== 'button' && b.tag !== 'a') return null;
     if (b.tag === 'a') return { kind: 'text', text: label, role, look, link: safeUrl(b.attrs.href) };
     if (b.tag === 'button') return { kind: 'text', text: label, role, look, button: true };
@@ -642,7 +647,7 @@ function swiftBody(v: NView, o: Out, d: number, fill: boolean): void {
       o.line(d, 'VStack(alignment: .leading, spacing: 4) {');
       v.items.forEach((item, i) => {
         o.line(d + 1, 'HStack(alignment: .firstTextBaseline, spacing: 8) {');
-        o.line(d + 2, `Text(verbatim: ${swiftString(v.ordered ? `${i + 1}.` : '•')})`);
+        o.line(d + 2, `Text(verbatim: ${swiftString(v.ordered ? `${v.start + v.step * i}.` : '•')})`);
         swiftView(item, o, d + 2, false);
         o.line(d + 1, '}');
       });
@@ -928,7 +933,7 @@ function dartView(v: NView, o: Out, d: number): void {
           const cond = dartShown(item);
           if (cond === 'false') return;
           o.line(dd + 2, `${cond ? `if (${cond}) ` : ''}Row(crossAxisAlignment: CrossAxisAlignment.start, children: [`);
-          o.line(dd + 3, `Text(${dartString(v.ordered ? `${i + 1}. ` : '•  ')}),`);
+          o.line(dd + 3, `Text(${dartString(v.ordered ? `${v.start + v.step * i}. ` : '•  ')}),`);
           o.line(dd + 3, 'Expanded(child:');
           dartView(item, o, dd + 4);
           o.line(dd + 3, '),');
