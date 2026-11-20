@@ -75,6 +75,9 @@ specificity (`[&&]:[border-top:2px_solid_red]`) to keep winning, as it does in C
 With Tailwind, `kits.css` puts the design kits in the `components` cascade layer, below Tailwind's
 utilities, so a branch's own styles override its kit classes. In v3, whose utilities aren't in a
 layer, add the kit CSS to your Tailwind input after `@tailwind components` instead.
+A kit class with the same name as a Tailwind utility (`container`, `hidden`, `table` …) gets
+Tailwind's rule too, which wins: Weaver Basic's `container` becomes Tailwind's stepped-width
+container. Rename such a class in your kit, or turn off that utility in your Tailwind config.
 This needs Tailwind CSS v3.4 or later (for `max-*` variants), or v4. Make sure Tailwind scans the
 exported files. If the forest's display settings use other breakpoints, the variants follow them.
 

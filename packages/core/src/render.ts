@@ -183,7 +183,11 @@ export interface HtmlOptions {
   xml?: boolean;
   /** Whether the node being rendered sits inside an `<svg>`. Set while rendering; callers rarely need it. */
   inSvg?: boolean;
+  /** Set while rendering XML for the direct children of a `<foreignObject>`, which need the XHTML namespace. */
+  inForeign?: boolean;
 }
+
+const XHTML = ' xmlns="http://www.w3.org/1999/xhtml"';
 
 function renderAttrs(branch: Branch, xml = false): string {
   const parts = [`${BRANCH_ATTR}="${escapeAttr(branch.id)}"`];
@@ -225,12 +229,12 @@ function renderLeaf(leaf: Leaf, opts: HtmlOptions): string {
       .join('');
     const src = isSafeAttr('src', leaf.value) ? leaf.value : '';
     const alt = leaf.attrs?.alt === undefined ? ' alt=""' : '';
-    return `<img ${LEAF_ATTR}="${escapeAttr(leaf.id)}" src="${escapeAttr(src)}"${alt}${attrs}>`;
+    return `<img${opts.inForeign && !opts.inSvg ? XHTML : ''} ${LEAF_ATTR}="${escapeAttr(leaf.id)}" src="${escapeAttr(src)}"${alt}${attrs}>`;
   }
   const content = escapeHtml(leaf.value);
   // Inside an SVG a <span> would end the drawing, so selectable text uses <tspan>.
   if (!opts.designer) return content;
-  return opts.inSvg ? `<tspan ${LEAF_ATTR}="${escapeAttr(leaf.id)}">${content}</tspan>` : `<span ${LEAF_ATTR}="${escapeAttr(leaf.id)}">${content}</span>`;
+  return opts.inSvg ? `<tspan ${LEAF_ATTR}="${escapeAttr(leaf.id)}">${content}</tspan>` : `<span${opts.inForeign ? XHTML : ''} ${LEAF_ATTR}="${escapeAttr(leaf.id)}">${content}</span>`;
 }
 
 /**
@@ -254,14 +258,15 @@ export function renderNodeHtml(node: TreeNode, opts: HtmlOptions = {}, depth = 0
   if (!isBranch(node)) return renderLeaf(node, opts);
   const tag = safeTag(node.tag);
   const inSvg = childrenInSvg(node, !!opts.inSvg);
-  const svgRoot = tag === 'svg' && !opts.inSvg && opts.xml && node.attrs.xmlns === undefined ? ` xmlns="${SVG_NAMESPACE}"` : '';
+  // In a standalone .svg, HTML in a <foreignObject> would otherwise take the SVG namespace and draw nothing.
+  const svgRoot = tag === 'svg' && !opts.inSvg && opts.xml && node.attrs.xmlns === undefined ? ` xmlns="${SVG_NAMESPACE}"` : opts.inForeign && !opts.inSvg && node.attrs.xmlns === undefined ? XHTML : '';
   const open = `<${tag}${svgRoot} ${renderAttrs(node, opts.xml)}>`;
   if (VOID_TAGS.has(tag) && !opts.inSvg) return opts.xml ? `${open.slice(0, -1)}/>` : open;
   if (!node.children.length) return `${open}</${tag}>`;
   const keep = keepsWhitespace(node);
   // Text in a <textarea> or <title> isn't markup, so the designer's leaf spans would show as text.
   const rawText = !opts.inSvg && /^(textarea|title)$/i.test(tag);
-  const inner = { ...opts, inSvg, pretty: opts.pretty && !keep, designer: opts.designer && !rawText };
+  const inner = { ...opts, inSvg, pretty: opts.pretty && !keep, designer: opts.designer && !rawText, inForeign: !!opts.xml && !!opts.inSvg && tag.toLowerCase() === 'foreignobject' };
   // Also beside an inline-block child: a line break there would show as a gap the canvas doesn't have.
   const inline = !opts.pretty || keep || node.children.some((c) => isInline(c) || (isBranch(c) && hasInlineDisplay(c)));
   if (inline) {

@@ -181,6 +181,7 @@ const expandedId = (instanceId: string, templateId: string) => `${instanceId}~${
 export function expandComponent(def: ComponentDef, instance: ComponentInstance, instanceId: string): Branch {
   const values = instanceValues(def, instance);
   const perDisplay = variantPerDisplay(def, instance.variants);
+  const boolProps = new Set(componentProps(def).filter((p) => p.type === 'boolean').map((p) => p.name));
   const visit = (node: TreeNode, isRoot: boolean): TreeNode | null => {
     if (!isBranch(node)) {
       const leaf = { ...node, id: expandedId(instanceId, node.id), value: fillPlaceholders(node.value, values) };
@@ -202,7 +203,8 @@ export function expandComponent(def: ComponentDef, instance: ComponentInstance, 
       const bound = BOOLEAN_ATTRS.has(k.toLowerCase()) ? /^\{\{\s*([A-Za-z][A-Za-z0-9_]*)\s*\}\}$/.exec(v.trim()) : null;
       if (bound) {
         const value = Object.hasOwn(values, bound[1]) ? values[bound[1]] : '';
-        const isBool = def.props.some((p) => p.name === bound[1] && p.type === 'boolean');
+        // The inferred types too (a prop only `data-show-if` uses is boolean), as the exports and prop panel see them.
+        const isBool = boolProps.has(bound[1]);
         if (isBool ? !truthy(value) : value === 'false') continue;
       }
       attrs[k] = fillPlaceholders(v, values);

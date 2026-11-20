@@ -1,5 +1,6 @@
 import {
   closesParagraph,
+  type ThemeToken,
   keepsWhitespace,
   BOOLEAN_ATTRS,
   canonicalSvgAttr,
@@ -990,14 +991,17 @@ export function exportComponent(tree: Tree, opts: ComponentOptions): ComponentEx
   }
   if (css && framework !== 'vue' && framework !== 'svelte') files.push({ path: cssFile, contents: `/* ${header((s) => s)} */\n${css}\n` });
   files.push(...kitFileList);
-  if (tokens.length) {
-    files.push({ path: 'tokens.json', contents: `${JSON.stringify(tokensToDtcg(tokens), null, 2)}\n` });
-    if (styling === 'tailwind') {
-      const theme = tailwindThemeCss(tokens);
-      if (theme) files.push({ path: 'tailwind.theme.css', contents: theme }, { path: 'tailwind.tokens.cjs', contents: tailwindPreset(tokens) });
-    }
-  }
+  files.push(...tokenFiles(tokens, styling));
   return { name, framework, styling, entry, files };
+}
+
+/** `tokens.json`, and with Tailwind the theme files its token utilities (`bg-color-brand`) need. */
+function tokenFiles(tokens: ThemeToken[], styling: string): { path: string; contents: string }[] {
+  if (!tokens.length) return [];
+  const files = [{ path: 'tokens.json', contents: `${JSON.stringify(tokensToDtcg(tokens), null, 2)}\n` }];
+  const theme = styling === 'tailwind' ? tailwindThemeCss(tokens) : '';
+  if (theme) files.push({ path: 'tailwind.theme.css', contents: theme }, { path: 'tailwind.tokens.cjs', contents: tailwindPreset(tokens) });
+  return files;
 }
 
 /* ------------------------------------------------- reusable components */
@@ -1217,6 +1221,6 @@ export function exportComponentDef(def: ComponentDef, opts: ComponentOptions): C
   if (docs.length) files[0].contents = files[0].contents.replace(header, () => commentText(`${header} Props: ${docs.join('; ')}.`));
   if (css && framework === 'react') files.push({ path: cssFile, contents: `/* ${header} */\n${css}\n` });
   files.push(...kitFileList);
-  if (tokens.length) files.push({ path: 'tokens.json', contents: `${JSON.stringify(tokensToDtcg(tokens), null, 2)}\n` });
+  files.push(...tokenFiles(tokens, styling));
   return { name, framework, styling, entry, files };
 }

@@ -1265,7 +1265,9 @@ export async function openDocument(doc: TreeDocument, meta: ChangeMeta = {}): Pr
   // Edits still waiting for the debounced save would be lost when the forest is replaced.
   if (open && state.saveState !== 'saved' && !(await saveNow())) throw new Error('The open forest’s changes could not be saved, so it stays open');
   openLoaded(forest, '');
-  await saveNow();
+  // The opened document replaces any stored copy with its id (a rejoined share, an embed host
+  // loading it again): that copy's save time isn't another tab's edit.
+  await saveNow(false);
   return { kind: doc.kind, trees: forest.trees.length };
 }
 

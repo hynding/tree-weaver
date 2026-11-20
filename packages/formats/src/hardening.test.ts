@@ -1130,3 +1130,21 @@ describe('pass 31 fixes', () => {
     expect(dart).toContain('obscureText: true');
   });
 });
+
+describe('pass 32 fixes', () => {
+  it('ships the Tailwind theme files with a component that uses token utilities', async () => {
+    const { createTokenKit } = await import('@tree-weaver/core');
+    const kits = [createTokenKit([{ name: '--brand', value: '#4f46e5' }])];
+    const def = createComponent('Button', createBranch({ tag: 'button', styles: { lg: { background: 'var(--brand)' } }, children: [text('Go')] }));
+    const paths = exportComponentDef(def, { framework: 'react', styling: 'tailwind', kits }).files.map((f) => f.path);
+    expect(paths).toEqual(expect.arrayContaining(['tokens.json', 'tailwind.theme.css', 'tailwind.tokens.cjs']));
+  });
+
+  it('puts HTML inside a foreignObject in the XHTML namespace in .svg files', () => {
+    const fo = createBranch({ tag: 'foreignObject', attrs: { width: '200', height: '100' }, children: [createBranch({ tag: 'p', children: [text('Hello')] }), text('loose')] });
+    const tree = createTree('Drawing', createBranch({ tag: 'svg', type: 'root', attrs: { viewBox: '0 0 200 100' }, children: [fo] }));
+    const svg = exportTree(tree, 'svg');
+    expect(svg).toMatch(/<p xmlns="http:\/\/www\.w3\.org\/1999\/xhtml"/);
+    expect(svg).not.toMatch(/<svg[^>]*xmlns="http:\/\/www\.w3\.org\/1999\/xhtml"/);
+  });
+});

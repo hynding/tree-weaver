@@ -554,3 +554,12 @@ describe('pass 31 fixes', () => {
     expect(Object.keys(tokensToDtcg(themeTokens(kits)))).toContain('__proto__');
   });
 });
+
+describe('pass 32 fixes', () => {
+  it('treats a prop only data-show-if declares as boolean for bound attributes', async () => {
+    const { createComponent, expandComponent } = await import('./index');
+    const def = { ...createComponent('Save', createBranch({ tag: 'div', children: [createBranch({ tag: 'span', attrs: { 'data-show-if': 'busy' } }), createBranch({ tag: 'button', attrs: { disabled: '{{busy}}' } })] })), props: [] };
+    const out = expandComponent(def, { component: def.id }, 'i1');
+    expect((out.children.find((c) => 'tag' in c && c.tag === 'button') as Branch).attrs.disabled).toBeUndefined();
+  });
+});
