@@ -123,12 +123,20 @@ function pascalName(value: string): string {
 /** Readable, unique class names for branches that carry styles: `home__hero`, `home__feature-grid`, `home__card-2`. */
 function classNamer(prefix: string) {
   const used = new Map<string, number>();
+  // Every name handed out: "Card", "Card" and "Card 2" must not give two `card-2`s.
+  const taken = new Set<string>();
   return (branch: Branch): string => {
     const base = slugify(branch.name || branch.type || branch.tag, branch.tag);
     const stem = `${prefix}${base}`.replace(/[^a-z0-9_-]/gi, '-').replace(/^-+|-+$/g, '') || `${prefix}node`;
-    const n = (used.get(stem) ?? 0) + 1;
+    let n = used.get(stem) ?? 0;
+    let name: string;
+    do {
+      n++;
+      name = n === 1 ? stem : `${stem}-${n}`;
+    } while (taken.has(name));
     used.set(stem, n);
-    return n === 1 ? stem : `${stem}-${n}`;
+    taken.add(name);
+    return name;
   };
 }
 
@@ -292,12 +300,13 @@ function tailwindClasses(branch: Branch, tokenKinds: ReadonlyMap<string, TokenKi
       // longhand it covers could swap. Each declaration that must beat an earlier overlapping
       // one gets one more `&` of specificity (`[&&]:`); the same property on a later display
       // keeps its tier, since Tailwind already writes display variants after the base.
-      // Two named utilities (`m-[0_auto]`, `mt-[2rem]`) are already written shorthand first.
+      // Two named utilities (`m-[0_auto]`, `mt-[2rem]`) are written shorthand first, so only a
+      // shorthand that comes after its longhand (`pt-[20px]`, then `p-[3px]`) needs the bump.
       const cls = tailwindClass(prop, value, tokenKinds);
       let tier = 1;
       for (const d of decls) {
         if (d.prop === prop) tier = Math.max(tier, d.tier);
-        else if (overlaps(d.prop, prop)) tier = Math.max(tier, /^!?\[/.test(d.cls) || /^!?\[/.test(cls) ? d.tier + 1 : d.tier);
+        else if (overlaps(d.prop, prop)) tier = Math.max(tier, /^!?\[/.test(d.cls) || /^!?\[/.test(cls) || covers(prop, d.prop) ? d.tier + 1 : d.tier);
       }
       decls.push({ prop, cls, variant, tier });
     }

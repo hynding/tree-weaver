@@ -179,7 +179,8 @@ type NView =
   | { kind: 'text'; text: string; role: TextRole; look: Tiered<Look>; link?: string; button?: boolean }
   | { kind: 'image'; src: string; alt: string; look: Tiered<Look> }
   | { kind: 'divider' }
-  | { kind: 'field'; placeholder: string; multiline: boolean; look: Tiered<Look> }
+  | { kind: 'field'; placeholder: string; multiline: boolean; look: Tiered<Look>; /** `type="password"`: typed text is hidden. */ secure?: boolean }
+  | { kind: 'toggle'; label: string; on: boolean; look: Tiered<Look> }
   | { kind: 'box'; layout: Tiered<Layout>; children: NView[]; look: Tiered<Look>; note?: string }
   | { kind: 'list'; ordered: boolean; items: NView[]; look: Tiered<Look>; /** The first number, and +1 or -1 (`reversed`). */ start: number; step: number }
   | { kind: 'table'; rows: { header: boolean; cells: NView[] }[]; look: Tiered<Look> }
@@ -453,7 +454,14 @@ function toView(node: TreeNode, ctx: Ctx): NView | null {
       return { kind: 'divider' };
     case 'img':
       return { kind: 'image', src: safeUrl(b.attrs.src), alt: b.attrs.alt ?? '', look };
-    case 'input':
+    case 'input': {
+      // The input's type decides the control: a checkbox isn't a text box, a password is hidden.
+      const type = (b.attrs.type ?? 'text').trim().toLowerCase();
+      if (type === 'hidden') return null;
+      if (type === 'checkbox' || type === 'radio') return { kind: 'toggle', label: b.attrs['aria-label'] ?? '', on: b.attrs.checked !== undefined && b.attrs.checked !== 'false', look };
+      if (type === 'submit' || type === 'button' || type === 'reset') return { kind: 'text', text: b.attrs.value ?? (type === 'reset' ? 'Reset' : type === 'submit' ? 'Submit' : ''), role: 'body', look, button: true };
+      return { kind: 'field', placeholder: b.attrs.placeholder ?? b.attrs['aria-label'] ?? b.attrs.name ?? '', multiline: false, look, ...(type === 'password' ? { secure: true } : {}) };
+    }
     case 'textarea':
       return { kind: 'field', placeholder: b.attrs.placeholder ?? b.attrs['aria-label'] ?? b.attrs.name ?? '', multiline: b.tag === 'textarea', look };
     case 'script':
@@ -635,8 +643,13 @@ function swiftBody(v: NView, o: Out, d: number, fill: boolean): void {
       o.line(d, 'Divider()');
       return;
     case 'field':
-      o.line(d, v.multiline ? `TextField(${swiftString(v.placeholder)}, text: .constant(""), axis: .vertical)` : `TextField(${swiftString(v.placeholder)}, text: .constant(""))`);
+      o.line(d, v.secure ? `SecureField(${swiftString(v.placeholder)}, text: .constant(""))` : v.multiline ? `TextField(${swiftString(v.placeholder)}, text: .constant(""), axis: .vertical)` : `TextField(${swiftString(v.placeholder)}, text: .constant(""))`);
       o.line(d + 1, '.textFieldStyle(.roundedBorder)');
+      mods(v.look, {});
+      return;
+    case 'toggle':
+      o.line(d, `Toggle(${swiftString(v.label)}, isOn: .constant(${v.on}))`);
+      if (!v.label) o.line(d + 1, '.labelsHidden()');
       mods(v.look, {});
       return;
     case 'placeholder':
@@ -918,8 +931,11 @@ function dartView(v: NView, o: Out, d: number): void {
       return;
     case 'field':
       dartDecorate(v.look, o, d, (dd) =>
-        o.line(dd, `TextField(${v.multiline ? 'maxLines: null, ' : ''}decoration: InputDecoration(hintText: ${dartString(v.placeholder)}, border: const OutlineInputBorder()))`),
+        o.line(dd, `TextField(${v.multiline ? 'maxLines: null, ' : ''}${v.secure ? 'obscureText: true, ' : ''}decoration: InputDecoration(hintText: ${dartString(v.placeholder)}, border: const OutlineInputBorder()))`),
       );
+      return;
+    case 'toggle':
+      dartDecorate(v.look, o, d, (dd) => o.line(dd, `Checkbox(value: ${v.on}, onChanged: (_) {}${v.label ? `, semanticLabel: ${dartString(v.label)}` : ''})`));
       return;
     case 'placeholder':
       o.line(d, `const SizedBox.shrink() /* ${comment(v.note)} */`);

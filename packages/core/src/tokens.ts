@@ -248,7 +248,8 @@ export function tokensToDtcg(tokens: ThemeToken[]): Record<string, unknown> {
     const type = TYPE[t.kind];
     if (type) entry.$type = type;
     if (t.description) entry.$description = t.description;
-    out[t.name.replace(/^--/, '')] = entry;
+    // As an own key even for `--__proto__`, which plain assignment would make the prototype.
+    Object.defineProperty(out, t.name.replace(/^--/, ''), { value: entry, enumerable: true, writable: true, configurable: true });
   }
   return out;
 }

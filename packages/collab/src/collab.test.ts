@@ -388,3 +388,21 @@ describe('pass 29 fixes', () => {
     expect(Object.hasOwn(h.styles.lg!, '__proto__')).toBe(true);
   });
 });
+
+describe('pass 31 fixes', () => {
+  it('merges concurrent edits to different attributes of one leaf', async () => {
+    const { createLeaf } = await import('@tree-weaver/core');
+    const img = { ...createLeaf('a.png', 'image', { alt: 'old', width: '100' }), id: 'img' };
+    const start = withRoot(sample(), (r) => ({ ...r, children: [...r.children, img] }));
+    const { a, c, sync } = offline();
+    writeForest(a, null, start);
+    sync();
+    const fa = readForest(a)!;
+    const fc = readForest(c)!;
+    const setAttr = (f: Forest, k: string, v: string) => withRoot(f, (r) => ({ ...r, children: r.children.map((n) => (n.id === 'img' ? { ...n, attrs: { ...(n as typeof img).attrs, [k]: v } } : n)) }));
+    writeForest(a, fa, setAttr(fa, 'alt', 'A alt'));
+    writeForest(c, fc, setAttr(fc, 'width', '300'));
+    sync();
+    for (const doc of [a, c]) expect((readForest(doc)!.trees[0].root.children.find((n) => n.id === 'img') as typeof img).attrs).toEqual({ alt: 'A alt', width: '300' });
+  });
+});

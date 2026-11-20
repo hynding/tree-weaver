@@ -237,7 +237,10 @@ function writeNode(nodes: Y.Map<YNode>, p: Placed, order: string | undefined, ol
   } else {
     setIfChanged(m, 'leaf', n.type);
     setIfChanged(m, 'value', n.value);
-    setIfChanged(m, 'attrs', n.attrs && Object.keys(n.attrs).length ? json(n.attrs) : undefined);
+    const prior = old && !isBranch(old) ? old : null;
+    const legacy = m.has('attrs');
+    writeEntries(m, 'a:', n.attrs, legacy || !prior ? null : prior.attrs ?? {});
+    setIfChanged(m, 'attrs', undefined);
   }
 }
 
@@ -388,7 +391,8 @@ function put<T>(obj: object, key: string, value: T): T {
 
 function readNode(id: string, m: YNode): TreeNode {
   if (m.get('kind') === 'leaf') {
-    const attrs = stringMap(parse<unknown>(m.get('attrs'), undefined));
+    let attrs = stringMap(parse<unknown>(m.get('attrs'), undefined));
+    for (const [k, v] of m) if (k.startsWith('a:') && typeof v === 'string') put((attrs ??= {}), k.slice(2), v);
     const type = m.get('leaf');
     const value = m.get('value');
     const leaf: Leaf = { kind: 'leaf', id, type: type === 'image' || type === 'shape' ? type : 'text', value: typeof value === 'string' ? value : '' };

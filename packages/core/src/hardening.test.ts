@@ -543,3 +543,14 @@ describe('pass 30 fixes', () => {
     expect(checkTree(bad).issues.map((i) => i.rule)).toContain('nesting');
   });
 });
+
+describe('pass 31 fixes', () => {
+  it('refuses setText that puts text straight in a table row, and keeps a __proto__ token', async () => {
+    const { applyPatch: patch, setToken, themeTokens, tokensToDtcg } = await import('./index');
+    const tr = createBranch({ tag: 'tr', children: [createBranch({ tag: 'td' })] });
+    const tree = createTree('T', createBranch({ tag: 'body', type: 'root', children: [createBranch({ tag: 'table', children: [createBranch({ tag: 'tbody', children: [tr] })] })] }));
+    expect(() => patch(tree.root, [{ op: 'setText', target: tr.id, value: 'hello' }] as never)).toThrow(/can only hold/);
+    const kits = setToken([], { name: '--__proto__', value: '#ff0000' });
+    expect(Object.keys(tokensToDtcg(themeTokens(kits)))).toContain('__proto__');
+  });
+});

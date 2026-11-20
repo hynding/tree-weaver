@@ -52,7 +52,7 @@ export function nestingProblem(ancestors: readonly Branch[], node: TreeNode): st
     }
     return false;
   };
-  if (CLOSES_P.has(tag) && inScope((t) => t === 'p', new Set([...SCOPE, 'button']))) return `<${tag}> can't go inside a <p>: the browser would end the paragraph there. Use a <div> (or a <span> inside the paragraph) instead`;
+  if (CLOSES_P.has(tag) && inScope((t) => t === 'p', new Set([...SCOPE, 'button']))) return `<${tag}> can't go inside a <p>: the browser would end the paragraph there. Put it outside the paragraph, or use a <span>`;
   if (HEADING.test(tag) && HEADING.test(parentTag)) return `A heading can't go directly inside another heading; the browser would end the outer one`;
   if (tag === 'a' && inScope((t) => t === 'a', new Set(['caption', 'td', 'th', 'marquee', 'object', 'template', 'applet']))) return `A link can't go inside another link; the browser would end the outer one`;
   if (tag === 'button' && inScope((t) => t === 'button')) return `A button can't go inside another button; the browser would end the outer one`;

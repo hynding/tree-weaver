@@ -1097,3 +1097,36 @@ describe('pass 30 fixes', () => {
     expect(exportStorybook(createForest('Site', [tree])).files.map((f) => f.content).join('\n')).toMatch(/<table><tbody><tr data-tw=\\"[^"\\]+\\" data-tw-name=\\"Total row\\"/);
   });
 });
+
+describe('pass 31 fixes', () => {
+  it('never gives two branches the same class name', () => {
+    const card = (name: string, color: string) => createBranch({ tag: 'div', name, styles: { lg: { color } }, children: [text(color)] });
+    const html = exportComponent(page([card('Card', 'red'), card('Card', 'green'), card('Card 2', 'blue')]), { framework: 'html' }).files.find((f) => f.path.endsWith('.html'))!.contents;
+    const classes = [...html.matchAll(/class="([^"]+)"/g)].map((m) => m[1]).filter((c) => c.includes('card'));
+    expect(new Set(classes).size).toBe(3);
+  });
+
+  it('lets a shorthand set after its longhand win in Tailwind', () => {
+    const tree = page([createBranch({ tag: 'div', styles: { lg: { 'padding-top': '20px', padding: '3px' } }, children: [text('x')] })]);
+    const out = exportComponent(tree, { framework: 'html', styling: 'tailwind' }).files.map((f) => f.contents).join('\n');
+    expect(out).toContain('pt-[20px] [&&]:p-[3px]');
+  });
+
+  it('exports inputs by type to SwiftUI and Flutter', () => {
+    const tree = page([
+      createBranch({ tag: 'input', attrs: { type: 'checkbox', name: 'terms' } }),
+      createBranch({ tag: 'input', attrs: { type: 'password' } }),
+      createBranch({ tag: 'input', attrs: { type: 'hidden', name: 'token' } }),
+      createBranch({ tag: 'input', attrs: { type: 'submit', value: 'Send' } }),
+    ]);
+    const swift = exportComponent(tree, { framework: 'swiftui' }).files[0].contents;
+    expect(swift).toContain('Toggle("", isOn: .constant(false))');
+    expect(swift).toContain('SecureField(');
+    expect(swift).not.toContain('"token"');
+    expect(swift).not.toContain('TextField("terms"');
+    expect(swift).toContain('Send');
+    const dart = exportComponent(tree, { framework: 'flutter' }).files[0].contents;
+    expect(dart).toContain('Checkbox(value: false');
+    expect(dart).toContain('obscureText: true');
+  });
+});

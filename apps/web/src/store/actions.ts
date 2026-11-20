@@ -639,6 +639,13 @@ export function wrapSelected(tag = 'div', type = 'box'): void {
   const parent = parentOf(id);
   const svg = !!parent && inSvgContext(tree.root, parent.id);
   const wrapper = svg ? createBranch({ tag: 'g', name: 'Group' }) : createBranch({ tag, type, name: 'Wrapper' });
+  // The wrapper must suit where the node sits (a <div> can't go in a <p> or straight in a <table>).
+  const node = findNode(tree.root, id);
+  const problem = parent && node ? insertionProblem(removeNode(tree.root, id), parent.id, { ...wrapper, children: [node] }) : null;
+  if (problem) {
+    toast(problem, 'error');
+    return;
+  }
   editTree((root) => wrapNode(root, id, wrapper));
   state.selectedId = wrapper.id;
 }
