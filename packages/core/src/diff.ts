@@ -82,6 +82,12 @@ function sameMap(a: Record<string, string> | undefined, b: Record<string, string
   return ka.length === kb.length && ka.every((k) => (a ?? {})[k] === (b ?? {})[k]);
 }
 
+/** Style declarations: order counts too (`padding` then `padding-left` isn't the reverse). */
+function sameDeclarations(a: Record<string, string> | undefined, b: Record<string, string> | undefined): boolean {
+  const ka = Object.keys(a ?? {});
+  return sameMap(a, b) && ka.every((k, i) => Object.keys(b ?? {})[i] === k);
+}
+
 function compareNodes(a: TreeNode, b: TreeNode): { fields: NodeField[]; displays: string[] } {
   const fields: NodeField[] = [];
   const displays: string[] = [];
@@ -93,7 +99,7 @@ function compareNodes(a: TreeNode, b: TreeNode): { fields: NodeField[]; displays
     if (!same(a.classes, b.classes)) fields.push('classes');
     if (!sameMap(a.attrs, b.attrs)) fields.push('attrs');
     const ids = new Set([...Object.keys(a.styles), ...Object.keys(b.styles)]);
-    for (const d of ids) if (!sameMap(a.styles[d as keyof typeof a.styles], b.styles[d as keyof typeof b.styles])) displays.push(d);
+    for (const d of ids) if (!sameDeclarations(a.styles[d as keyof typeof a.styles], b.styles[d as keyof typeof b.styles])) displays.push(d);
     if (displays.length) fields.push('styles');
     if (!same(a.instance, b.instance)) fields.push('instance');
   } else if (!isBranch(a) && !isBranch(b)) {

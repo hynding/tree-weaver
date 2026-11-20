@@ -135,3 +135,5 @@ the older import so they still build on 3.27, and the analyzer only reports it a
 - Native exports are a starting point that looks like the layout, not a pixel-exact copy: check it in
   Xcode or with `flutter run`, then refine.
 - Images keep their URLs; copy any images the app should host itself.
+- Vue reads custom elements (`<my-badge>`) as components unless the app's `compilerOptions.isCustomElement`
+  says otherwise; server rendering drops them until it does. The Vue file names them in a comment.

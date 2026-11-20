@@ -650,3 +650,14 @@ describe('pass 41 fixes', async () => {
     expect(core.nestingProblem(at(['ul', 'li', 'div']), core.createBranch({ tag: 'li' }))).toMatch(/li/);
   });
 });
+
+describe('pass 42 fixes', async () => {
+  const core = await import('./index');
+
+  it('counts a change in style declaration order as a change', () => {
+    const tree = (styles: Record<string, string>) => core.createTree('T', { ...core.createBranch({ tag: 'body', children: [{ ...core.createBranch({ tag: 'div', styles: { lg: styles } }), id: 'box' }] }), id: 'root' });
+    const a = core.createForest('F', [{ ...tree({ padding: '0', 'padding-left': '24px' }), id: 't' }]);
+    const b = { ...a, trees: [{ ...tree({ 'padding-left': '24px', padding: '0' }), id: 't' }] };
+    expect(core.diffForests(a, b).empty).toBe(false);
+  });
+});

@@ -1391,3 +1391,24 @@ describe('pass 41 fixes', () => {
     expect(plain.kind).toBe('leaf');
   });
 });
+
+describe('pass 42 fixes', () => {
+  it('keeps the spaces in SVG text between and at the edges of tspans', () => {
+    const doc = importDocument('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><text><tspan>Hello</tspan> <tspan>World</tspan></text><text><tspan>Hi</tspan><tspan> there</tspan></text></svg>', 'svg');
+    const root = doc.kind === 'tree' ? doc.tree.root : doc.forest.trees[0].root;
+    const json = JSON.stringify(root);
+    expect(json).toContain('"value":" "');
+    expect(json).toContain('"value":" there"');
+  });
+
+  it('reads a header key as the <header> element in shorthand, and as the table option beside a table', async () => {
+    const { expandShorthand } = await import('@tree-weaver/branches');
+    expect((expandShorthand({ header: ['h1: Site'] }) as Branch).tag).toBe('header');
+    expect(JSON.stringify(expandShorthand({ table: [['a'], ['b']], header: false }))).not.toContain('thead');
+  });
+
+  it('names custom elements for Vue', () => {
+    const tree = page([createBranch({ tag: 'p', children: [text('Hi '), createBranch({ tag: 'my-badge', children: [text('New')] })] })]);
+    expect(exportComponent(tree, { framework: 'vue' }).files[0].contents).toContain(`isCustomElement: (tag) => ['my-badge'].includes(tag)`);
+  });
+});

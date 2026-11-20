@@ -212,7 +212,8 @@ function convertChildren(nodes: ChildNode[], ctx: Ctx, raw: boolean, svg = false
         // Whitespace only matters between two pieces of inline content.
         // At an inline element's edge the other side is the text around the element.
         const side = (n: ChildNode | undefined) => (n ? inlineish(n, ctx) : inline);
-        if (!/[^ ]/.test(value)) value = !svg && side(kept[i - 1]) && side(kept[i + 1]) ? ' ' : '';
+        // In SVG only text content (`<text>`, `<tspan>`: passed as inline) shows a space between its parts.
+        if (!/[^ ]/.test(value)) value = (!svg || inline) && side(kept[i - 1]) && side(kept[i + 1]) ? ' ' : '';
       }
       if (value) items.push({ kind: 'leaf', type: 'text', value });
       return;
@@ -327,7 +328,7 @@ export function convertParts(tag: string, attribs: Record<string, string>, child
     attrs,
     styles,
     // An XML parse (a standalone .svg) keeps the newline after `<pre>`; only the HTML parser drops it.
-    children: (ctx.xml ? (_: string, c: RawNode[]) => c : dropLeadingNewline)(tag, impliedTbody(tag, convertChildren(children, ctx, raw || RAW_TEXT_TAGS.has(tag) || keepsWhitespace({ tag, styles } as Branch) || (inSvg && a['xml:space'] === 'preserve'), childrenInSvg({ tag }, svg), !svg && isInlineTag(tag)))),
+    children: (ctx.xml ? (_: string, c: RawNode[]) => c : dropLeadingNewline)(tag, impliedTbody(tag, convertChildren(children, ctx, raw || RAW_TEXT_TAGS.has(tag) || keepsWhitespace({ tag, styles } as Branch) || (inSvg && a['xml:space'] === 'preserve'), childrenInSvg({ tag }, svg), childrenInSvg({ tag }, svg) ? /^(text|tspan|textPath)$/.test(tag) : !svg && isInlineTag(tag)))),
   };
 }
 

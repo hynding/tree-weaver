@@ -812,6 +812,23 @@ function writePropsEl(el: El & { kind: 'el' }, depth: number, mode: 'vue' | 'sve
   return `<${el.tag}${cond}${attrs}>\n${childLines(el.children, pad, (c) => writeHtml(c, depth + 1, mode, props))}\n${'  '.repeat(depth)}</${el.tag}>`;
 }
 
+/**
+ * Vue reads an unknown tag (`<my-badge>`) as a component; without `isCustomElement` it warns, and
+ * server rendering drops the element. A note naming the custom elements, for the Vue file.
+ */
+function vueCustomElementNote(root: El): string {
+  const tags = new Set<string>();
+  const visit = (el: El) => {
+    if (el.kind !== 'el') return;
+    if (el.tag.includes('-') && !el.svg) tags.add(el.tag);
+    el.children.forEach(visit);
+  };
+  visit(root);
+  if (!tags.size) return '';
+  const list = [...tags].map((t) => `'${t}'`).join(', ');
+  return `\n<!-- Custom elements: tell Vue they aren't components, or server rendering drops them:\n     compilerOptions: { isCustomElement: (tag) => [${list}].includes(tag) } -->`;
+}
+
 const jsxString = (value: string): string => JSON.stringify(value);
 
 /** `props` is false outside a component; in one, the names of its boolean props. */
@@ -971,7 +988,7 @@ export function exportComponent(tree: Tree, opts: ComponentOptions): ComponentEx
     case 'vue': {
       entry = `${name}.vue`;
       const style = [kitCss ? `<style src="./kits.css"></style>` : '', css ? `<style>\n${css}\n</style>` : ''].filter(Boolean).join('\n');
-      files.push({ path: entry, contents: `<!-- ${header((s) => s)}${tailwindNote} -->\n<template>\n  ${writeHtml(root, 1, 'vue')}\n</template>\n${style ? `\n${style}\n` : ''}` });
+      files.push({ path: entry, contents: `<!-- ${header((s) => s)}${tailwindNote} -->${vueCustomElementNote(root)}\n<template>\n  ${writeHtml(root, 1, 'vue')}\n</template>\n${style ? `\n${style}\n` : ''}` });
       break;
     }
     case 'svelte': {
@@ -1215,7 +1232,7 @@ export function exportComponentDef(def: ComponentDef, opts: ComponentOptions): C
         ? `<script setup>\ndefineProps({\n${allProps.map((p) => `  ${p.name}: { type: ${vueType(p)}, default: ${jsDefault(p)} },`).join('\n')}\n});\n${helper ? `\n${helper}\n` : ''}</script>\n\n`
         : '';
       const style = [kitCss ? `<style src="./kits.css"></style>` : '', css ? `<style>\n${css}\n</style>` : ''].filter(Boolean).join('\n');
-      files.push({ path: entry, contents: `<!-- ${header} -->\n${script}<template>\n  ${writeHtml(root, 1, 'vue', booleanProps)}\n</template>\n${style ? `\n${style}\n` : ''}` });
+      files.push({ path: entry, contents: `<!-- ${header} -->${vueCustomElementNote(root)}\n${script}<template>\n  ${writeHtml(root, 1, 'vue', booleanProps)}\n</template>\n${style ? `\n${style}\n` : ''}` });
       break;
     }
     case 'svelte': {

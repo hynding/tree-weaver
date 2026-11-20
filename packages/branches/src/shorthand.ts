@@ -244,7 +244,8 @@ function expandObject(value: Obj, path: string): TreeNode {
     }
     return node;
   }
-  const keys = Object.keys(value).filter((k) => !MODIFIERS.has(k));
+  // `header` is the table's modifier (`"header": false`) only beside a `table` key; otherwise it's the element.
+  const keys = Object.keys(value).filter((k) => !MODIFIERS.has(k) || (k === 'header' && value.table === undefined));
   if (keys.length !== 1) {
     fail(
       keys.length
