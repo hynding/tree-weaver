@@ -92,8 +92,14 @@ export function parseDeclarations(body: string): StyleMap {
 /** At-rules whose blocks hold nested rules rather than declarations. */
 const BLOCK_AT_RULES_WITH_RULES = new Set(['media', 'supports', 'layer', 'container', 'document', 'scope', 'starting-style']);
 
+/** How deep nested at-rule blocks are parsed; deeper ones are kept as an unparsed body. */
+const MAX_CSS_DEPTH = 32;
+
 export function parseCss(input: string): CssNode[] {
-  const css = stripCssComments(input);
+  return parseStripped(stripCssComments(input), 0);
+}
+
+function parseStripped(css: string, depth: number): CssNode[] {
   const nodes: CssNode[] = [];
   let i = 0;
   while (i < css.length) {
@@ -120,8 +126,8 @@ export function parseCss(input: string): CssNode[] {
       const name = (m?.[1] ?? '').toLowerCase();
       const prelude = (m?.[2] ?? '').trim();
       nodes.push(
-        BLOCK_AT_RULES_WITH_RULES.has(name)
-          ? { type: 'at', name, prelude, children: parseCss(body), body }
+        BLOCK_AT_RULES_WITH_RULES.has(name) && depth < MAX_CSS_DEPTH
+          ? { type: 'at', name, prelude, children: parseStripped(body, depth + 1), body }
           : { type: 'at', name, prelude, children: null, body },
       );
     } else if (head) {

@@ -109,12 +109,26 @@ export function rootTokens(css: string): DesignToken[] {
 /** A token kit read back from CSS (formats that carry only CSS, such as XML and HTML). */
 export const tokensFromCss = (css: string): DesignToken[] => rootTokens(css);
 
+/** The longest value `resolveTokenValue` makes. */
+const MAX_RESOLVED = 8192;
+
 /** Replace `var(--name, fallback)` with token values, a few levels deep. */
 export function resolveTokenValue(value: string, tokens: ReadonlyMap<string, string>, depth = 0): string {
   if (depth > 6 || !value.includes('var(')) return value;
   // The fallback is text with any number of one-level (…) groups; no two quantifiers can match the
   // same characters, so an unclosed `var(` can't make it backtrack.
-  const out = value.replace(/var\(\s*(--[\w-]+)\s*(?:,\s*([^()]*(?:\([^()]*\)[^()]*)*))?\)/g, (_m, name: string, fallback?: string) => tokens.get(name) ?? fallback?.trim() ?? '');
+  // Tokens that use each other several times grow with every level, so the output is capped and a
+  // value that would pass the cap is left as it is.
+  let size = value.length;
+  let over = false;
+  const out = value.replace(/var\(\s*(--[\w-]+)\s*(?:,\s*([^()]*(?:\([^()]*\)[^()]*)*))?\)/g, (m: string, name: string, fallback?: string) => {
+    if (over) return m;
+    const next = tokens.get(name) ?? fallback?.trim() ?? '';
+    size += next.length - m.length;
+    if (size > MAX_RESOLVED) over = true;
+    return over ? m : next;
+  });
+  if (over) return value;
   return out === value ? out : resolveTokenValue(out, tokens, depth + 1);
 }
 

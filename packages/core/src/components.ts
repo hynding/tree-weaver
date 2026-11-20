@@ -346,18 +346,32 @@ function drawsInSvg(root: Branch): boolean {
   return svg;
 }
 
+/** Whether an instance of the component sits inside an SVG, in a tree or in an SVG component's template. */
+function usedInSvg(forest: Forest, componentId: string): boolean {
+  const visit = (node: TreeNode, inSvg: boolean): boolean => {
+    if (!isBranch(node)) return false;
+    if (node.instance?.component === componentId && inSvg) return true;
+    const inner = node.tag === 'foreignObject' ? false : inSvg || node.tag === 'svg';
+    return node.children.some((c) => visit(c, inner));
+  };
+  return (
+    forest.trees.some((t) => visit(t.root, false)) ||
+    (forest.components ?? []).some((c) => c.id !== componentId && drawsInSvg(c.root) && visit(c.root, true))
+  );
+}
+
 /**
  * A component's template as a tree, so the editor can open it like any other: a `<body>`
  * holding the template, with `variant`'s styles laid over when one is given.
  */
-export function componentAsTree(def: ComponentDef, variant?: string | null): Tree {
+export function componentAsTree(def: ComponentDef, variant?: string | null, forest?: Forest): Tree {
   const ts = new Date(0).toISOString();
   return {
     id: componentTreeId(def.id),
     name: def.name,
-    // An SVG-only template (a `<g>`, a shape group) is edited inside an `<svg>`, so it is drawn and
-    // the SVG placement rules apply to it.
-    root: { kind: 'branch', id: `${BODY_PREFIX}${def.id}`, tag: drawsInSvg(def.root) ? 'svg' : 'body', type: 'root', name: def.name, classes: [], attrs: {}, styles: {}, children: [withVariant(def, variant)] },
+    // An SVG-only template (a `<g>`, a shape group), or one with an instance inside an SVG, is
+    // edited inside an `<svg>`, so it is drawn and the SVG placement rules apply to it.
+    root: { kind: 'branch', id: `${BODY_PREFIX}${def.id}`, tag: drawsInSvg(def.root) || (forest && usedInSvg(forest, def.id)) ? 'svg' : 'body', type: 'root', name: def.name, classes: [], attrs: {}, styles: {}, children: [withVariant(def, variant)] },
     createdAt: ts,
     updatedAt: ts,
   };
@@ -367,7 +381,7 @@ export function componentAsTree(def: ComponentDef, variant?: string | null): Tre
 export function findTree(forest: Forest, treeId: string, variant?: string | null): Tree | undefined {
   if (isComponentTreeId(treeId)) {
     const def = forest.components?.find((c) => componentTreeId(c.id) === treeId);
-    return def ? componentAsTree(def, variant) : undefined;
+    return def ? componentAsTree(def, variant, forest) : undefined;
   }
   return forest.trees.find((t) => t.id === treeId);
 }
@@ -393,7 +407,7 @@ function stylesDiff(before: DisplayStyles, after: DisplayStyles): DisplayStyles 
 export function updateComponentTree(forest: Forest, treeId: string, fn: (root: Branch) => Branch, variant?: string | null): Forest {
   const def = forest.components?.find((c) => componentTreeId(c.id) === treeId);
   if (!def) return forest;
-  const tree = componentAsTree(def, variant);
+  const tree = componentAsTree(def, variant, forest);
   const nextBody = fn(tree.root);
   if (nextBody === tree.root) return forest;
   const kids = nextBody.children;

@@ -342,3 +342,33 @@ describe('pass 13 fixes', () => {
     expect(shapeGeometry('circle')).toContain('r');
   });
 });
+
+describe('pass 14 fixes', () => {
+  it('caps tokens that use each other many times', async () => {
+    const { resolveTokenValue } = await import('./index');
+    const raw = Array(12).fill('var(--a)').join(' ');
+    const start = Date.now();
+    const out = resolveTokenValue(raw, new Map([['--a', raw]]));
+    expect(out.length).toBeLessThanOrEqual(8192);
+    expect(Date.now() - start).toBeLessThan(500);
+    expect(resolveTokenValue('var(--b)', new Map([['--b', 'var(--c)'], ['--c', 'red']]))).toBe('red');
+  });
+
+  it('parses deeply nested at-rules quickly', async () => {
+    const { parseCss } = await import('./index');
+    const start = Date.now();
+    const css = `${'@media x{'.repeat(8000)}${'a{color:red}'.repeat(1000)}`;
+    expect(() => parseCss(css)).not.toThrow();
+    expect(Date.now() - start).toBeLessThan(2000);
+  });
+
+  it('opens a template inside an <svg> when an instance lives in one', async () => {
+    const { createComponent, instantiateComponent, findTree, componentTreeId, insertionProblem } = await import('./index');
+    const def = createComponent('Link', createBranch({ tag: 'a', attrs: { href: '#' } }));
+    const tree = createTree('T', createBranch({ tag: 'body', type: 'root', children: [createBranch({ tag: 'svg', children: [instantiateComponent(def)] })] }));
+    const forest = { ...createForest('F', [tree]), components: [def] };
+    const opened = findTree(forest, componentTreeId(def.id))!;
+    expect(opened.root.tag).toBe('svg');
+    expect(insertionProblem(opened.root, def.root.id, createBranch({ tag: 'p' }))).toBeTruthy();
+  });
+});

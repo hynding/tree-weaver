@@ -486,3 +486,62 @@ describe('pass 13 fixes', () => {
     expect(nativeTypeName('MainAxisSize', 'flutter')).toBe('MainAxisSizeWidget');
   });
 });
+
+describe('pass 14 fixes', () => {
+  const jsx = (html: string, opts: Record<string, unknown> = {}) => {
+    const doc = importDocument(`<body>${html}</body>`, 'html');
+    const tree = doc.kind === 'tree' ? doc.tree : doc.forest.trees[0];
+    return exportComponent(tree, { framework: 'react', ...opts }).files[0].contents;
+  };
+
+  it('writes numbers and booleans the way React types them', () => {
+    const out = jsx('<table><tbody><tr><td colspan="2">x</td></tr></tbody></table><textarea rows="5"></textarea><input type="checkbox" checked="checked" maxlength="5" disabled="disabled">');
+    expect(out).toContain('colSpan={2}');
+    expect(out).toContain('rows={5}');
+    expect(out).toContain('maxLength={5}');
+    expect(out).toMatch(/defaultChecked[ />]/);
+    expect(out).not.toContain('defaultChecked=');
+    expect(out).not.toContain('disabled=');
+  });
+
+  it('turns a numeric prop into a number', () => {
+    const def = createComponent('Box', createBranch({ tag: 'div', attrs: { tabindex: '{{tab}}' } }));
+    const out = exportComponentDef(def, { framework: 'react' }).files[0].contents;
+    expect(out).toContain("tabIndex={tab === '' ? undefined : Number(tab)}");
+  });
+
+  it('writes xmlns:xlink as xmlnsXlink and drops other xmlns: names', () => {
+    const out = jsx('<svg xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:foo="urn:x" viewBox="0 0 2 2"></svg>');
+    expect(out).toContain('xmlnsXlink=');
+    expect(out).not.toMatch(/xmlns:/);
+  });
+
+  it('turns a <p> with a block anywhere below it into a div', () => {
+    for (const html of ['<p>See <a href="/x"><div>card</div></a></p>', '<p><span>a<div>b</div></span></p>', '<p><em>x<ul><li>y</li></ul></em></p>']) {
+      expect(jsx(html, { framework: 'svelte' })).not.toMatch(/<p[ >]/);
+    }
+    expect(jsx('<p>Hi <a href="/x">there</a></p>', { framework: 'svelte' })).toMatch(/<p[ >]/);
+  });
+
+  it('keeps kit order and a later kit\'s @import working', () => {
+    const tree = page([createBranch({ tag: 'p' })]);
+    const kits = [
+      { id: 'a', name: 'Base', css: '.card{padding:1rem}', enabled: true },
+      { id: 'b', name: 'Fonts', css: '@import url("https://fonts.example/x.css"); body{font-family:Inter}', enabled: true },
+      { id: 'c', name: 'Linked', css: '', href: 'https://cdn.example/l.css', enabled: true },
+    ];
+    const files = exportComponent(tree, { framework: 'react', kits }).files;
+    const main = files.find((f) => f.path === 'kits.css')!.contents;
+    const lines = main.split('\n').filter((l) => l.startsWith('@import'));
+    expect(lines).toEqual(['@import url("./kits/base.css");', '@import url("./kits/fonts.css");', '@import url("https://cdn.example/l.css");']);
+    expect(files.find((f) => f.path === 'kits/fonts.css')!.contents).toMatch(/^\/\*[^]*?\*\/\n@import/);
+    // Without a clash, one file as before.
+    const one = exportComponent(tree, { framework: 'react', kits: kits.slice(0, 1) }).files.filter((f) => f.path.startsWith('kits'));
+    expect(one.map((f) => f.path)).toEqual(['kits.css']);
+  });
+
+  it('keeps adjacent inline elements together in HTML and Svelte', () => {
+    const out = jsx('<div><span>a</span><span>b</span><p>c</p></div>', { framework: 'svelte' });
+    expect(out).toContain('<span>a</span><span>b</span>');
+  });
+});

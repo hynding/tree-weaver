@@ -339,13 +339,24 @@ function leafEl(leaf: Leaf, inSvg: boolean, defaults?: Record<string, string>): 
  * warns about): a link in a link becomes a span, a paragraph or heading holding blocks a div,
  * rows straight under a table go in a tbody, and whitespace between table parts goes.
  */
+/** Whether a block element sits anywhere below `node` (Svelte refuses one at any depth under a `<p>`). */
+function blockBelow(node: Branch, inSvg = false): boolean {
+  return node.children.some((c) => {
+    if (!isBranch(c)) return false;
+    const lower = c.tag.toLowerCase();
+    if (inSvg) return blockBelow(c, lower !== 'foreignobject');
+    if (lower === 'svg') return blockBelow(c, true);
+    return !INLINE_TAGS.has(lower) || blockBelow(c);
+  });
+}
+
 export function repairNesting(node: Branch, ctx: { a?: boolean; form?: boolean; button?: boolean } = {}): Branch {
   const lower = node.tag.toLowerCase();
   if (lower === 'svg') return node;
   let tag = node.tag;
   if ((lower === 'a' && ctx.a) || (lower === 'button' && ctx.button)) tag = 'span';
   if (lower === 'form' && ctx.form) tag = 'div';
-  const holdsBlock = node.children.some((c) => isBranch(c) && !INLINE_TAGS.has(c.tag.toLowerCase()) && c.tag.toLowerCase() !== 'svg');
+  const holdsBlock = blockBelow(node);
   if ((lower === 'p' || /^h[1-6]$/.test(lower)) && holdsBlock) tag = 'div';
   const inner = { a: ctx.a || lower === 'a', form: ctx.form || lower === 'form', button: ctx.button || lower === 'button' };
   let children: TreeNode[] = node.children.map((c) => (isBranch(c) ? repairNesting(c, inner) : c));
@@ -434,10 +445,28 @@ const variantSuffix = `\${${VARIANT_CALL}}`;
 
 /* ------------------------------------------------------------- writers */
 
-const INLINE = new Set(['a', 'abbr', 'b', 'br', 'code', 'em', 'i', 'img', 'kbd', 'mark', 'q', 's', 'small', 'span', 'strong', 'sub', 'sup', 'time', 'u', 'tspan']);
+const INLINE = new Set([
+  'a', 'abbr', 'audio', 'b', 'bdi', 'bdo', 'br', 'button', 'canvas', 'cite', 'code', 'data', 'dfn', 'em', 'i', 'iframe', 'img', 'input', 'kbd', 'label',
+  'mark', 'output', 'picture', 'q', 's', 'samp', 'select', 'small', 'span', 'strong', 'sub', 'sup', 'svg', 'textarea', 'time', 'u', 'var', 'video', 'wbr', 'tspan',
+]);
 const isInlineEl = (el: El): boolean => el.kind === 'text' || INLINE.has(el.tag);
 /** Keep children on one line when line breaks could change the text: any text, or only inline elements. */
 const oneLine = (children: El[]): boolean => children.some((c) => c.kind === 'text') || children.every(isInlineEl);
+/**
+ * Children on separate lines for HTML, Vue and Svelte. HTML keeps the line break between two
+ * inline elements as a space, so runs of inline siblings stay together on one line.
+ */
+function childLines(children: El[], pad: string, write: (c: El) => string): string {
+  const lines: string[] = [];
+  let prevInline = false;
+  for (const c of children) {
+    const inline = isInlineEl(c);
+    if (inline && prevInline) lines[lines.length - 1] += write(c);
+    else lines.push(pad + write(c));
+    prevInline = inline;
+  }
+  return lines.join('\n');
+}
 
 /** HTML (also Vue and Svelte templates). */
 function writeHtml(el: El, depth: number, mode: 'html' | 'vue' | 'svelte', props = false): string {
@@ -466,7 +495,7 @@ function writeHtml(el: El, depth: number, mode: 'html' | 'vue' | 'svelte', props
   if (!el.children.length) return el.svg ? `<${el.tag}${attrs} />` : `<${el.tag}${attrs}></${el.tag}>`;
   if (oneLine(el.children)) return `<${el.tag}${attrs}>${el.children.map((c) => writeHtml(c, depth + 1, mode)).join('')}</${el.tag}>`;
   const pad = '  '.repeat(depth + 1);
-  return `<${el.tag}${attrs}>\n${el.children.map((c) => pad + writeHtml(c, depth + 1, mode)).join('\n')}\n${'  '.repeat(depth)}</${el.tag}>`;
+  return `<${el.tag}${attrs}>\n${childLines(el.children, pad, (c) => writeHtml(c, depth + 1, mode))}\n${'  '.repeat(depth)}</${el.tag}>`;
 }
 
 const JSX_ATTRS: Record<string, string> = {
@@ -531,6 +560,9 @@ const BOOLEAN_ATTRS = new Set([
   'ismap', 'itemscope', 'loop', 'multiple', 'muted', 'nomodule', 'novalidate', 'open', 'playsinline', 'readonly', 'required', 'reversed', 'selected',
 ]);
 
+/** HTML attributes React's types take as numbers. */
+const NUMERIC_ATTRS = new Set(['tabindex', 'colspan', 'rowspan', 'rows', 'cols', 'size', 'maxlength', 'minlength', 'start', 'span']);
+
 /** SVG presentation attributes, which React takes in camel case (`strokeWidth`). */
 const SVG_DASHED = new Set(
   'alignment-baseline baseline-shift clip-path clip-rule color-interpolation color-interpolation-filters color-profile color-rendering dominant-baseline enable-background fill-opacity fill-rule flood-color flood-opacity font-family font-size font-size-adjust font-stretch font-style font-variant font-weight glyph-name glyph-orientation-horizontal glyph-orientation-vertical horiz-adv-x image-rendering letter-spacing lighting-color marker-end marker-mid marker-start overline-position overline-thickness paint-order panose-1 pointer-events rendering-intent shape-rendering stop-color stop-opacity strikethrough-position strikethrough-thickness stroke-dasharray stroke-dashoffset stroke-linecap stroke-linejoin stroke-miterlimit stroke-opacity stroke-width text-anchor text-decoration text-rendering underline-position underline-thickness unicode-bidi unicode-range units-per-em v-alphabetic v-hanging v-ideographic v-mathematical vector-effect vert-adv-y vert-origin-x vert-origin-y word-spacing writing-mode x-height'.split(' '),
@@ -543,7 +575,7 @@ export function jsxAttrName(name: string): string {
   if (lower.startsWith('data-') || lower.startsWith('aria-')) return lower;
   // Only names React knows in camel case are converted (SVG presentation attributes, `xlink:*`);
   // React passes any other name through as written (`hx-post`, a custom element's `some-attr`).
-  if (SVG_DASHED.has(lower) || /^(xlink|xml):/.test(lower)) return lower.replace(/[-:]([a-z])/g, (_m, c: string) => c.toUpperCase());
+  if (SVG_DASHED.has(lower) || /^(xlink|xml|xmlns):/.test(lower)) return lower.replace(/[-:]([a-z])/g, (_m, c: string) => c.toUpperCase());
   return name;
 }
 
@@ -568,7 +600,7 @@ function writePropsEl(el: El & { kind: 'el' }, depth: number, mode: 'vue' | 'sve
   if (!el.children.length) return el.svg ? `<${el.tag}${cond}${attrs} />` : `<${el.tag}${cond}${attrs}></${el.tag}>`;
   if (oneLine(el.children)) return `<${el.tag}${cond}${attrs}>${el.children.map((c) => writeHtml(c, depth + 1, mode, true)).join('')}</${el.tag}>`;
   const pad = '  '.repeat(depth + 1);
-  return `<${el.tag}${cond}${attrs}>\n${el.children.map((c) => pad + writeHtml(c, depth + 1, mode, true)).join('\n')}\n${'  '.repeat(depth)}</${el.tag}>`;
+  return `<${el.tag}${cond}${attrs}>\n${childLines(el.children, pad, (c) => writeHtml(c, depth + 1, mode, true))}\n${'  '.repeat(depth)}</${el.tag}>`;
 }
 
 const jsxString = (value: string): string => JSON.stringify(value);
@@ -588,16 +620,23 @@ function writeJsx(el: El, depth: number, props = false): string {
     return `{${cond.negate ? '!' : ''}${cond.prop} && (${writeJsx(rest, depth, props)})}`;
   }
   const attrs = el.attrs
-    // A `.` in a name is fine in HTML but not in JSX.
-    .filter(([n]) => !n.includes('.'))
+    // A `.` in a name is fine in HTML but not in JSX, and of the `xmlns:` names React knows only `xmlnsXlink`.
+    .filter(([n]) => !n.includes('.') && !(/^xmlns:/i.test(n) && n.toLowerCase() !== 'xmlns:xlink'))
     .map(([n, v]) => {
       // Without onChange, React makes `value`/`checked` read-only; the default* props keep fields editable.
       const formField = (el.tag === 'input' || el.tag === 'textarea' || el.tag === 'select') && (n === 'value' || n === 'checked');
       const name = formField ? (n === 'value' ? 'defaultValue' : 'defaultChecked') : jsxAttrName(n);
       if (props && n === 'class' && el.variantClass) return ` ${name}={${templateLiteral(v, variantSuffix)}}`;
-      if (props && hasProps(v)) return ` ${name}={${propExpr(v)}}`;
-      // A bare JSX attribute means `true`, which only a boolean attribute should get.
-      if (v === '' && !el.svg && BOOLEAN_ATTRS.has(n.toLowerCase())) return ` ${name}`;
+      const numeric = !el.svg && NUMERIC_ATTRS.has(n.toLowerCase());
+      if (props && hasProps(v)) {
+        const expr = propExpr(v);
+        // An empty prop leaves the attribute off, as the string form does, rather than giving 0.
+        return numeric ? ` ${name}={${expr} === '' ? undefined : Number(${expr})}` : ` ${name}={${expr}}`;
+      }
+      // HTML turns a boolean attribute on whatever its value, and React (and its types) take `true`.
+      if (!el.svg && BOOLEAN_ATTRS.has(n.toLowerCase()) && !(n.toLowerCase() === 'hidden' && v.toLowerCase() === 'until-found')) return ` ${name}`;
+      // React's types take numbers for these.
+      if (numeric && /^-?\d{1,15}$/.test(v.trim())) return ` ${name}={${Number(v.trim())}}`;
       return /["\\{}<>\n]/.test(v) ? ` ${name}={${jsxString(v)}}` : ` ${name}="${v.replace(/&/g, '&amp;')}"`;
     })
     .join('');
@@ -609,12 +648,33 @@ function writeJsx(el: El, depth: number, props = false): string {
 
 /* --------------------------------------------------------------- files */
 
-function kitsCss(kits: DesignKit[]): string {
-  const enabled = kits.filter((k) => k.enabled && k.source !== 'env');
-  if (!enabled.length) return '';
-  const imports = enabled.filter((k) => k.href).map((k) => `@import url("${k.href!.replace(/["\\]/g, '')}");`);
-  const inline = enabled.filter((k) => !k.href && k.css.trim()).map((k) => `/* ${commentText(k.name)} */\n${k.css.trim()}`);
-  return `/* Design kits from Tree Weaver, in load order. */\n${[...imports, ...inline].join('\n\n')}\n`;
+/**
+ * The design kit files: `kits.css`, in kit order. CSS takes `@import` only before any rule, so
+ * when a linked kit follows an inline one, or a later inline kit has its own `@import`, each
+ * inline kit gets its own file under `kits/` and `kits.css` imports them all in order.
+ */
+function kitFiles(kits: DesignKit[]): ComponentFile[] {
+  const enabled = kits.filter((k) => k.enabled && k.source !== 'env' && (k.href || k.css.trim()));
+  if (!enabled.length) return [];
+  const link = (href: string) => `@import url("${href.replace(/["\\\n\r]/g, '')}");`;
+  const inlineCss = (k: DesignKit) => `/* ${commentText(k.name)} */\n${k.css.trim()}`;
+  const firstInline = enabled.findIndex((k) => !k.href);
+  const together =
+    firstInline < 0 || enabled.slice(firstInline).every((k, i) => !k.href && (i === 0 || !/@import/i.test(k.css)));
+  const head = '/* Design kits from Tree Weaver, in load order. */\n';
+  if (together) return [{ path: 'kits.css', contents: `${head}${enabled.map((k) => (k.href ? link(k.href) : inlineCss(k))).join('\n\n')}\n` }];
+  const used = new Set<string>();
+  const files: ComponentFile[] = [];
+  const lines = enabled.map((k) => {
+    if (k.href) return link(k.href);
+    const base = slugify(k.name, 'kit');
+    let slug = base;
+    for (let n = 2; used.has(slug); n++) slug = `${base}-${n}`;
+    used.add(slug);
+    files.push({ path: `kits/${slug}.css`, contents: `${inlineCss(k)}\n` });
+    return link(`./kits/${slug}.css`);
+  });
+  return [{ path: 'kits.css', contents: `${head}${lines.join('\n')}\n` }, ...files];
 }
 
 /** Export a tree as a component (or a plain HTML page) with its styles. */
@@ -648,7 +708,8 @@ export function exportComponent(tree: Tree, opts: ComponentOptions): ComponentEx
   }
 
   const css = styling === 'css' ? renderDisplayCss(build.rules) : '';
-  const kitCss = kitsCss(opts.kits ?? []);
+  const kitFileList = kitFiles(opts.kits ?? []);
+  const kitCss = kitFileList.length > 0;
   const files: ComponentFile[] = [];
   const header = (comment: (s: string) => string) => comment(`Generated by Tree Weaver from the tree "${commentText(tree.name)}".`);
   const cssFile = `${name}.css`;
@@ -700,7 +761,7 @@ export function exportComponent(tree: Tree, opts: ComponentOptions): ComponentEx
       throw new Error(`Unknown framework "${String(framework)}"`);
   }
   if (css && framework !== 'vue' && framework !== 'svelte') files.push({ path: cssFile, contents: `/* ${header((s) => s)} */\n${css}\n` });
-  if (kitCss) files.push({ path: 'kits.css', contents: kitCss });
+  files.push(...kitFileList);
   if (tokens.length) {
     files.push({ path: 'tokens.json', contents: `${JSON.stringify(tokensToDtcg(tokens), null, 2)}\n` });
     if (styling === 'tailwind') {
@@ -870,7 +931,8 @@ export function exportComponentDef(def: ComponentDef, opts: ComponentOptions): C
   const helper = variants.length ? variantHelper(rootCls, opts.typescript && framework === 'react' ? name : undefined) : '';
 
   const css = styling === 'css' ? renderDisplayCss(build.rules) : '';
-  const kitCss = kitsCss(opts.kits ?? []);
+  const kitFileList = kitFiles(opts.kits ?? []);
+  const kitCss = kitFileList.length > 0;
   const files: ComponentFile[] = [];
   const header = commentText(`Generated by Tree Weaver from the component "${def.name}".${variants.length ? ` Variants: ${options.join(', ')}.` : ''}`);
   const cssFile = `${name}.css`;
@@ -924,7 +986,7 @@ export function exportComponentDef(def: ComponentDef, opts: ComponentOptions): C
   }
   if (docs.length) files[0].contents = files[0].contents.replace(header, () => commentText(`${header} Props: ${docs.join('; ')}.`));
   if (css && framework === 'react') files.push({ path: cssFile, contents: `/* ${header} */\n${css}\n` });
-  if (kitCss) files.push({ path: 'kits.css', contents: kitCss });
+  files.push(...kitFileList);
   if (tokens.length) files.push({ path: 'tokens.json', contents: `${JSON.stringify(tokensToDtcg(tokens), null, 2)}\n` });
   return { name, framework, styling, entry, files };
 }

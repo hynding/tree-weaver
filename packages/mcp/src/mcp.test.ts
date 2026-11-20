@@ -354,5 +354,19 @@ describe('Tree Weaver MCP server', () => {
     const both = await call('diff', { before: { path: 'home.json' }, after: { path: 'home.json' } });
     expect(both.text).toBe('No changes.');
   });
+
+  it('keeps both of two parallel edits to one file', async () => {
+    const { call } = await connect();
+    await call('create_tree', { path: 'par.json', template: 'blank', name: 'Par' });
+    const [a, b] = await Promise.all([
+      call('patch_tree', { path: 'par.json', ops: [{ op: 'insert', parent: '/', node: 'p: from-a' }] }),
+      call('patch_tree', { path: 'par.json', ops: [{ op: 'insert', parent: '/', node: 'p: from-b' }] }),
+    ]);
+    expect(a.isError).toBeFalsy();
+    expect(b.isError).toBeFalsy();
+    const text = readFileSync(join(root, 'par.json'), 'utf8');
+    expect(text).toContain('from-a');
+    expect(text).toContain('from-b');
+  });
 });
 

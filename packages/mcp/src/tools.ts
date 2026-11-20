@@ -95,8 +95,27 @@ interface Loaded {
   text: string;
 }
 
+/** Tools that read a file, change it and write it back (or write its version log). */
+const WRITING_TOOLS = ['createTree', 'patchTree', 'saveVersion', 'restoreVersion', 'setTokens', 'saveComponent', 'insertComponent'] as const;
+
 export class Tools {
-  constructor(readonly ws: Workspace) {}
+  /** The end of the queue of writing calls. */
+  private queue: Promise<unknown> = Promise.resolve();
+
+  constructor(readonly ws: Workspace) {
+    // An MCP client can send calls in parallel. Writing calls run one at a time, so two edits to the
+    // same file both land (and both reach its version log) instead of one overwriting the other.
+    for (const name of WRITING_TOOLS) {
+      const run = this[name].bind(this) as (args: never) => Promise<ToolOutput>;
+      (this as Record<string, unknown>)[name] = (args: never) => this.serial(() => run(args));
+    }
+  }
+
+  private serial<T>(fn: () => Promise<T>): Promise<T> {
+    const result = this.queue.then(fn, fn);
+    this.queue = result.catch(() => undefined);
+    return result;
+  }
 
   /* ---------------------------------------------------------------- helpers */
 
