@@ -905,6 +905,32 @@ function selectedOptions(select: El & { kind: 'el' }, props: false | ReadonlySet
 }
 
 /** `props` is false outside a component; in one, the names of its boolean props. */
+/**
+ * Attributes React's types take only fixed values for (`type` on a <button>: "submit" | "button" | "reset").
+ * A prop filling one is typed `string`, so a TypeScript export casts it to the attribute's own type.
+ */
+const REACT_UNION_ATTRS: Record<string, readonly string[]> = {
+  '*': ['inputMode', 'enterKeyHint', 'draggable', 'spellCheck', 'translate', 'contentEditable'],
+  button: ['type'],
+  ol: ['type'],
+  img: ['loading', 'decoding', 'crossOrigin', 'referrerPolicy'],
+  iframe: ['loading', 'referrerPolicy'],
+  a: ['referrerPolicy'],
+  area: ['referrerPolicy'],
+  link: ['crossOrigin', 'referrerPolicy'],
+  script: ['crossOrigin', 'referrerPolicy'],
+  video: ['crossOrigin'],
+  audio: ['crossOrigin'],
+};
+/** Set while writing a TypeScript React file; `used` says whether a cast needs the `ComponentProps` import. */
+const tsJsx = { on: false, used: false };
+const tsCast = (el: El & { kind: 'el' }, name: string, expr: string): string => {
+  if (!tsJsx.on || el.svg || el.tag.includes('-')) return expr;
+  if (!REACT_UNION_ATTRS['*'].includes(name) && !(Object.hasOwn(REACT_UNION_ATTRS, el.tag) && REACT_UNION_ATTRS[el.tag].includes(name))) return expr;
+  tsJsx.used = true;
+  return `(${expr}) as ComponentProps<'${el.tag}'>['${name}']`;
+};
+
 function writeJsx(el: El, depth: number, props: false | ReadonlySet<string> = false): string {
   // React refuses children on a void element (`<img>x</img>`); HTML drops them anyway.
   if (el.kind === 'el' && !el.svg && VOID_TAGS.has(el.tag.toLowerCase()) && el.children.length) return writeJsx({ ...el, children: [] }, depth, props);
@@ -953,12 +979,12 @@ function writeJsx(el: El, depth: number, props: false | ReadonlySet<string> = fa
         const expr = propExpr(v);
         // `globalThis.Number`: a component or prop may itself be called Number.
         // A boolean prop in any other attribute reads as the editor writes it: 'true', or nothing when off.
-        if (props.has(expr)) return ` ${name}={${boolAttr ? expr : numeric ? `globalThis.Number(${expr})` : `${expr} ? 'true' : ''`}}`;
+        if (props.has(expr)) return ` ${name}={${boolAttr ? expr : numeric ? `globalThis.Number(${expr})` : tsCast(el, name, `${expr} ? 'true' : ''`)}}`;
         // A text prop turns a boolean attribute on as HTML does (any value), unless it is "false".
         if (boolAttr) return ` ${name}={globalThis.String(${expr}) !== 'false'}`;
         // An empty prop leaves the attribute off, as the string form does, rather than giving 0.
         // A prop with no default is undefined, which would give NaN.
-        return numeric ? ` ${name}={${expr} == null || ${expr} === '' ? undefined : globalThis.Number(${expr})}` : ` ${name}={${propExpr(v, props)}}`;
+        return numeric ? ` ${name}={${expr} == null || ${expr} === '' ? undefined : globalThis.Number(${expr})}` : ` ${name}={${tsCast(el, name, propExpr(v, props))}}`;
       }
       // HTML turns a boolean attribute on whatever its value, and React (and its types) take `true`.
       if (boolAttr) return ` ${name}`;
@@ -1359,9 +1385,18 @@ export function exportComponentDef(def: ComponentDef, opts: ComponentOptions): C
           : '';
       const iface = opts.typescript ? `${types}\nexport interface ${name}Props {\n${allProps.map((p) => `  ${p.name}?: ${tsType(p)};`).join('\n')}\n}\n` : '';
       const params = allProps.length ? `{ ${allProps.map((p) => `${p.name} = ${jsDefault(p)}`).join(', ')} }${opts.typescript ? `: ${name}Props` : ''}` : '';
+      tsJsx.on = !!opts.typescript;
+      tsJsx.used = false;
+      let jsx: string;
+      try {
+        jsx = writeJsx(root, 2, booleanProps);
+      } finally {
+        tsJsx.on = false;
+      }
+      const typeImport = tsJsx.used ? `import type { ComponentProps } from 'react';\n` : '';
       files.push({
         path: entry,
-        contents: `// ${header}\n${imports ? `${imports}\n` : ''}${iface}${helper ? `\n${helper}\n` : ''}\nexport default function ${name}(${params}) {\n  return (\n    ${writeJsx(root, 2, booleanProps)}\n  );\n}\n`,
+        contents: `// ${header}\n${typeImport}${imports ? `${imports}\n` : ''}${iface}${helper ? `\n${helper}\n` : ''}\nexport default function ${name}(${params}) {\n  return (\n    ${jsx}\n  );\n}\n`,
       });
       break;
     }
