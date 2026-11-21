@@ -1724,3 +1724,15 @@ describe('pass 54 fixes', () => {
     expect(base).toMatch(/sub, sup \{ vertical-align: revert/);
   });
 });
+
+describe('TypeScript React prop types', () => {
+  it('casts a prop that fills an attribute React types to fixed values', () => {
+    const def = createComponent('Submit', createBranch({ tag: 'button', attrs: { type: '{{kind}}', title: '{{kind}}' }, children: [text('Go')] }));
+    const tsx = exportComponentDef(def, { framework: 'react', typescript: true }).files[0].contents;
+    expect(tsx).toContain(`import type { ComponentProps } from 'react';`);
+    expect(tsx).toContain(`type={(kind) as ComponentProps<'button'>['type']}`);
+    expect(tsx).toContain('title={kind}');
+    const jsx = exportComponentDef(def, { framework: 'react' }).files[0].contents;
+    expect(jsx).not.toContain('ComponentProps');
+  });
+});
