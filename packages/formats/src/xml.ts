@@ -114,7 +114,8 @@ const elements = (el: Element, name?: string): Element[] =>
 const localName = (el: Element): string => el.name.replace(/^.*:/, '');
 
 const textOf = (el: Element): string =>
-  el.children.map((c) => ('data' in c ? (c.data as string) : c.type === 'tag' ? textOf(c as Element) : '')).join('');
+  // CDATA sections hold their text in a child node.
+  el.children.map((c) => ('data' in c ? (c.data as string) : c.type === 'tag' || c.type === 'cdata' ? textOf(c as Element) : '')).join('');
 
 function json(text: string, what: string): unknown {
   try {

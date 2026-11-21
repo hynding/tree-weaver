@@ -497,6 +497,8 @@ export function applyPatch(root: Branch, ops: unknown, options: PatchOptions = {
             if (!canHaveChildren(node)) throw new Error(`A <${(node as Branch).tag}> can’t hold text`);
             const leaf = node.children.length === 1 && !isBranch(node.children[0]) && node.children[0].type === 'text' ? node.children[0] : null;
             const text = leaf ? { ...leaf, value: op.value } : createLeaf(op.value);
+            // Text straight in a <table> or <tr> is moved out by the HTML parser.
+            placeable(node, text);
             current = updateNode(current, node.id, (b) => ({ ...(b as Branch), children: [text] }));
           } else {
             if (node.type !== 'text') throw new Error(`This is ${node.type === 'image' ? 'an image' : 'a shape'} leaf; use update with "value"`);

@@ -58,11 +58,14 @@ export function normalizeNode(value: unknown, path = 'node', seen = new Set<stri
   if (!isObj(value)) throw new TreeDataError('Expected a branch or leaf object', path);
   const kind = value.kind ?? (value.tag !== undefined || value.children !== undefined ? 'branch' : 'leaf');
   if (kind === 'leaf') {
-    const type = value.type === 'image' || value.type === 'shape' ? value.type : 'text';
+    // `{ "src": "…", "alt": "…" }` with no type is an image, as `src` says.
+    const srcOnly = value.type === undefined && value.src !== undefined && value.value === undefined && value.text === undefined;
+    const type = value.type === 'image' || value.type === 'shape' ? value.type : srcOnly ? 'image' : 'text';
     let content = str(value.value ?? value.text ?? value.src);
     if (type === 'shape') content = canonicalTag(content);
     const leaf: Leaf = { kind: 'leaf', id: str(value.id), type, value: content };
     const attrs = stringMap(value.attrs);
+    if (type === 'image' && typeof value.alt === 'string' && attrs.alt === undefined) attrs.alt = value.alt;
     if (Object.keys(attrs).length) leaf.attrs = attrs;
     return uniq(leaf, seen);
   }
@@ -120,7 +123,7 @@ export function normalizeComponent(value: unknown, path = 'component'): Componen
   for (const [i, v] of (Array.isArray(value.variants) ? value.variants : []).entries()) {
     if (!isObj(v)) throw new TreeDataError('Expected a variant object', `${path}.variants[${i}]`);
     const name = str(v.name).trim();
-    if (!name || variants.some((w) => w.name === name)) continue;
+    if (!name || name === '-' || variants.some((w) => w.name === name)) continue;
     const styles: Record<string, DisplayStyles> = {};
     for (const [id, s] of Object.entries(isObj(v.styles) ? v.styles : {})) {
       const ds = normalizeStyles(s);
@@ -156,7 +159,8 @@ export function normalizeTree(value: unknown, path = 'tree', seen = new Set<stri
   root.type ??= 'root';
   const ts = now();
   return {
-    id: str(value.id) || createId('t'),
+    // `component:` ids name a component opened as a tree (COMPONENT_TREE_PREFIX); a real tree can't use one.
+    id: (str(value.id).startsWith('component:') ? '' : str(value.id)) || createId('t'),
     name: str(value.name).trim() || 'Untitled tree',
     root,
     createdAt: str(value.createdAt) || ts,

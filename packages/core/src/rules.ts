@@ -1,8 +1,9 @@
+import { cssOverlaps } from './longhands';
 import { createId } from './create';
-import { parseCss, type CssNode } from './css';
-import { displayForMedia } from './displays';
+import { declarationList, parseCss, type CssNode } from './css';
+import { DISPLAY_IDS, displayForMedia } from './displays';
 import type { DesignKit, DisplayId, StyleMap, StyleRule } from './model';
-import { bracketsBalance, renderDisplayCss, untilStable } from './render';
+import { bracketsBalance, isSafeCssProp, renderDisplayCss, sanitizeCssValue, untilStable } from './render';
 
 /**
  * Custom classes and selectors. They live in an editable design kit: a kit whose
@@ -17,16 +18,45 @@ export const isEditableKit = (kit: DesignKit): kit is DesignKit & { rules: Style
 
 /** Tidy a selector so it can't break out of its rule: no braces, semicolons, comments or tags. */
 export function sanitizeSelector(selector: string): string {
+  // Repeated until nothing changes: dropping a character can bring `/` and `*` together.
   const out = untilStable(selector, (s) =>
-    s
-      .replace(/\/\*[\s\S]*?(\*\/|$)/g, '')
-      .replace(/<\/?(style|script)/gi, '')
-      .replace(/[{};@]/g, ''),
+    selectorPunctuation(
+      s
+        .replace(/\/\*[\s\S]*?(\*\/|$)/g, '')
+        .replace(/<\/?(style|script)/gi, '')
+        .replace(/[\n\r\f]+/g, ' '),
+    ) ?? '',
   )
     .replace(/\s+/g, ' ')
     .trim();
   // An unclosed `(` or `[` would swallow every rule after it.
   return bracketsBalance(out) ? out : '';
+}
+
+/**
+ * Drop `{`, `}`, `;` and `@` that could end the rule or start another, keeping escaped ones
+ * (`.\@container`, Tailwind's `\@md\:flex`) and those inside strings (`[data-x="a;b"]`).
+ * Null when a string is left open.
+ */
+function selectorPunctuation(selector: string): string | null {
+  let out = '';
+  let quote = '';
+  for (let i = 0; i < selector.length; i++) {
+    const c = selector[i];
+    if (c === '\\') {
+      // A trailing backslash would escape whatever the rule adds next.
+      if (i + 1 < selector.length) out += c + selector[++i];
+      continue;
+    }
+    if (quote) {
+      if (c === quote) quote = '';
+      out += c;
+    } else if (c === '"' || c === "'") {
+      quote = c;
+      out += c;
+    } else if (!/[{};@]/.test(c)) out += c;
+  }
+  return quote ? null : out;
 }
 
 const CLASS_NAME = /^-?[_a-zA-Z][_a-zA-Z0-9-]*$/;
@@ -63,6 +93,18 @@ export interface ParsedRules {
   rules: StyleRule[];
   /** At-rules and media queries that don't map to a display, which editable kits can't hold. */
   skipped: string[];
+  /**
+   * Rules whose effect depends on where they sit, which merging by selector would change: a
+   * property given twice in one rule (a fallback), a selector repeated after a rule that sets the
+   * same property, or a plain rule after a media query that sets the same property.
+   */
+  reordered: string[];
+  /**
+   * What the kit's CSS would lose or change once written back from rules: a nested rule, a
+   * property name or hack that isn't kept (`*zoom`), or a selector or value that has to be
+   * tidied (`\@`, `content: "{"`).
+   */
+  changed: string[];
 }
 
 /**
@@ -74,9 +116,45 @@ export function parseRulesCss(css: string, previous: StyleRule[] = []): ParsedRu
   const bySelector = new Map<string, StyleRule>();
   const skipped: string[] = [];
   const known = new Map(previous.map((r) => [r.selector, r.id]));
-  const add = (selector: string, display: DisplayId, declarations: StyleMap) => {
+  const reordered: string[] = [];
+  const seen: { selector: string; display: DisplayId; props: Set<string> }[] = [];
+  const note = (text: string) => {
+    if (!reordered.includes(text)) reordered.push(text);
+  };
+  const changed: string[] = [];
+  const change = (text: string) => {
+    if (!changed.includes(text)) changed.push(text);
+  };
+  const add = (selector: string, display: DisplayId, declarations: StyleMap, body: string) => {
     const sel = sanitizeSelector(selector);
+    const plain = selector.replace(/\s+/g, ' ').trim();
+    if (sel !== plain) change(`the selector ${plain || selector}`);
+    // Strings set aside, a brace left in the body is a nested rule, which rules can't hold.
+    if (/[{}]/.test(body.replace(/"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'/g, ''))) change(`a rule nested in ${plain}`);
+    const entries = declarationList(body);
+    for (const [prop, value] of entries) {
+      if (!isSafeCssProp(prop)) change(`${prop} in ${plain}`);
+      // Line breaks in a value (grid areas) are kept as spaces, which reads the same.
+      else if (sanitizeCssValue(value) !== value.replace(/[\n\r\f]+/g, ' ').trim()) change(`the ${prop} value in ${plain}`);
+    }
     if (!sel || !Object.keys(declarations).length) return;
+    const list = entries.map(([prop]) => prop);
+    const props = new Set(list);
+    if (props.size < list.length) note(`a property given twice in ${sel}`);
+    // A shorthand and its longhands clash too (`padding` and `padding-left`).
+    const overlaps = (other: Set<string>) => [...props].some((p) => other.has(p) || [...other].some((o) => cssOverlaps(p, o)));
+    let last = -1;
+    seen.forEach((r, i) => {
+      if (r.selector === sel && r.display === display) last = i;
+    });
+    if (last >= 0 && seen.slice(last + 1).some((r) => overlaps(r.props))) note(`${sel} set again after other rules`);
+    if (display === 'lg' && seen.some((r) => r.display !== 'lg' && overlaps(r.props))) note(`${sel} after a media query`);
+    // Display blocks are written back in display order (tablet before the phones), so a rule
+    // that comes after one written later would lose to it once converted.
+    else if (seen.some((r) => r.display !== 'lg' && DISPLAY_IDS.indexOf(r.display) > DISPLAY_IDS.indexOf(display) && overlaps(r.props))) {
+      note(`${sel} after a narrower display's media query`);
+    }
+    seen.push({ selector: sel, display, props });
     let rule = bySelector.get(sel);
     if (!rule) {
       rule = { id: known.get(sel) ?? createId('r'), selector: sel, styles: {} };
@@ -87,7 +165,7 @@ export function parseRulesCss(css: string, previous: StyleRule[] = []): ParsedRu
   const visit = (nodes: CssNode[], display: DisplayId | null) => {
     for (const node of nodes) {
       if (node.type === 'rule') {
-        if (display) add(node.selector, display, node.declarations);
+        if (display) add(node.selector, display, node.declarations, node.body);
       } else if (!display || node.name !== 'media' || !node.children) {
         skipped.push(`@${node.name}${node.prelude ? ` ${node.prelude}` : ''}`);
       } else {
@@ -98,7 +176,7 @@ export function parseRulesCss(css: string, previous: StyleRule[] = []): ParsedRu
     }
   };
   visit(parseCss(css), 'lg');
-  return { rules: [...bySelector.values()], skipped };
+  return { rules: [...bySelector.values()], skipped, reordered, changed };
 }
 
 /** Set or clear one declaration of a rule on a display. */

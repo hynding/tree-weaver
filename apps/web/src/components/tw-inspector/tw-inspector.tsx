@@ -49,6 +49,7 @@ import {
   type GridTrack,
   type Leaf,
   type StyleMap,
+  isSafeAttr,
 } from '@tree-weaver/core';
 import { kitClasses } from '@tree-weaver/kits';
 import {
@@ -314,9 +315,8 @@ export class TwInspector {
           {ATTR_LABELS[name] ?? name}
         </label>
         {name === 'd' || name === 'points' ? (
-          <textarea id={`shape-${name}`} class="textarea mono" rows={3} onChange={(e) => set(name, (e.target as HTMLTextAreaElement).value)}>
-            {attrs[name] ?? ''}
-          </textarea>
+          // `value`, not child text: child text only sets the default, which typing makes stale (undo, a peer's edit).
+          <textarea id={`shape-${name}`} class="textarea mono" rows={3} value={attrs[name] ?? ''} onChange={(e) => set(name, (e.target as HTMLTextAreaElement).value)} />
         ) : (
           <input id={`shape-${name}`} class="input mono" value={attrs[name] ?? ''} list={SUGGEST[name] ? `tw-dl-${name}` : undefined} onChange={(e) => set(name, (e.target as HTMLInputElement).value)} />
         )}
@@ -355,10 +355,9 @@ export class TwInspector {
             class="textarea prose"
             aria-label="Text"
             rows={5}
+            value={leaf.value}
             onChange={(e) => updateLeaf(leaf.id, { value: (e.target as HTMLTextAreaElement).value })}
-          >
-            {leaf.value}
-          </textarea>
+          />
         ) : (
           [
             <div class="field" key={`${leaf.id}-src`}>
@@ -398,8 +397,13 @@ export class TwInspector {
               value={branch.tag}
               list={this.inSvg(branch) ? 'tw-dl-svg-tags' : 'tw-dl-tags'}
               onChange={(e) => {
-                const tag = canonicalTag((e.target as HTMLInputElement).value);
+                const input = e.target as HTMLInputElement;
+                const tag = canonicalTag(input.value);
                 if (/^[a-z][a-zA-Z0-9-]*$/.test(tag)) updateBranch(branch.id, { tag });
+                else {
+                  toast(`“${input.value}” isn't a valid tag name`, 'error');
+                  input.value = branch.tag;
+                }
               }}
             />
           </div>
@@ -431,18 +435,20 @@ export class TwInspector {
         {branch.classes.length ? (
           <div class="chips">
             {branch.classes.map((c) => {
-              const custom = findRule({ selector: `.${c}` });
+              // Classes like `w-1/2` need escaping to make a valid selector.
+              const selector = `.${CSS.escape(c)}`;
+              const custom = findRule({ selector });
               const known = defined.has(c);
               return (
                 <span class={{ chip: true, undefined: !known }} title={known ? undefined : `No kit defines .${c} yet`}>
                   {custom ? (
-                    <button class="chip-link" title={`Edit .${c} in the Classes tab`} onClick={() => showRule(custom.rule.id)}>
+                    <button class="chip-link" title={`Edit ${selector} in the Classes tab`} onClick={() => showRule(custom.rule.id)}>
                       {c}
                     </button>
                   ) : known ? (
                     c
                   ) : (
-                    <button class="chip-link" title={`Create .${c} in the Classes tab`} onClick={() => addRule(`.${c}`)}>
+                    <button class="chip-link" title={`Create ${selector} in the Classes tab`} onClick={() => addRule(selector)}>
                       {c}
                     </button>
                   )}
@@ -1204,7 +1210,7 @@ export class TwInspector {
   private renderSource(rule: MatchedRule) {
     const { source } = rule;
     const line = rule.line ? <span class="style-line">:{rule.line}</span> : null;
-    const external = source.href ? (
+    const external = source.href && /^https?:\/\//i.test(source.href) ? (
       <a class="style-href" href={source.href} target="_blank" rel="noopener noreferrer" title={source.href} aria-label={`Open ${describeHref(source.href)}`}>
         <Icon name="link" />
       </a>
@@ -1344,7 +1350,13 @@ export class TwInspector {
     };
     const add = () => {
       const name = this.newAttr.name.trim();
-      if (/^[a-zA-Z_:][-a-zA-Z0-9_:.]*$/.test(name) && !/^on/i.test(name) && (name !== 'class' || !isBranch(node)) && name !== 'style') set(name, this.newAttr.value);
+      if (!name) return;
+      // The same rule the canvas and exports use: a name they would drop isn't stored either.
+      if (!isSafeAttr(name, this.newAttr.value) || (name.toLowerCase() === 'class' && isBranch(node))) {
+        toast(/^(class|style)$/i.test(name) ? `Set ${name.toLowerCase()} in the Classes or Styles section instead` : `“${name}” can't be added: it isn't kept when the layout renders or exports`);
+        return;
+      }
+      set(name, this.newAttr.value);
       this.newAttr = { name: '', value: '' };
     };
     return (

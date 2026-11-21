@@ -6,7 +6,9 @@ the link edits the same forest in real time:
 - the toolbar shows who is here, and what each person has selected is outlined on your canvas in
   their colour (when they are on the same tree);
 - changes merge per branch and per field: one person can restyle a card for tablet while another
-  rewrites its text, and both changes stay. When two people change the same field, or move the same
+  rewrites its text, and both changes stay. Each style property, attribute, class rule and token
+  is a field of its own, so two people editing different ones of the same branch or kit both keep
+  their edit. When two people change the same field, or move the same
   branch, at the same moment, the last change wins. A branch someone added inside a branch someone
   else deleted moves to the end of the tree instead of being lost;
 - **Undo** takes back only your own changes. Other people's changes show in the **History** tab

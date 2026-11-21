@@ -1,21 +1,26 @@
 import {
   CONTROL_CHARS,
   createId,
+  CUSTOM_KIT_SOURCE,
   isBranch,
+  isStylesheetUrl,
   isSvgRoot,
   renderNodeHtml,
   renderTreeCss,
   SVG_NAMESPACE,
+  TOKENS_KIT_SOURCE,
   walk,
   type Branch,
   type DesignKit,
   type DisplayStyles,
   type Tree,
 } from '@tree-weaver/core';
+
+const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 import type { ChildNode, Element } from 'domhandler';
 import { parseDocument } from 'htmlparser2';
 import { fromData } from './data';
-import { convertParts, readTreeCss, type Ctx } from './html';
+import { convertParts, readTreeCss, withMedia, type Ctx } from './html';
 import { FormatError, type TreeDocument } from './types';
 
 /*
@@ -56,14 +61,20 @@ export function exportSvg(tree: Tree, opts: SvgExportOptions = {}): string {
   const styles: string[] = [];
   for (const kit of (opts.kits ?? []).filter((k) => k.enabled)) {
     const css = kit.href ? `@import url("${kit.href.replace(/"/g, '%22')}");` : kit.css;
-    if (css.trim()) styles.push(`<style data-tw-kit="${xmlAttr(kit.id)}" data-tw-kit-name="${xmlAttr(kit.name)}">${cdata(css)}</style>`);
+    // The kind of kit rides along, as in an HTML export, so import gives back a linked,
+    // editable (custom classes) or tokens kit rather than plain CSS.
+    const kind = kit.href ? ` data-tw-kit-href="${xmlAttr(kit.href)}"` : `${kit.rules ? ' data-tw-kit-editable=""' : ''}${kit.tokens ? ' data-tw-kit-tokens=""' : ''}`;
+    if (css.trim()) styles.push(`<style data-tw-kit="${xmlAttr(kit.id)}" data-tw-kit-name="${xmlAttr(kit.name)}"${kind}>${cdata(css)}</style>`);
   }
   const branchCss = renderTreeCss(svg);
   if (branchCss) styles.push(`<style data-tw-styles="">${cdata(branchCss)}</style>`);
   // Designer markup keeps text leaves' ids on <tspan>s, which a standalone SVG draws the same.
   // The tree's name, and whether the namespace was added here, ride on the root so import can restore them.
   const marks = ` data-tw-tree-name="${xmlAttr(tree.name)}"${svg.attrs.xmlns === undefined ? ' data-tw-added-xmlns=""' : ''}`;
-  const markup = renderNodeHtml(svg, { pretty: true, xml: true, designer: true }).replace(/^<svg\b/, `$&${marks}`);
+  let markup = renderNodeHtml(svg, { pretty: true, xml: true, designer: true });
+  // `xlink:href` (common on <use>) needs its namespace declared, or the file isn't well-formed XML.
+  const xlink = svg.attrs['xmlns:xlink'] === undefined && /\sxlink:[\w-]+=/.test(markup) ? ' xmlns:xlink="http://www.w3.org/1999/xlink"' : '';
+  markup = markup.replace(/^<svg\b/, `$&${marks}${xlink}`);
   const body = styles.length ? markup.replace(/^(<svg\b[^>]*>)/, `$1\n  ${styles.join('\n  ')}`) : markup;
   const out = `<?xml version="1.0" encoding="UTF-8"?>\n<!-- ${tree.name.replace(/-(?=-)/g, '- ')} · made with Tree Weaver -->\n${body}\n`;
   // XML 1.0 can't hold these even as references.
@@ -114,8 +125,15 @@ export function importSvg(text: string): TreeDocument {
     if (el.name.replace(/^svg:/, '') !== 'style') continue;
     const css = textOf(el).trim();
     if (el.attribs['data-tw-styles'] !== undefined) readTreeCss(css, styles);
-    else if (el.attribs['data-tw-kit'] !== undefined) kits.push({ id: el.attribs['data-tw-kit'] || createId('k'), name: el.attribs['data-tw-kit-name'] || 'Design kit', css, enabled: true });
-    else if (css) looseCss.push(css);
+    else if (el.attribs['data-tw-kit'] !== undefined) {
+      const kit: Record<string, unknown> = { id: el.attribs['data-tw-kit'] || createId('k'), name: el.attribs['data-tw-kit-name'] || 'Design kit', css, enabled: true };
+      const href = (el.attribs['data-tw-kit-href'] ?? '').trim();
+      if (href && isStylesheetUrl(href)) Object.assign(kit, { href, css: '', source: href });
+      else if (el.attribs['data-tw-kit-editable'] !== undefined) Object.assign(kit, { editable: true, source: CUSTOM_KIT_SOURCE });
+      else if (el.attribs['data-tw-kit-tokens'] !== undefined) kit.source = TOKENS_KIT_SOURCE;
+      kits.push(kit);
+    }
+    else if (css) looseCss.push(withMedia(css, el.attribs.media));
   }
 
   const titleEl = top.children.find((c): c is Element => isElement(c) && c.name.replace(/^svg:/, '') === 'title');
@@ -127,11 +145,23 @@ export function importSvg(text: string): TreeDocument {
   const authored = top.attribs['data-tw'] !== undefined;
   if (looseCss.length) kits.push({ id: createId('k'), name: name ? `${name} styles` : 'Drawing styles', css: looseCss.join('\n\n'), enabled: true, source: 'svg' });
 
-  const ctx: Ctx = { styles };
+  const ctx: Ctx = { styles, xml: true };
   const root = convertParts('svg', clean(top).attribs, top.children, ctx, false);
   root.type ??= 'root';
   const rootAttrs = root.attrs as Record<string, string> | undefined;
   if (addedXmlns && rootAttrs?.xmlns === SVG_NAMESPACE) delete rootAttrs.xmlns;
+  // A Tree Weaver export gives the HTML in a <foreignObject> the XHTML namespace; the tree didn't have it.
+  if (authored) {
+    const drop = (n: Record<string, unknown>) => {
+      for (const c of (n.children as Record<string, unknown>[] | undefined) ?? []) {
+        if (c.kind !== 'branch') continue;
+        const attrs = c.attrs as Record<string, string> | undefined;
+        if (String(n.tag).toLowerCase() === 'foreignobject' && attrs?.xmlns === XHTML_NAMESPACE) delete attrs.xmlns;
+        drop(c);
+      }
+    };
+    drop(root);
+  }
   if (!authored) root.name ??= 'Drawing';
   return fromData({ tree: { name: name || 'Imported drawing', root }, kits }, 'svg');
 }

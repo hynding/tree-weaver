@@ -3,6 +3,8 @@ import { DISPLAY_IDS, getDisplay, resolveStyles } from './displays';
 import type { Branch, DisplayId, DisplayStyles, Forest, StyleMap, Tree, TreeNode } from './model';
 import { isBranch } from './model';
 import { isSvgOnly } from './svg';
+import { VOID_TAGS } from './ops';
+import { insertionProblem } from './patch';
 
 /**
  * Reusable components: a branch saved once in the forest, with props and variants, and used
@@ -117,7 +119,15 @@ export function fillPlaceholders(value: string, values: Record<string, string>):
   return value.replace(PLACEHOLDER, (_m, name: string) => (Object.hasOwn(values, name) ? values[name] : '') ?? '');
 }
 
-const truthy = (v: string | undefined) => !!v && v !== 'false' && v !== '0';
+/** Whether a boolean prop's value is on: anything but empty, "false" or "0". */
+export const isPropOn = (v: string | undefined): boolean => !!v && v !== 'false' && v !== '0';
+const truthy = isPropOn;
+
+/** HTML attributes that are on when present, whatever their value. */
+export const BOOLEAN_ATTRS: ReadonlySet<string> = new Set([
+  'allowfullscreen', 'async', 'autofocus', 'autoplay', 'checked', 'controls', 'default', 'defer', 'disabled', 'formnovalidate', 'hidden', 'inert',
+  'ismap', 'itemscope', 'loop', 'multiple', 'muted', 'nomodule', 'novalidate', 'open', 'playsinline', 'readonly', 'required', 'reversed', 'selected',
+]);
 
 /** Prop values for an instance: its own, then the defaults. */
 export function instanceValues(def: ComponentDef, instance: ComponentInstance | undefined): Record<string, string> {
@@ -130,13 +140,19 @@ export function instanceValues(def: ComponentDef, instance: ComponentInstance | 
 /** The variant each display uses: its own pick, else the nearest display it inherits from. */
 export function variantPerDisplay(def: ComponentDef, picks: ComponentInstance['variants']): Record<DisplayId, ComponentVariant | undefined> {
   const out = {} as Record<DisplayId, ComponentVariant | undefined>;
+  // `-` is the pick for the base styles on a display (no variant), never a variant's name. A pick
+  // naming a variant that no longer exists counts as no pick, so the display inherits.
+  const pickOn = (d: DisplayId): string | undefined => {
+    const name = picks?.[d];
+    return name === '-' || (name !== undefined && def.variants.some((v) => v.name === name)) ? name : undefined;
+  };
   for (const d of DISPLAY_IDS) {
-    let name = picks?.[d];
+    let name = pickOn(d);
     if (name === undefined) {
       const chain = getDisplay(d).inherits;
-      for (let i = chain.length - 1; i >= 0 && name === undefined; i--) name = picks?.[chain[i]];
+      for (let i = chain.length - 1; i >= 0 && name === undefined; i--) name = pickOn(chain[i]);
     }
-    out[d] = name ? def.variants.find((v) => v.name === name) : undefined;
+    out[d] = name && name !== '-' ? def.variants.find((v) => v.name === name) : undefined;
   }
   return out;
 }
@@ -173,6 +189,7 @@ const expandedId = (instanceId: string, templateId: string) => `${instanceId}~${
 export function expandComponent(def: ComponentDef, instance: ComponentInstance, instanceId: string): Branch {
   const values = instanceValues(def, instance);
   const perDisplay = variantPerDisplay(def, instance.variants);
+  const boolProps = new Set(componentProps(def).filter((p) => p.type === 'boolean').map((p) => p.name));
   const visit = (node: TreeNode, isRoot: boolean): TreeNode | null => {
     if (!isBranch(node)) {
       const leaf = { ...node, id: expandedId(instanceId, node.id), value: fillPlaceholders(node.value, values) };
@@ -187,7 +204,19 @@ export function expandComponent(def: ComponentDef, instance: ComponentInstance, 
       if (negate ? on : !on) return null;
     }
     const attrs: Record<string, string> = {};
-    for (const [k, v] of Object.entries(node.attrs)) if (k !== IF_ATTR) attrs[k] = fillPlaceholders(v, values);
+    for (const [k, v] of Object.entries(node.attrs)) {
+      if (k === IF_ATTR) continue;
+      // A boolean attribute bound to a prop is left off when the prop is off: a boolean prop that
+      // isn't truthy, or any other prop set to "false". The component exports follow the same rule.
+      const bound = BOOLEAN_ATTRS.has(k.toLowerCase()) ? /^\{\{\s*([A-Za-z][A-Za-z0-9_]*)\s*\}\}$/.exec(v.trim()) : null;
+      if (bound) {
+        const value = Object.hasOwn(values, bound[1]) ? values[bound[1]] : '';
+        // The inferred types too (a prop only `data-show-if` uses is boolean), as the exports and prop panel see them.
+        const isBool = boolProps.has(bound[1]);
+        if (isBool ? !truthy(value) : value === 'false') continue;
+      }
+      attrs[k] = fillPlaceholders(v, values);
+    }
     const branch: Branch = {
       ...node,
       id: isRoot ? instanceId : expandedId(instanceId, node.id),
@@ -302,6 +331,17 @@ export function saveComponent(forest: Forest, treeId: string, branchId: string, 
     const rootId = createId('b');
     const rekey = (styles: ComponentVariant['styles']) => Object.fromEntries(Object.entries(styles).map(([id, st]) => [id === found!.id ? rootId : id, st]));
     component = { ...component, root: { ...component.root, id: rootId }, variants: component.variants.map((v) => ({ ...v, styles: rekey(v.styles) })) };
+  } else {
+    // The tree's root stays in the tree with all its branches, so the template gets new ids throughout.
+    const ids = new Map<string, string>();
+    const fresh = (node: TreeNode): TreeNode => {
+      const id = createId(isBranch(node) ? 'b' : 'l');
+      ids.set(node.id, id);
+      return isBranch(node) ? { ...node, id, children: node.children.map(fresh) } : { ...node, id };
+    };
+    const root = fresh(component.root) as Branch;
+    const rekey = (styles: ComponentVariant['styles']) => Object.fromEntries(Object.entries(styles).map(([id, st]) => [ids.get(id) ?? id, st]));
+    component = { ...component, root, variants: component.variants.map((v) => ({ ...v, styles: rekey(v.styles) })) };
   }
   let next: Forest = { ...forest, components: [...(forest.components ?? []), component] };
   if (found.id !== tree.root.id) {
@@ -335,7 +375,7 @@ function withVariant(def: ComponentDef, variantName: string | null | undefined):
 }
 
 /** A template that only works inside an SVG: SVG-only itself, or (an `<a>`, a `<title>`) holding SVG-only content. */
-function drawsInSvg(root: Branch): boolean {
+export function drawsInSvg(root: Branch): boolean {
   let svg = false;
   const visit = (n: TreeNode): void => {
     if (svg) return;
@@ -418,8 +458,18 @@ export function updateComponentTree(forest: Forest, treeId: string, fn: (root: B
   else if (rootAt >= 0) {
     // Something added beside the template root goes inside it, before or after what it holds.
     const r = kids[rootAt] as Branch;
+    // A void root (`<hr>`, `<input>`) can't hold them: they would never render.
+    if (VOID_TAGS.has(r.tag.toLowerCase())) throw new Error(`The component's <${r.tag}> can't hold other branches`);
+    // They are checked against the root they land in (the editor checked them against the body).
+    for (const k of [...kids.slice(0, rootAt), ...kids.slice(rootAt + 1)]) {
+      const problem = insertionProblem({ ...nextBody, children: [r] }, r.id, k);
+      if (problem) throw new Error(problem);
+    }
     nextRoot = { ...r, children: [...kids.slice(0, rootAt), ...r.children, ...kids.slice(rootAt + 1)] };
-  } else nextRoot = { ...def.root, children: kids };
+  } else {
+    if (kids.length && VOID_TAGS.has(def.root.tag.toLowerCase())) throw new Error(`The component's <${def.root.tag}> can't hold other branches`);
+    nextRoot = { ...def.root, children: kids };
+  }
   const v = variant ? def.variants.find((x) => x.name === variant) : undefined;
   let next: ComponentDef;
   if (v) {

@@ -1,6 +1,6 @@
-import { createBranch, createComponent, createForest, createLeaf, createTree, instantiateComponent, text, type Branch, type TreeNode } from '@tree-weaver/core';
+import { createBranch, createComponent, createCustomKit, createForest, createKit, createLeaf, createRule, createTree, instantiateComponent, text, withTokens, type Branch, type TreeNode } from '@tree-weaver/core';
 import { describe, expect, it } from 'vitest';
-import { exportComponent, exportComponentDef, exportForest, exportTree, importDocument } from './index';
+import { detectFormat, exportComponent, exportComponentDef, exportForest, exportStorybook, exportTree, importDocument } from './index';
 
 const page = (children: Branch['children']) => createTree('Home', createBranch({ tag: 'body', type: 'root', children }));
 
@@ -507,7 +507,7 @@ describe('pass 14 fixes', () => {
   it('turns a numeric prop into a number', () => {
     const def = createComponent('Box', createBranch({ tag: 'div', attrs: { tabindex: '{{tab}}' } }));
     const out = exportComponentDef(def, { framework: 'react' }).files[0].contents;
-    expect(out).toContain("tabIndex={tab === '' ? undefined : Number(tab)}");
+    expect(out).toContain("tabIndex={tab == null || tab === '' ? undefined : globalThis.Number(tab)}");
   });
 
   it('writes xmlns:xlink as xmlnsXlink and drops other xmlns: names', () => {
@@ -543,5 +543,1184 @@ describe('pass 14 fixes', () => {
   it('keeps adjacent inline elements together in HTML and Svelte', () => {
     const out = jsx('<div><span>a</span><span>b</span><p>c</p></div>', { framework: 'svelte' });
     expect(out).toContain('<span>a</span><span>b</span>');
+  });
+});
+
+describe('pass 15 fixes', () => {
+  const imported = (html: string) => {
+    const doc = importDocument(`<body>${html}</body>`, 'html');
+    return doc.kind === 'tree' ? doc.tree : doc.forest.trees[0];
+  };
+  const texts = (node: TreeNode): string[] => ('children' in node ? node.children.flatMap(texts) : node.type === 'text' ? [node.value] : []);
+
+  it('keeps spaces at the edges of inline elements on HTML import', () => {
+    const tree = imported('<p><strong>Note: </strong>read this<em> carefully</em></p>');
+    expect(texts(tree.root)).toEqual(['Note: ', 'read this', ' carefully']);
+    const back = importDocument(exportTree(tree, 'html'), 'html');
+    expect(texts(back.kind === 'tree' ? back.tree.root : back.forest.trees[0].root)).toEqual(['Note: ', 'read this', ' carefully']);
+    expect(texts(imported('<p>  Hello  </p>').root)).toEqual(['Hello']);
+  });
+
+  it('keeps edge spaces in Svelte exports', () => {
+    const out = exportComponent(imported('<p><strong>Note: </strong>read this<em> carefully</em></p>'), { framework: 'svelte' }).files[0].contents;
+    expect(out).toContain("Note:{' '}</strong>");
+    expect(out).toContain("{' '}carefully</em>");
+  });
+
+  it('keeps <del> and <ins> together', () => {
+    const out = exportComponent(imported('<div><del>$10</del><ins>$8</ins><p>x</p></div>'), { framework: 'html' }).files[0].contents;
+    expect(out).toMatch(/<\/del><ins/);
+  });
+
+  it('calls the global Number even in a component named Number', () => {
+    const def = createComponent('Number', createBranch({ tag: 'td', attrs: { colspan: '{{span}}' }, children: [text('{{value}}')] }));
+    const out = exportComponentDef(def, { framework: 'react' }).files[0].contents;
+    expect(out).toContain('globalThis.Number(span)');
+    expect(out).not.toMatch(/[^.]Number\(span\)/);
+  });
+
+  it('drops a children attribute from React exports', () => {
+    const out = exportComponent(imported('<div children="Injected text"></div>'), { framework: 'react' }).files[0].contents;
+    expect(out).not.toContain('Injected text');
+  });
+
+  it('types prop bindings the way React expects', () => {
+    const btn = createComponent('Btn', createBranch({ tag: 'button', attrs: { disabled: '{{disabled}}', title: '{{pressed}}', tabindex: '{{pressed}}' } }), {
+      props: [{ name: 'disabled', type: 'text', default: '' }, { name: 'pressed', type: 'boolean', default: '' }],
+    } as never);
+    const out = exportComponentDef(btn, { framework: 'react', typescript: true }).files[0].contents;
+    expect(out).toContain("disabled={globalThis.String(disabled) !== 'false'}");
+    expect(out).toContain("title={pressed ? 'true' : ''}");
+    expect(out).toContain('tabIndex={globalThis.Number(pressed)}');
+  });
+
+  it('gives Storybook stories distinct ids', async () => {
+    const tree = createTree('Home', createBranch({ tag: 'body', type: 'root', children: [{ ...createBranch({ tag: 'p' }), name: 'Step 1a' }, { ...createBranch({ tag: 'p' }), name: 'Step 1A' }] }));
+    const all = exportStorybook(createForest('Site', [tree])).files.map((f) => f.content).join('\n');
+    expect(all).toContain('export const Step1a ');
+    expect(all).toContain('export const Step1A2 ');
+  });
+});
+
+describe('pass 16 fixes', () => {
+  const imported = (html: string) => {
+    const doc = importDocument(`<body>${html}</body>`, 'html');
+    return doc.kind === 'tree' ? doc.tree : doc.forest.trees[0];
+  };
+  const texts = (node: TreeNode): string[] => ('children' in node ? node.children.flatMap(texts) : node.type === 'text' ? [node.value] : []);
+
+  it('keeps a whitespace-only text at the edge of an inline element', () => {
+    expect(texts(imported('<p><strong><em>Note:</em> </strong>text</p>').root).join('')).toBe('Note: text');
+    expect(texts(imported('<p>Go<span> <b>now</b></span></p>').root).join('')).toBe('Go now');
+  });
+
+  it('keeps a whitespace-only edge text in Vue', () => {
+    const out = exportComponent(imported('<p><strong><em>Note:</em> </strong>text</p>'), { framework: 'vue' }).files[0].contents;
+    expect(out).toContain("</em>{{ ' ' }}</strong>");
+  });
+
+  it('binds boolean attributes the same way in every export', () => {
+    const def = createComponent('Btn', createBranch({ tag: 'button', attrs: { disabled: '{{off}}', hidden: '{{gone}}' } }), {
+      props: [{ name: 'off', type: 'text', default: 'false' }, { name: 'gone', type: 'boolean', default: '' }],
+    } as never);
+    const react = exportComponentDef(def, { framework: 'react', typescript: true }).files[0].contents;
+    expect(react).toContain("disabled={globalThis.String(off) !== 'false'}");
+    expect(react).toContain('hidden={gone}');
+    const vue = exportComponentDef(def, { framework: 'vue' }).files[0].contents;
+    expect(vue).toContain(`:disabled="off !== 'false'"`);
+    expect(vue).toContain(':hidden="gone"');
+    const svelte = exportComponentDef(def, { framework: 'svelte' }).files[0].contents;
+    expect(svelte).toContain("disabled={off !== 'false'}");
+    expect(svelte).toContain('hidden={gone}');
+    // The editor's expansion leaves both off.
+    const inst = instantiateComponent(def);
+    expect(inst.attrs.disabled).toBeUndefined();
+    expect(inst.attrs.hidden).toBeUndefined();
+    const on = instantiateComponent(def, { off: '', gone: 'true' });
+    expect(on.attrs.disabled).toBe('');
+    expect(on.attrs.hidden).toBe('true');
+  });
+});
+
+describe('pass 17 fixes', () => {
+  const imported = (html: string) => {
+    const doc = importDocument(`<body>${html}</body>`, 'html');
+    return doc.kind === 'tree' ? doc.tree : doc.forest.trees[0];
+  };
+  const texts = (node: TreeNode): string[] => ('children' in node ? node.children.flatMap(texts) : node.type === 'text' ? [node.value] : []);
+
+  it('leaves whitespace inside <pre> alone in Svelte and Vue', () => {
+    const tree = imported('<pre><code>    indented();\n  more();\n\n</code></pre>');
+    for (const framework of ['svelte', 'vue'] as const) {
+      const out = exportComponent(tree, { framework }).files[0].contents;
+      expect(out).toContain('"    indented();\\n  more();\\n\\n"');
+      expect(out).not.toContain("' '");
+    }
+  });
+
+  it('keeps the space beside a comment and between other inline elements', () => {
+    expect(texts(imported('<p>Hello<!-- name --> <b>World</b></p>').root).join('')).toBe('Hello World');
+    expect(texts(imported('<p><my-badge>New</my-badge> <b>Item</b></p>').root).join('')).toBe('New Item');
+  });
+
+  it('drops the line break after <pre> as a browser does', () => {
+    expect(texts(imported('<pre>\n  def f():</pre>').root)).toEqual(['  def f():']);
+  });
+
+  it('tests data-show-if on a text prop the way the editor does', () => {
+    const def = createComponent('Inbox', createBranch({ tag: 'div', children: [text('Inbox'), createBranch({ tag: 'span', attrs: { 'data-show-if': 'count' }, children: [text('{{count}}')] })] }), {
+      props: [{ name: 'count', type: 'text', default: '0' }],
+    } as never);
+    expect(exportComponentDef(def, { framework: 'react' }).files[0].contents).toContain("(count && globalThis.String(count) !== 'false' && globalThis.String(count) !== '0') && (");
+    expect(exportComponentDef(def, { framework: 'svelte' }).files[0].contents).toContain("{#if (count && globalThis.String(count) !== 'false' && globalThis.String(count) !== '0')}");
+    expect(exportComponentDef(def, { framework: 'vue' }).files[0].contents).toContain('v-if="(count &amp;&amp; String(count) !== \'false\'');
+  });
+
+  it('keeps an ordered list with an unusual start as HTML in Markdown', () => {
+    const tree = imported('<ol start="-1"><li>a</li><li>b</li></ol>');
+    const md = exportTree(tree, 'markdown');
+    expect(md).not.toMatch(/^-1\. a/m);
+    const back = importDocument(md, 'markdown');
+    const root = back.kind === 'tree' ? back.tree.root : back.forest.trees[0].root;
+    expect(JSON.stringify(root)).toContain('"tag":"ol"');
+  });
+});
+
+describe('pass 18 fixes', () => {
+  const poem = () =>
+    createTree('Home', createBranch({ tag: 'body', type: 'root', children: [createBranch({ tag: 'div', styles: { lg: { 'white-space': 'pre-wrap' } }, children: [text('Roses are red,\n    violets  are blue.')] })] }));
+
+  it('keeps whitespace under white-space: pre-wrap in Vue and Svelte', () => {
+    expect(exportComponent(poem(), { framework: 'vue' }).files[0].contents).toContain('{{ "Roses are red,\\n    violets  are blue." }}');
+    expect(exportComponent(poem(), { framework: 'svelte' }).files[0].contents).toContain('{"Roses are red,\\n    violets  are blue."}');
+  });
+
+  it('keeps whitespace under white-space: pre-wrap on HTML import and round trip', () => {
+    const doc = importDocument('<body><div style="white-space: pre-wrap">Roses are red,\n    violets are blue.</div></body>', 'html');
+    const tree = doc.kind === 'tree' ? doc.tree : doc.forest.trees[0];
+    expect(JSON.stringify(tree.root)).toContain('Roses are red,\\n    violets are blue.');
+    const back = importDocument(exportTree(poem(), 'html'), 'html');
+    const root = back.kind === 'tree' ? back.tree.root : back.forest.trees[0].root;
+    expect(JSON.stringify(root)).toContain('Roses are red,\\n    violets  are blue.');
+  });
+
+  it('calls the global String in a component named String', () => {
+    const def = createComponent('String', createBranch({ tag: 'button', attrs: { disabled: '{{busy}}', 'data-show-if': 'label' }, children: [text('{{label}}')] }));
+    const out = exportComponentDef(def, { framework: 'react' }).files[0].contents;
+    expect(out.replace('function String(', '')).not.toMatch(/[^.]String\(/);
+  });
+
+  it('suffixes native type names that clash with names the code uses', () => {
+    const tree = createTree('Font Style', createBranch({ tag: 'body', type: 'root', children: [createBranch({ tag: 'p', styles: { lg: { 'font-style': 'italic' } }, children: [text('Hi')] })] }));
+    expect(exportComponent(tree, { framework: 'flutter' }).name).not.toBe('FontStyle');
+    expect(exportComponent({ ...tree, name: 'self' }, { framework: 'swiftui' }).name).not.toBe('Self');
+  });
+});
+
+describe('pass 19 fixes', () => {
+  const imported = (html: string) => {
+    const doc = importDocument(`<body>${html}</body>`, 'html');
+    return doc.kind === 'tree' ? doc.tree : doc.forest.trees[0];
+  };
+  const texts = (node: TreeNode): string[] => ('children' in node ? node.children.flatMap(texts) : node.type === 'text' ? [node.value] : []);
+
+  it('keeps non-breaking spaces on HTML and Markdown import', () => {
+    expect(texts(imported('<p>a&nbsp;&nbsp;b</p>').root)).toEqual(['a  b']);
+    expect(texts(imported('<p>a&nbsp;</p>').root)).toEqual(['a ']);
+    const md = importDocument('Price:&nbsp;&nbsp;$5', 'markdown');
+    expect(texts(md.kind === 'tree' ? md.tree.root : md.forest.trees[0].root).join('')).toContain('Price:  $5');
+  });
+
+  it('keeps an edge non-breaking space as written in Vue and Svelte', () => {
+    const tree = createTree('Home', createBranch({ tag: 'body', type: 'root', children: [createBranch({ tag: 'p', children: [text(' '), createBranch({ tag: 'b', children: [text('x')] }), text('  ')] })] }));
+    expect(exportComponent(tree, { framework: 'vue' }).files[0].contents).not.toContain("{{ ' ' }}");
+    expect(exportComponent(tree, { framework: 'svelte' }).files[0].contents).not.toContain("{' '}");
+  });
+
+  it('keeps whitespace in prop text under white-space: pre in Vue', () => {
+    const def = createComponent('Poem', createBranch({ tag: 'div', styles: { lg: { 'white-space': 'pre' } }, children: [text('Dear {{name}},\n    thanks!')] }), {
+      props: [{ name: 'name', type: 'text', default: 'Ann' }],
+    } as never);
+    expect(exportComponentDef(def, { framework: 'vue' }).files[0].contents).toContain('{{ name }}{{ ",\\n    thanks!" }}');
+  });
+});
+
+describe('pass 20 fixes', () => {
+  const imported = (html: string) => {
+    const doc = importDocument(`<body>${html}</body>`, 'html');
+    return doc.kind === 'tree' ? doc.tree : doc.forest.trees[0];
+  };
+  const roundTrip = (html: string) => {
+    const back = importDocument(exportTree(imported(html), 'markdown'), 'markdown');
+    return back.kind === 'tree' ? back.tree.root : back.forest.trees[0].root;
+  };
+  const shape = (n: TreeNode): unknown => ('children' in n ? { [n.tag]: n.children.map(shape) } : n.type === 'text' ? n.value : n.type);
+
+  it('keeps headings and paragraphs holding custom or media elements', () => {
+    const out = exportComponent(imported('<h2>Pricing <x-badge>new</x-badge></h2><p><picture><img src="a.png" alt="Logo"></picture></p>'), { framework: 'react' }).files[0].contents;
+    expect(out).toMatch(/<h2[ >]/);
+    expect(out).toMatch(/<p[ >]/);
+  });
+
+  it('writes emphasis and code Markdown can read back', () => {
+    for (const html of ['<p><strong>a</strong><strong>b</strong></p>', '<p><em>a</em><em>b</em></p>', '<p>foo<strong>(bar)</strong></p>', '<p><s>x</s><del>y</del></p>', '<p><code>a</code><code>b</code></p>', '<p>x<code> a </code></p>']) {
+      expect(JSON.stringify(shape(roundTrip(html)))).toBe(JSON.stringify(shape(imported(html).root)));
+    }
+    expect(exportTree(imported('<p>a <strong>b</strong> c</p>'), 'markdown')).toContain('a **b** c');
+  });
+
+  it('keeps non-breaking-space paragraphs and edges in Markdown', () => {
+    expect(JSON.stringify(shape(roundTrip('<p>&nbsp;</p><p>x</p>')))).toBe(JSON.stringify(shape(imported('<p>&nbsp;</p><p>x</p>').root)));
+    expect(JSON.stringify(shape(roundTrip('<p>&nbsp;Hello&nbsp;</p>')))).toContain(' Hello ');
+    expect(JSON.stringify(shape(roundTrip('<h2>&nbsp;Hi</h2>')))).toContain(' Hi');
+  });
+
+  it('percent-encodes spaces inside url() in Tailwind classes', () => {
+    const tree = createTree('Home', createBranch({ tag: 'body', type: 'root', children: [createBranch({ tag: 'div', styles: { lg: { 'background-image': 'url("a b.png")' } } })] }));
+    const out = exportComponent(tree, { framework: 'react', styling: 'tailwind' }).files[0].contents;
+    expect(out).toContain('a%20b.png');
+  });
+});
+
+describe('pass 21 fixes', () => {
+  it('uses only globals Vue templates allow in v-if', () => {
+    const def = createComponent('Inbox', createBranch({ tag: 'div', children: [createBranch({ tag: 'span', attrs: { 'data-show-if': 'count' }, children: [text('{{count}}')] })] }), {
+      props: [{ name: 'count', type: 'text', default: '0' }],
+    } as never);
+    const vue = exportComponentDef(def, { framework: 'vue' }).files[0].contents;
+    expect(vue).not.toContain('globalThis');
+    expect(vue).toContain("String(count) !== '0'");
+  });
+
+  it('drops padding inside url() in Tailwind classes', () => {
+    const tree = createTree('Home', createBranch({ tag: 'body', type: 'root', children: [createBranch({ tag: 'div', styles: { lg: { 'background-image': 'url( "hero.png" )' } } })] }));
+    const out = exportComponent(tree, { framework: 'react', styling: 'tailwind' }).files[0].contents;
+    expect(out).toContain("[background-image:url('hero.png')]");
+    expect(out).not.toContain('%20');
+  });
+
+  it('keeps linked, custom-class and token kits through an SVG file', () => {
+    const tree = createTree('Logo', createBranch({ tag: 'svg', type: 'root' }));
+    const linked = { ...createKit('Remote', ''), href: 'https://cdn.example.com/kit.css' };
+    const custom = createCustomKit('Mine', [createRule('.card', { lg: { color: 'red' } })]);
+    const tokens = withTokens(createKit('Tokens', ''), [{ name: '--brand', value: '#f00' }]);
+    const back = importDocument(exportTree(tree, 'svg', [linked, custom, tokens]), 'svg');
+    const kits = back.kits ?? [];
+    expect(kits.find((k) => k.name === 'Remote')?.href).toBe('https://cdn.example.com/kit.css');
+    expect(kits.find((k) => k.name === 'Mine')?.rules?.[0].selector).toBe('.card');
+    expect(kits.find((k) => k.name === 'Tokens')?.tokens?.[0].name).toBe('--brand');
+  });
+
+  it('exports a link holding a lone surrogate to SwiftUI', () => {
+    const tree = page([createBranch({ tag: 'a', attrs: { href: 'https://example.com/\uD800x' }, children: [text('Go')] })]);
+    const swift = exportComponent(tree, { framework: 'swiftui' }).files[0].contents;
+    expect(swift).toContain('%EF%BF%BDx');
+  });
+});
+
+describe('pass 22 fixes', () => {
+  const imported = (html: string) => {
+    const doc = importDocument(`<body>${html}</body>`, 'html');
+    return doc.kind === 'tree' ? doc.tree : doc.forest.trees[0];
+  };
+  const shape = (n: TreeNode): unknown => ('children' in n ? { [n.tag]: n.children.map(shape) } : n.type === 'text' ? n.value : n.type);
+  const mdRoundTrip = (html: string) => {
+    const back = importDocument(exportTree(imported(html), 'markdown'), 'markdown');
+    return JSON.stringify(shape(back.kind === 'tree' ? back.tree.root : back.forest.trees[0].root));
+  };
+
+  it('writes multi-value Tailwind classes as utilities, so later longhands still win in v3', () => {
+    const tree = page([createBranch({ tag: 'div', styles: { lg: { margin: '0 auto', 'margin-top': '2rem' } } })]);
+    const out = exportComponent(tree, { framework: 'html', styling: 'tailwind' }).files[0].contents;
+    expect(out).toContain('m-[0_auto] mt-[2rem]');
+  });
+
+  it('writes React textarea text as one defaultValue', () => {
+    const def = createComponent('Note', createBranch({ tag: 'div', children: [createBranch({ tag: 'textarea', children: [text('Dear {{name}},')] })] }), {
+      props: [{ name: 'name', type: 'text', default: 'you' }],
+    } as never);
+    expect(exportComponentDef(def, { framework: 'react' }).files[0].contents).toContain('<textarea defaultValue={`Dear ${name},`} />');
+  });
+
+  it('repairs nesting the HTML parser would undo', () => {
+    const svelte = (html: string) => exportComponent(imported(html), { framework: 'svelte' }).files[0].contents;
+    expect(svelte('<table><col width="50"><tr><td>a</td></tr></table>')).toMatch(/<colgroup>\s*<col[^>]*\/?>\s*<\/colgroup>/);
+    const nested = page([createBranch({ tag: 'ul', children: [createBranch({ tag: 'li', children: [createBranch({ tag: 'li', children: [text('x')] })] })] })]);
+    expect(exportComponent(nested, { framework: 'svelte' }).files[0].contents).toMatch(/<li[^>]*>\s*<div[^>]*>x<\/div>/);
+  });
+
+  it('keeps strikethrough mixed with emphasis, trailing list spaces and headerless tables in Markdown', () => {
+    for (const html of ['<p><strong><del>a <em>b</em></del></strong></p>', '<p><del>was <s>old</s></del></p>', '<ul><li>a\u00a0</li></ul>', '<table><tbody><tr><td>a</td></tr></tbody></table>']) {
+      expect(mdRoundTrip(html)).toBe(JSON.stringify(shape(imported(html).root)));
+    }
+  });
+
+  it('keeps a leading newline in <pre> through HTML', () => {
+    const tree = page([createBranch({ tag: 'pre', children: [text('\nline2')] })]);
+    const back = importDocument(exportTree(tree, 'html'), 'html');
+    const root = back.kind === 'tree' ? back.tree.root : back.forest.trees[0].root;
+    expect(JSON.stringify(shape(root))).toContain('"\\nline2"');
+  });
+
+  it('writes React attributes its types and renderer accept', () => {
+    const def = createComponent('Card', createBranch({ tag: 'div', children: [createBranch({ tag: 'a', attrs: { hidden: 'until-found', tabindex: '{{tab}}' }, children: [text('x')] })] }), {
+      props: [{ name: 'tab', type: 'text' }],
+    } as never);
+    const out = exportComponentDef(def, { framework: 'react' }).files[0].contents;
+    expect(out).toContain(' hidden');
+    expect(out).not.toContain('until-found');
+    expect(out).toContain("tab == null || tab === ''");
+  });
+});
+
+describe('pass 23 fixes', () => {
+  const imported = (html: string) => {
+    const doc = importDocument(`<body>${html}</body>`, 'html');
+    return doc.kind === 'tree' ? doc.tree : doc.forest.trees[0];
+  };
+  const shape = (n: TreeNode): unknown => ('children' in n ? { [n.tag]: n.children.map(shape) } : n.type === 'text' ? n.value : n.type);
+  const mdBack = (tree: ReturnType<typeof imported>) => {
+    const back = importDocument(exportTree(tree, 'markdown'), 'markdown');
+    return JSON.stringify(shape(back.kind === 'tree' ? back.tree.root : back.forest.trees[0].root));
+  };
+
+  it('keeps a longhand after its shorthand in Tailwind, and includes the breakpoint width', () => {
+    const tree = page([createBranch({ tag: 'div', styles: { lg: { border: '1px solid blue', 'border-top': '2px solid red' }, tablet: { padding: '2px' } } })]);
+    const out = exportComponent(tree, { framework: 'html', styling: 'tailwind' }).files[0].contents;
+    expect(out).toContain('[border:1px_solid_blue] [&&]:[border-top:2px_solid_red]');
+    expect(out).toContain('max-[1024.02px]:p-[2px]');
+  });
+
+  it('writes same-kind emphasis nested at the edge as HTML in Markdown', () => {
+    for (const html of ['<p><em><em>Dune</em></em></p>', '<p><strong><strong>a</strong>c</strong></p>']) {
+      expect(mdBack(imported(html))).toBe(JSON.stringify(shape(imported(html).root)));
+    }
+  });
+
+  it('keeps headings holding a line separator in Markdown', () => {
+    const tree = page([createBranch({ tag: 'h2', children: [text('Price\u2028list')] })]);
+    expect(mdBack(tree)).toContain('"h2"');
+  });
+
+  it('puts non-table children of a table in a cell', () => {
+    const out = exportComponent(imported('<table><tbody><tr><td>a</td></tr></tbody></table>'), { framework: 'svelte' }).files[0].contents;
+    expect(out).toContain('<td');
+    const tree = page([createBranch({ tag: 'table', children: [createBranch({ tag: 'p', children: [text('x')] })] })]);
+    expect(exportComponent(tree, { framework: 'svelte' }).files[0].contents).toMatch(/<tbody[^>]*>\s*<tr[^>]*>\s*<td[^>]*>\s*<p/);
+  });
+});
+
+describe('pass 24 fixes', () => {
+  it('puts kits in the components layer for Tailwind', () => {
+    const tree = page([createBranch({ tag: 'article', classes: ['card'], styles: { lg: { padding: '2px' } } })]);
+    const out = exportComponent(tree, { framework: 'react', styling: 'tailwind', kits: [createKit('Basic', '.card { padding: 24px }'), { ...createKit('Remote', ''), href: 'https://cdn.example.com/k.css' }] });
+    const kits = out.files.find((f) => f.path === 'kits.css')!.contents;
+    expect(kits).toContain('@layer theme, base, components, utilities;');
+    expect(kits).toContain('@import url("https://cdn.example.com/k.css") layer(components);');
+    expect(kits).toMatch(/@import url\("\.\/kits\/basic\.css"\) layer\(components\);/);
+    const css = exportComponent(tree, { framework: 'react', kits: [createKit('Basic', '.card { padding: 24px }')] }).files.find((f) => f.path === 'kits.css')!.contents;
+    expect(css).not.toContain('@layer');
+  });
+
+  it('namespaces the wrapper class', () => {
+    const tree = createTree('Hidden', createBranch({ tag: 'body', type: 'root', children: [createBranch({ tag: 'p', children: [text('x')] })] }));
+    expect(exportComponent(tree, { framework: 'react', styling: 'tailwind' }).files[0].contents).toContain('className="hidden__root"');
+  });
+
+  it('keeps code indentation and list numbering in native exports', () => {
+    const tree = page([
+      createBranch({ tag: 'pre', children: [createBranch({ tag: 'code', children: [text('if (x) {\n    return 1;\n}\n')] })] }),
+      createBranch({ tag: 'ol', attrs: { start: '5' }, children: [createBranch({ tag: 'li', children: [text('Five')] }), createBranch({ tag: 'li', children: [text('Six')] })] }),
+    ]);
+    const swift = exportComponent(tree, { framework: 'swiftui' }).files[0].contents;
+    expect(swift).toContain('if (x) {\\n    return 1;\\n}"');
+    expect(swift).toContain('Text(verbatim: "6.")');
+    const dart = exportComponent(tree, { framework: 'flutter' }).files[0].contents;
+    expect(dart).toContain("Text('5. ')");
+  });
+});
+
+describe('pass 25 fixes', () => {
+  it('writes quoted CSS values in Tailwind classes so Tailwind can read them', async () => {
+    const tree = page([createBranch({ tag: 'div', styles: { lg: { 'grid-template-areas': '"sidebar main"', 'font-family': '"Open Sans", serif', width: 'var(--side_width)' } } })]);
+    const react = exportComponent(tree, { framework: 'react', styling: 'tailwind' }).files[0].contents;
+    expect(react).toContain("[grid-template-areas:'sidebar_main']");
+    expect(react).toContain("[font-family:'Open_Sans',serif]");
+    expect(react).toContain('w-[var(--side\\_width)]');
+    expect(react).not.toContain('className={');
+    const vue = exportComponent(tree, { framework: 'vue', styling: 'tailwind' }).files[0].contents;
+    expect(vue).not.toContain('&quot;');
+  });
+
+  it('absolutizes quoted url() paths holding parentheses', async () => {
+    const { absolutizeCssUrls } = await import('./storybook-import');
+    expect(absolutizeCssUrls('.a{background:url("img/a(1).png")} .b{background:url(img/b.png)} .c{background:url("")}', 'https://sb.example/assets/main.css')).toBe(
+      '.a{background:url("https://sb.example/assets/img/a(1).png")} .b{background:url("https://sb.example/assets/img/b.png")} .c{background:url("")}',
+    );
+  });
+});
+
+describe('pass 26 fixes', () => {
+  it('leaves plain ampersands raw and percent-encodes angle brackets in Tailwind url() classes', () => {
+    const tree = page([
+      createBranch({ tag: 'div', styles: { lg: { 'background-image': 'url("https://img.example/p?auto=format&fit=crop")' } } }),
+      createBranch({ tag: 'i', styles: { lg: { 'background-image': 'url("data:image/svg+xml,<svg></svg>")' } } }),
+    ]);
+    for (const framework of ['html', 'react', 'vue', 'svelte'] as const) {
+      const out = exportComponent(tree, { framework, styling: 'tailwind' }).files[0].contents;
+      expect(out).toContain("[background-image:url('https://img.example/p?auto=format&fit=crop')]");
+      expect(out).toContain("url('data:image/svg+xml,%3Csvg%3E%3C/svg%3E')");
+    }
+  });
+
+  it('keeps line breaks and spaces of pre and white-space: pre branches in Markdown', () => {
+    const tree = page([
+      createBranch({ tag: 'pre', children: [text('line 1\n  indented\nline 3')] }),
+      createBranch({ tag: 'p', styles: { lg: { 'white-space': 'pre-line' } }, children: [text('Roses\nViolets')] }),
+    ]);
+    const back = importDocument(exportTree(tree, 'markdown'), 'markdown');
+    const root = back.kind === 'tree' ? back.tree.root : back.forest.trees[0].root;
+    const texts = JSON.stringify(root);
+    expect(texts).toContain('"line 1\\n  indented\\nline 3"');
+    expect(texts).toContain('"Roses\\nViolets"');
+  });
+});
+
+describe('pass 27 fixes', () => {
+  const shape = (n: TreeNode): unknown => ('children' in n ? { [n.tag]: n.children.map(shape) } : n.type === 'text' ? n.value : n.type);
+  const li = (t: string) => createBranch({ tag: 'li', children: [text(t)] });
+
+  it('keeps two adjacent lists apart in Markdown', () => {
+    const tree = page([createBranch({ tag: 'ul', children: [li('a')] }), createBranch({ tag: 'ul', children: [li('b')] }), createBranch({ tag: 'ol', children: [li('c')] }), createBranch({ tag: 'ol', children: [li('d')] })]);
+    const back = importDocument(exportTree(tree, 'markdown'), 'markdown');
+    const root = back.kind === 'tree' ? back.tree.root : back.forest.trees[0].root;
+    expect(JSON.stringify(shape(root))).toBe(JSON.stringify(shape(tree.root)));
+  });
+
+  it('writes inline-block siblings without line breaks between them', () => {
+    const item = (t: string) => createBranch({ tag: 'li', styles: { lg: { display: 'inline-block' } }, children: [text(t)] });
+    const tree = page([createBranch({ tag: 'ul', children: [item('One'), item('Two')] })]);
+    expect(exportTree(tree, 'html')).toMatch(/One<\/li><li[^>]*>Two/);
+    expect(exportComponent(tree, { framework: 'svelte' }).files[0].contents).toMatch(/One<\/li><li[^>]*>Two/);
+  });
+
+  it('absolutizes @import strings from Storybook', async () => {
+    const { absolutizeCssUrls } = await import('./storybook-import');
+    expect(absolutizeCssUrls('@import "./tokens.css";', 'https://sb.example.com/assets/main.css')).toBe('@import url("https://sb.example.com/assets/tokens.css");');
+  });
+
+  it('writes a boolean prop in text as the editor shows it', () => {
+    const def = createComponent('Flag', createBranch({ tag: 'p', children: [text('{{x}}')] }), { props: [{ name: 'x', type: 'boolean', default: 'false' }] } as never);
+    expect(exportComponentDef(def, { framework: 'react' }).files[0].contents).toContain("{x ? 'true' : ''}");
+    expect(exportComponentDef(def, { framework: 'vue' }).files[0].contents).toContain("{{ x ? 'true' : '' }}");
+    expect(exportComponentDef(def, { framework: 'svelte' }).files[0].contents).toContain("{x ? 'true' : ''}");
+  });
+});
+
+describe('pass 28 fixes', () => {
+  it('drops attribute names with a dot, which Vue reads as binding modifiers', () => {
+    const def = createComponent('Bio', createBranch({ tag: 'div', attrs: { 'inner-h-t-m-l.camel': '{{bio}}', 'href.prop': '{{bio}}' } }), { props: [{ name: 'bio', type: 'text', default: '<img src=x onerror=alert(1)>' }] } as never);
+    for (const framework of ['vue', 'svelte', 'react'] as const) expect(exportComponentDef(def, { framework }).files[0].contents).not.toMatch(/camel|href\.prop/);
+  });
+
+  it('keeps inline content under the root on one line in HTML', () => {
+    const html = exportTree(page([text('Price: '), createBranch({ tag: 'strong', children: [text('$5')] }), text('.')]), 'html');
+    expect(html).toMatch(/Price: <strong[^>]*>\$5<\/strong>\./);
+    const back = importDocument(html, 'html');
+    const root = back.kind === 'tree' ? back.tree.root : back.forest.trees[0].root;
+    expect(root.children.map((c) => ('value' in c ? c.value : c.tag))).toEqual(['Price: ', 'strong', '.']);
+  });
+
+  it('keeps a pre’s leading newline through Vue’s static stringifying', () => {
+    const tree = page([createBranch({ tag: 'pre', children: [text('\nfirst line')] })]);
+    expect(exportComponent(tree, { framework: 'vue' }).files[0].contents).toContain('{{ String("\\nfirst line") }}');
+  });
+
+  it('writes !important with Tailwind’s modifier', () => {
+    const tree = page([createBranch({ tag: 'p', styles: { lg: { color: 'red !important' }, tablet: { color: 'blue' } }, children: [text('x')] })]);
+    const out = exportComponent(tree, { framework: 'react', styling: 'tailwind' }).files.map((f) => f.contents).join('\n');
+    expect(out).toContain('![color:red]');
+    expect(out).not.toContain('important]');
+  });
+});
+
+describe('pass 29 fixes', () => {
+  const shape = (n: TreeNode): unknown => ('children' in n ? { [n.tag]: n.children.map(shape) } : n.type === 'text' ? n.value : n.type);
+  const roundTrip = (tree: ReturnType<typeof page>) => {
+    const back = importDocument(exportTree(tree, 'markdown'), 'markdown');
+    return JSON.stringify(shape(back.kind === 'tree' ? back.tree.root : back.forest.trees[0].root));
+  };
+
+  it('keeps paragraphs and items that Markdown would read as an HTML block', () => {
+    const area = () => createBranch({ tag: 'textarea', children: [text('notes')] });
+    const em = () => createBranch({ tag: 'em', children: [text('this')] });
+    for (const tree of [
+      page([createBranch({ tag: 'p', children: [area(), text(' see '), em()] }), createBranch({ tag: 'p', children: [text('After')] })]),
+      page([createBranch({ tag: 'ul', children: [createBranch({ tag: 'li', children: [area(), text(' see '), em()] })] })]),
+      page([createBranch({ tag: 'p', children: [createBranch({ tag: 'br' })] }), createBranch({ tag: 'p', children: [text('After')] })]),
+      page([createBranch({ tag: 'p', children: [createLeaf('photo.jpg', 'image', { alt: 'Team', width: '320' })] }), createBranch({ tag: 'p', children: [text('Caption')] })]),
+    ])
+      expect(roundTrip(tree)).toBe(JSON.stringify(shape(tree.root)));
+  });
+
+  it('keeps bold next to strikethrough', () => {
+    const tree = page([createBranch({ tag: 'p', children: [createBranch({ tag: 'strong', children: [text('Price:')] }), createBranch({ tag: 'del', children: [text('$10')] }), text(' $8')] })]);
+    expect(roundTrip(tree)).toBe(JSON.stringify(shape(tree.root)));
+  });
+
+  it('makes no Storybook control for text inside a textarea', () => {
+    const tree = page([createBranch({ tag: 'textarea', name: 'Notes', children: [text('Hello')] })]);
+    expect(exportStorybook(createForest('Site', [tree])).files.map((f) => f.content).join('\n')).not.toContain('notesText');
+  });
+});
+
+describe('pass 30 fixes', () => {
+  it('keeps a <p> holding a select or picture, and a heading holding a div', () => {
+    const select = createBranch({ tag: 'select', children: [createBranch({ tag: 'option', children: [text('S')] })] });
+    const tree = page([createBranch({ tag: 'p', children: [text('Size: '), select] }), createBranch({ tag: 'h1', children: [createBranch({ tag: 'div', children: [text('Title')] })] })]);
+    const out = exportComponent(tree, { framework: 'svelte' }).files[0].contents;
+    expect(out).toMatch(/<p[^>]*>Size: <select/);
+    expect(out).toMatch(/<h1[^>]*>\s*<div/);
+    expect(exportComponent(page([createBranch({ tag: 'p', children: [createBranch({ tag: 'div' })] })]), { framework: 'svelte' }).files[0].contents).not.toMatch(/<p[ >]/);
+  });
+
+  it('writes a loose run starting with a textarea as HTML in Markdown', () => {
+    const tree = page([createBranch({ tag: 'p', children: [text('Intro')] }), createBranch({ tag: 'textarea', children: [text('notes')] }), text(' see '), createBranch({ tag: 'em', children: [text('this')] })]);
+    const back = importDocument(exportTree(tree, 'markdown'), 'markdown');
+    const root = back.kind === 'tree' ? back.tree.root : back.forest.trees[0].root;
+    expect(root.children.map((c) => ('tag' in c ? c.tag : c.value))).toEqual(['p', 'textarea', ' see ', 'em']);
+  });
+
+  it('keeps a table part’s table around its Storybook story', () => {
+    const row = createBranch({ tag: 'tr', name: 'Total row', children: [createBranch({ tag: 'td', children: [text('Total')] })] });
+    const tree = page([createBranch({ tag: 'table', children: [createBranch({ tag: 'tbody', children: [row] })] })]);
+    expect(exportStorybook(createForest('Site', [tree])).files.map((f) => f.content).join('\n')).toMatch(/<table><tbody><tr data-tw=\\"[^"\\]+\\" data-tw-name=\\"Total row\\"/);
+  });
+});
+
+describe('pass 31 fixes', () => {
+  it('never gives two branches the same class name', () => {
+    const card = (name: string, color: string) => createBranch({ tag: 'div', name, styles: { lg: { color } }, children: [text(color)] });
+    const html = exportComponent(page([card('Card', 'red'), card('Card', 'green'), card('Card 2', 'blue')]), { framework: 'html' }).files.find((f) => f.path.endsWith('.html'))!.contents;
+    const classes = [...html.matchAll(/class="([^"]+)"/g)].map((m) => m[1]).filter((c) => c.includes('card'));
+    expect(new Set(classes).size).toBe(3);
+  });
+
+  it('lets a shorthand set after its longhand win in Tailwind', () => {
+    const tree = page([createBranch({ tag: 'div', styles: { lg: { 'padding-top': '20px', padding: '3px' } }, children: [text('x')] })]);
+    const out = exportComponent(tree, { framework: 'html', styling: 'tailwind' }).files.map((f) => f.contents).join('\n');
+    expect(out).toContain('pt-[20px] [&&]:p-[3px]');
+  });
+
+  it('exports inputs by type to SwiftUI and Flutter', () => {
+    const tree = page([
+      createBranch({ tag: 'input', attrs: { type: 'checkbox', name: 'terms' } }),
+      createBranch({ tag: 'input', attrs: { type: 'password' } }),
+      createBranch({ tag: 'input', attrs: { type: 'hidden', name: 'token' } }),
+      createBranch({ tag: 'input', attrs: { type: 'submit', value: 'Send' } }),
+    ]);
+    const swift = exportComponent(tree, { framework: 'swiftui' }).files[0].contents;
+    expect(swift).toContain('Toggle("", isOn: .constant(false))');
+    expect(swift).toContain('SecureField(');
+    expect(swift).not.toContain('"token"');
+    expect(swift).not.toContain('TextField("terms"');
+    expect(swift).toContain('Send');
+    const dart = exportComponent(tree, { framework: 'flutter' }).files[0].contents;
+    expect(dart).toContain('Checkbox(value: false');
+    expect(dart).toContain('obscureText: true');
+  });
+});
+
+describe('pass 32 fixes', () => {
+  it('ships the Tailwind theme files with a component that uses token utilities', async () => {
+    const { createTokenKit } = await import('@tree-weaver/core');
+    const kits = [createTokenKit([{ name: '--brand', value: '#4f46e5' }])];
+    const def = createComponent('Button', createBranch({ tag: 'button', styles: { lg: { background: 'var(--brand)' } }, children: [text('Go')] }));
+    const paths = exportComponentDef(def, { framework: 'react', styling: 'tailwind', kits }).files.map((f) => f.path);
+    expect(paths).toEqual(expect.arrayContaining(['tokens.json', 'tailwind.theme.css', 'tailwind.tokens.cjs']));
+  });
+
+  it('puts HTML inside a foreignObject in the XHTML namespace in .svg files', () => {
+    const fo = createBranch({ tag: 'foreignObject', attrs: { width: '200', height: '100' }, children: [createBranch({ tag: 'p', children: [text('Hello')] }), text('loose')] });
+    const tree = createTree('Drawing', createBranch({ tag: 'svg', type: 'root', attrs: { viewBox: '0 0 200 100' }, children: [fo] }));
+    const svg = exportTree(tree, 'svg');
+    expect(svg).toMatch(/<p xmlns="http:\/\/www\.w3\.org\/1999\/xhtml"/);
+    expect(svg).not.toMatch(/<svg[^>]*xmlns="http:\/\/www\.w3\.org\/1999\/xhtml"/);
+  });
+});
+
+describe('pass 33 fixes', () => {
+  it('closes an image leaf in .svg files', () => {
+    const div = createBranch({ tag: 'div', children: [createLeaf('logo.png', 'image', { alt: 'Logo' }), text('Caption')] });
+    const tree = createTree('Drawing', createBranch({ tag: 'svg', type: 'root', attrs: { viewBox: '0 0 200 100' }, children: [createBranch({ tag: 'foreignObject', attrs: { width: '200', height: '100' }, children: [div] })] }));
+    const svg = exportTree(tree, 'svg');
+    expect(svg).toMatch(/<img [^>]*\/>/);
+    const back = importDocument(svg, 'svg');
+    expect(JSON.stringify(back)).toContain('Caption');
+  });
+
+  it('keeps a background token’s reset of the background image in Tailwind', async () => {
+    const { createTokenKit } = await import('@tree-weaver/core');
+    const kits = [createTokenKit([{ name: '--surface', value: '#fff' }])];
+    const tree = page([createBranch({ tag: 'section', styles: { lg: { background: 'var(--surface)' }, tablet: { background: 'var(--surface)' } }, children: [text('x')] })]);
+    const out = exportComponent(tree, { framework: 'html', styling: 'tailwind', kits }).files.map((f) => f.contents).join('\n');
+    expect(out).toContain('bg-none bg-surface');
+    expect(out).toContain('max-[1024.02px]:bg-none max-[1024.02px]:bg-surface');
+  });
+
+  it('bumps the later of two partly overlapping declarations in Tailwind', () => {
+    const cls = (styles: Record<string, string>) =>
+      /class="([^"]*)"/.exec(exportComponent(page([createBranch({ tag: 'div', styles: { lg: styles }, children: [text('x')] })]), { framework: 'html', styling: 'tailwind' }).files[0].contents.split('<body')[1])![1];
+    expect(cls({ 'border-top-left-radius': '10px', 'border-radius': '4px' })).toContain('[&&]:rounded-[4px]');
+    expect(cls({ 'padding-inline': '2rem', 'padding-left': '1rem' })).toContain('[&&]:pl-[1rem]');
+    expect(cls({ 'border-bottom': '2px solid black', 'border-color': 'red' })).toMatch(/\[&&\]:\S*border-color|\[&&\]:border-\[red\]/);
+    expect(cls({ padding: '1rem', 'padding-top': '2rem' })).not.toContain('[&&]');
+  });
+});
+
+describe('pass 34 fixes', () => {
+  it('keeps inline svg, custom elements and tspans on one line when pretty printing', () => {
+    const icon = () => createBranch({ tag: 'svg', attrs: { width: '16', height: '16' } });
+    const tree = page([createBranch({ tag: 'div', children: [icon(), icon()] }), createBranch({ tag: 'div', children: [createBranch({ tag: 'my-a', children: [text('A')] }), createBranch({ tag: 'my-a', children: [text('B')] })] })]);
+    const html = exportTree(tree, 'html');
+    expect(html).toMatch(/<\/svg><svg/);
+    expect(html).toMatch(/A<\/my-a><my-a/);
+  });
+
+  it('keeps the spaces around an inline svg in a Markdown paragraph', () => {
+    const tree = page([createBranch({ tag: 'p', children: [createBranch({ tag: 'my-stars', children: [text('5')] }), text(' stars')] })]);
+    const back = importDocument(exportTree(tree, 'markdown'), 'markdown');
+    const root = back.kind === 'tree' ? back.tree.root : back.forest.trees[0].root;
+    expect(JSON.stringify(root)).toContain('" stars"');
+  });
+
+  it('lists only :root tokens outside media queries in the kit manifest', async () => {
+    const { kitManifest } = await import('@tree-weaver/kits');
+    const { createKit: kit } = await import('@tree-weaver/core');
+    const m = kitManifest([kit('K', ':root{--text:#111} @media (prefers-color-scheme: dark){:root{--text:#eee}} .card{--pad:8px}')]);
+    expect(m.tokens).toEqual([{ name: '--text', value: '#111' }]);
+  });
+});
+
+describe('pass 35 fixes', () => {
+  it('imports stylesheets in order, with their media, and skips ones that never apply', () => {
+    const doc = importDocument(
+      '<html><head><style>p{color:red}</style><link rel="stylesheet" href="https://x.example/theme.css"><link rel="stylesheet" media="print" href="https://x.example/print.css"><style media="print">h1{display:none}</style><link rel="alternate stylesheet" href="https://x.example/dark.css"><noscript><style>p{display:none}</style></noscript></head><body><p>Hi</p></body></html>',
+      'html',
+    );
+    const kits = doc.kits.map((k) => k.href ?? k.css);
+    expect(kits).toEqual(['p{color:red}', 'https://x.example/theme.css', '@import url("https://x.example/print.css") print;', '@media print {\nh1{display:none}\n}']);
+  });
+
+  it('keeps an inline parent’s children on one line in HTML component exports', () => {
+    const a = createBranch({ tag: 'a', attrs: { href: '#' }, children: [createBranch({ tag: 'div', children: [text('Title')] }), createLeaf('i.png', 'image', { alt: '' })] });
+    const html = exportComponent(page([createBranch({ tag: 'div', children: [a, createBranch({ tag: 'span', children: [text('after')] })] })]), { framework: 'html' }).files[0].contents;
+    expect(html).toMatch(/<a [^>]*><div[^>]*>Title<\/div><img[^>]*><\/a><span/);
+  });
+});
+
+describe('pass 36 fixes', () => {
+  const rootOf = (doc: ReturnType<typeof importDocument>) => (doc.kind === 'tree' ? doc.tree.root : doc.forest.trees[0].root);
+
+  it('keeps class and for as written on custom elements in JSX', () => {
+    const tree = page([createBranch({ tag: 'my-badge', classes: ['k'], attrs: { for: 'x' }, children: [text('hi')] })]);
+    const jsx = exportComponent(tree, { framework: 'react' }).files[0].contents;
+    expect(jsx).toMatch(/<my-badge class="k[^"]*" for="x">/);
+  });
+
+  it('does not take Toggle, SecureField or Checkbox as a native component name', () => {
+    const root = createBranch({ tag: 'label', children: [createBranch({ tag: 'input', attrs: { type: 'checkbox', 'aria-label': 'A' } })] });
+    const def = createComponent('Toggle', root);
+    expect(exportComponentDef(def, { framework: 'swiftui' }).entry).not.toBe('Toggle.swift');
+    expect(exportComponentDef({ ...def, name: 'SecureField' }, { framework: 'swiftui' }).entry).not.toBe('SecureField.swift');
+    expect(exportComponentDef({ ...def, name: 'Checkbox' }, { framework: 'flutter' }).files[0].contents).not.toMatch(/class Checkbox /);
+  });
+
+  it('keeps whitespace in SVG text with xml:space="preserve"', () => {
+    const doc = importDocument('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><text xml:space="preserve" x="0" y="5">a    b</text></svg>', 'svg');
+    expect(JSON.stringify(rootOf(doc))).toContain('a    b');
+  });
+
+  it('keeps the space between inline-block elements on import', () => {
+    const doc = importDocument('<body><div><div style="display:inline-block">A</div> <div style="display:inline-block">B</div></div></body>', 'html');
+    const outer = rootOf(doc).children.find((c) => c.kind === 'branch') as Branch;
+    expect(outer.children.map((c) => (c.kind === 'leaf' ? JSON.stringify(c.value) : c.tag))).toEqual(['div', '" "', 'div']);
+  });
+
+  it('finds classes in nested CSS rules', async () => {
+    const { analyzeKit } = await import('@tree-weaver/kits');
+    expect(analyzeKit('.card { padding: 1rem; & .card-title { font-weight: bold } .nested-child { color: red } }').classes).toEqual(['card', 'card-title', 'nested-child']);
+  });
+
+  it('maps only flex-start/flex-end justify and align keywords to Tailwind utilities', () => {
+    const tree = page([createBranch({ tag: 'div', styles: { lg: { display: 'flex', 'flex-direction': 'row-reverse', 'justify-content': 'start' } }, children: [text('A')] })]);
+    const out = exportComponent(tree, { framework: 'html', styling: 'tailwind' }).files.map((f) => f.contents).join('\n');
+    expect(out).not.toMatch(/\bjustify-start\b/);
+  });
+});
+
+describe('pass 37 fixes', () => {
+  const tw = (styles: Record<string, string>) =>
+    exportComponent(page([createBranch({ tag: 'div', styles: { lg: styles }, children: [text('x')] })]), { framework: 'html', styling: 'tailwind' }).files[0].contents;
+
+  it('writes a quote inside a CSS string as an escape Tailwind can read', () => {
+    expect(tw({ content: '"\\""' })).toContain(`[content:'\\22_']`);
+    expect(tw({ 'font-family': '"Font \\"X\\"", serif' })).toContain(`[font-family:'Font_\\22_X\\22_',serif]`);
+    expect(tw({ 'background-image': `url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg"/>')` })).toContain('xmlns=%22http://www.w3.org/2000/svg%22');
+  });
+
+  it('keeps grid line names in the grid utility', () => {
+    expect(tw({ display: 'grid', 'grid-template-columns': '[a] 1fr [b] 2fr [c]' })).toContain('grid-cols-[[a]_1fr_[b]_2fr_[c]]');
+  });
+});
+
+describe('pass 38 fixes', () => {
+  it('writes an off boolean prop as nothing in attributes, classes and textarea text', () => {
+    const root = createBranch({ tag: 'div', children: [
+      createBranch({ tag: 'button', classes: ['tab', 'is-{{active}}'], attrs: { 'aria-pressed': '{{active}}' }, children: [text('Tab')] }),
+      createBranch({ tag: 'textarea', children: [text('a {{active}} b')] }),
+    ] });
+    const def = { ...createComponent('Tab', root), props: [{ name: 'active', type: 'boolean' as const, default: '' }] };
+    const react = exportComponentDef(def, { framework: 'react' }).files[0].contents;
+    expect(react).toContain("is-${(active ? 'true' : '')}");
+    expect(react).toContain("aria-pressed={active ? 'true' : ''}");
+    expect(react).toContain("defaultValue={`a ${(active ? 'true' : '')} b`}");
+    expect(react).not.toMatch(/String\(active\)/);
+    expect(exportComponentDef(def, { framework: 'vue' }).files[0].contents).toContain(`:aria-pressed="(active ? 'true' : '')"`);
+    expect(exportComponentDef(def, { framework: 'svelte' }).files[0].contents).toContain(`aria-pressed="{active ? 'true' : ''}"`);
+  });
+
+  it('keeps a non-breaking space at the edge of bold inside it', () => {
+    const tree = page([createBranch({ tag: 'p', children: [text('Price:'), createBranch({ tag: 'strong', children: [text(' €5')] })] })]);
+    const back = importDocument(exportTree(tree, 'markdown'), 'markdown');
+    const root = back.kind === 'tree' ? back.tree.root : back.forest.trees[0].root;
+    expect(JSON.stringify(root)).toContain('" €5"');
+  });
+
+  it('keeps the newline after <pre> in a standalone SVG', () => {
+    const doc = importDocument('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><foreignObject width="10" height="10"><div xmlns="http://www.w3.org/1999/xhtml"><pre>\nkeep</pre></div></foreignObject></svg>', 'svg');
+    const root = doc.kind === 'tree' ? doc.tree.root : doc.forest.trees[0].root;
+    expect(JSON.stringify(root)).toContain('"\\nkeep"');
+  });
+});
+
+describe('pass 39 fixes', () => {
+  it('reads back Markdown with many instances of one component', () => {
+    const shared = { lg: { padding: '8px' } };
+    const tree = page(Array.from({ length: 120 }, () => createBranch({ tag: 'div', styles: shared, children: [text('x')] })));
+    const md = exportTree(tree, 'markdown');
+    expect(md).not.toMatch(/\*a1|&a1/);
+    expect(() => importDocument(md, 'markdown')).not.toThrow();
+  });
+
+  it('leaves out value on textarea and select in component exports', () => {
+    const tree = page([createBranch({ tag: 'textarea', attrs: { value: 'attr' }, children: [text('child')] })]);
+    for (const framework of ['react', 'vue', 'svelte'] as const) expect(exportComponent(tree, { framework }).files[0].contents).not.toMatch(/value="attr"|defaultValue="attr"/);
+  });
+
+  it('keeps whitespace in SVG text with xml:space="preserve" in Vue', () => {
+    const svg = createBranch({ tag: 'svg', type: 'root', attrs: { viewBox: '0 0 10 10' }, children: [createBranch({ tag: 'text', attrs: { 'xml:space': 'preserve' }, children: [text(' a  b ')] })] });
+    const vue = exportComponent(createTree('Pic', svg), { framework: 'vue' }).files[0].contents;
+    expect(vue).toMatch(/<text[^>]*>[^<]*a  b/);
+  });
+
+  it('reads a Tree Weaver Storybook’s branch styles into the imported branches', async () => {
+    const { snapshotToBranch, storyKits } = await import('./index');
+    const css = '[data-tw="b_1"] { color: red; }\n@media (max-width: 767px) { [data-tw="b_1"] { padding: 4px; } }';
+    const snap = { id: 's', title: 'T', name: 'N', html: '<div data-tw="b_1">Hi</div>', sheets: [{ css }] };
+    const branch = snapshotToBranch(snap);
+    expect(branch.styles.lg).toEqual({ color: 'red' });
+    expect(storyKits([snap], { name: 'SB', styles: 'copy', source: 'x' })).toEqual([]);
+  });
+});
+
+describe('pass 40 fixes', () => {
+  const rootOf = (doc: ReturnType<typeof importDocument>) => (doc.kind === 'tree' ? doc.tree.root : doc.forest.trees[0].root);
+
+  it('lets a shape’s inline style beat its attributes, and keeps CSS-only declarations on a group', () => {
+    const doc = importDocument('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect fill="red" style="fill: blue"/><circle style="transform: rotate(45deg); mix-blend-mode: multiply" transform="scale(2)"/></svg>', 'svg');
+    const [rect, g] = rootOf(doc).children as TreeNode[];
+    expect((rect as { attrs: Record<string, string> }).attrs.fill).toBe('blue');
+    expect(g.kind === 'branch' && g.tag).toBe('g');
+    expect((g as Branch).styles.lg).toEqual({ transform: 'rotate(45deg)', 'mix-blend-mode': 'multiply' });
+    expect(((g as Branch).children[0] as { attrs?: Record<string, string> }).attrs?.transform).toBeUndefined();
+  });
+
+  it('lists escaped classes from compiled CSS as written in HTML', async () => {
+    const { analyzeKit } = await import('@tree-weaver/kits');
+    expect(analyzeKit('.w-\\[200px\\]{} .\\!p-2{} .md\\:w-1\\/2{} .\\32 xl\\:flex{} a[href$=".pdf"]{}').classes).toEqual(['!p-2', '2xl:flex', 'md:w-1/2', 'w-[200px]']);
+  });
+
+  it('exports a shape outside an SVG to Markdown without crashing', () => {
+    const tree = page([createBranch({ tag: 'h1', children: [text('Logo')] }), createLeaf('circle', 'shape', { r: '4' })]);
+    expect(exportTree(tree, 'markdown')).toContain('<circle');
+  });
+
+  it('keeps obsolete inline tags on one line', () => {
+    const doc = importDocument('<body><p><font>Total:</font><big>42</big></p></body>', 'html');
+    expect(exportTree(createTree('T', rootOf(doc) as Branch), 'html')).toMatch(/<font[^>]*>Total:<\/font><big/);
+  });
+
+  it('keeps an img’s inline styles', () => {
+    const img = rootOf(importDocument('<body><img src="a.png" style="border-radius:50%"></body>', 'html')).children[0] as Branch;
+    expect(img.kind).toBe('branch');
+    expect(img.styles.lg).toEqual({ 'border-radius': '50%' });
+  });
+
+  it('reads lowercase SVG names as text outside an SVG in shorthand documents', async () => {
+    const { expandShorthandDocument } = await import('@tree-weaver/branches');
+    const doc = expandShorthandDocument(['title: Welcome back', { svg: ['text: Hi'] }]) as { tree: { root: Branch } };
+    const [first, svg] = doc.tree.root.children as TreeNode[];
+    expect(first.kind).toBe('leaf');
+    expect(((svg as Branch).children[0] as Branch).tag).toBe('text');
+  });
+});
+
+describe('pass 41 fixes', () => {
+  it('keeps spaces around a prop at an inline element’s edge in Vue', () => {
+    const root = createBranch({ tag: 'p', children: [text('Hello'), createBranch({ tag: 'strong', children: [text(' {{name}} ')] }), text('!')] });
+    const def = { ...createComponent('Greet', root), props: [{ name: 'name', type: 'text' as const, default: 'Ann' }] };
+    expect(exportComponentDef(def, { framework: 'vue' }).files[0].contents).toContain(`<strong>{{ ' ' }}{{ name }}{{ ' ' }}</strong>`);
+  });
+
+  it('reads a lone text key inside an SVG as the <text> element in shorthand', async () => {
+    const { expandShorthandDocument } = await import('@tree-weaver/branches');
+    const doc = expandShorthandDocument([{ svg: [{ text: 'Hello', attrs: { x: '10' } }] }, { text: 'plain' }]) as { tree: { root: Branch } };
+    const [svg, plain] = doc.tree.root.children as TreeNode[];
+    expect(((svg as Branch).children[0] as Branch).tag).toBe('text');
+    expect(plain.kind).toBe('leaf');
+  });
+});
+
+describe('pass 42 fixes', () => {
+  it('keeps the spaces in SVG text between and at the edges of tspans', () => {
+    const doc = importDocument('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><text><tspan>Hello</tspan> <tspan>World</tspan></text><text><tspan>Hi</tspan><tspan> there</tspan></text></svg>', 'svg');
+    const root = doc.kind === 'tree' ? doc.tree.root : doc.forest.trees[0].root;
+    const json = JSON.stringify(root);
+    expect(json).toContain('"value":" "');
+    expect(json).toContain('"value":" there"');
+  });
+
+  it('reads a header key as the <header> element in shorthand, and as the table option beside a table', async () => {
+    const { expandShorthand } = await import('@tree-weaver/branches');
+    expect((expandShorthand({ header: ['h1: Site'] }) as Branch).tag).toBe('header');
+    expect(JSON.stringify(expandShorthand({ table: [['a'], ['b']], header: false }))).not.toContain('thead');
+  });
+
+  it('names custom elements for Vue', () => {
+    const tree = page([createBranch({ tag: 'p', children: [text('Hi '), createBranch({ tag: 'my-badge', children: [text('New')] })] })]);
+    expect(exportComponent(tree, { framework: 'vue' }).files[0].contents).toContain(`isCustomElement: (tag) => ['my-badge'].includes(tag)`);
+  });
+});
+
+describe('pass 43 fixes', () => {
+  it('declares the XLink namespace in a standalone SVG that uses it', () => {
+    const svg = createBranch({ tag: 'svg', type: 'root', attrs: { viewBox: '0 0 10 10' }, children: [createLeaf('use', 'shape', { 'xlink:href': '#dot' })] });
+    expect(exportTree(createTree('Icons', svg), 'svg')).toMatch(/<svg[^>]*xmlns:xlink="http:\/\/www\.w3\.org\/1999\/xlink"/);
+  });
+
+  it('exports an SVG-only component inside an <svg> for HTML', () => {
+    const def = createComponent('Badge', createBranch({ tag: 'g', children: [createLeaf('circle', 'shape', { r: '8' })] }));
+    expect(exportComponentDef(def, { framework: 'html' }).files[0].contents).toMatch(/<svg[^>]*>\s*<g/);
+  });
+
+  it('keeps a stylesheet’s library rules when one rule styles Storybook’s preview', async () => {
+    const { storyKits } = await import('./index');
+    const snap = { id: 's', title: 'T', name: 'N', html: '', sheets: [{ href: 'https://sb.example/assets/preview.css', css: '.ds-button{color:red}\n#storybook-root{padding:1rem}' }] };
+    const kits = storyKits([snap], { name: 'DS', styles: 'copy', source: 'x' });
+    expect(kits[0]?.css).toContain('.ds-button');
+    expect(kits[0]?.css).not.toContain('storybook-root');
+  });
+});
+
+describe('pass 44 fixes', () => {
+  it('keeps a submit button’s label as value in React, and moves selected options to the select', () => {
+    const doc = importDocument('<body><form><input type="submit" value="Sign up"><select><option>A</option><option selected value="b">B</option></select></form></body>', 'html');
+    const tree = doc.kind === 'tree' ? doc.tree : doc.forest.trees[0];
+    const jsx = exportComponent(tree, { framework: 'react' }).files[0].contents;
+    expect(jsx).toContain('type="submit" value="Sign up"');
+    expect(jsx).toContain('<select defaultValue={"b"}');
+    expect(jsx).not.toMatch(/<option[^>]* selected/);
+  });
+
+  it('reads Markdown that starts with a link or HTML as Markdown', () => {
+    expect(detectFormat('[![CI](https://ci.example/b.svg)](https://ci.example)\n\n# Lib')).toBe('markdown');
+    expect(detectFormat('<p align="center"><img src="l.png"></p>\n\n# Lib\n\n- one')).toBe('markdown');
+    expect(detectFormat('[{"kind":"leaf"}]')).toBe('json');
+    expect(detectFormat('<div><p>Hi</p></div>')).toBe('html');
+  });
+
+  it('lets a variant override an !important template value', () => {
+    const root = { ...createBranch({ tag: 'div', styles: { lg: { padding: '0 !important' } }, children: [text('x')] }), id: 'r' };
+    const def = { ...createComponent('Box', root), variants: [{ name: 'Roomy', styles: { r: { lg: { padding: '30px' } } } }] };
+    const css = exportComponentDef(def, { framework: 'react' }).files.map((f) => f.contents).join('\n');
+    expect(css).toMatch(/padding: 30px !important/);
+  });
+
+  it('reads CDATA text in XML', () => {
+    const xml = exportTree(page([text('a < b')]), 'xml').replace(/>a &lt; b</, '><![CDATA[if (a < b) {}]]><');
+    expect(JSON.stringify(importDocument(xml, 'xml'))).toContain('if (a < b) {}');
+  });
+});
+
+describe('pass 45 fixes', () => {
+  const textOf = (doc: ReturnType<typeof importDocument>) => JSON.stringify(doc.kind === 'tree' ? doc.tree : doc.forest);
+
+  it('keeps whitespace that white-space-collapse, "preserve" or a kit class keeps', () => {
+    const kits = [createKit('Mono', '.mono { white-space: pre }')];
+    const a = createBranch({ tag: 'div', styles: { lg: { 'white-space-collapse': 'preserve' } }, children: [text('line1\n    indented')] });
+    const b = createBranch({ tag: 'div', styles: { lg: { 'white-space': 'preserve nowrap' } }, children: [text('a\n  b')] });
+    const c = createBranch({ tag: 'div', classes: ['mono'], children: [text('c\n    d')] });
+    const tree = page([a, b, c]);
+    for (const format of ['html', 'markdown'] as const) {
+      const back = textOf(importDocument(exportTree(tree, format, kits), format));
+      expect(back, format).toContain('line1\\n    indented');
+      expect(back, format).toContain('a\\n  b');
+      expect(back, format).toContain('c\\n    d');
+    }
+    const vue = exportComponent(tree, { framework: 'vue', kits }).files[0].contents;
+    expect(vue).toContain('"c\\n    d"');
+  });
+
+  it('names the component stylesheet apart from kits.css and base.css', () => {
+    const kits = [createKit('K', '.x { color: red }')];
+    for (const name of ['Kits', 'Base']) {
+      const tree = { ...page([createBranch({ tag: 'p', styles: { lg: { color: 'red' } }, children: [text('x')] })]), name };
+      for (const framework of ['react', 'html'] as const) {
+        const paths = exportComponent(tree, { framework, kits }).files.map((f) => f.path.toLowerCase());
+        expect(new Set(paths).size, `${name} ${framework}`).toBe(paths.length);
+      }
+    }
+  });
+
+  it('writes ismap as a string in React', () => {
+    const tree = page([createBranch({ tag: 'img', attrs: { src: 'https://x/a.png', ismap: '' } })]);
+    expect(exportComponent(tree, { framework: 'react' }).files[0].contents).toContain('ismap=""');
+  });
+
+  it('keeps every space inside a quoted string in Tailwind brackets', () => {
+    const tree = page([createBranch({ tag: 'ul', styles: { lg: { 'list-style-type': '"a  b"' } }, children: [] })]);
+    const jsx = exportComponent(tree, { framework: 'react', styling: 'tailwind' }).files[0].contents;
+    expect(jsx).toContain("'a__b'");
+  });
+});
+
+describe('pass 46 fixes', () => {
+  const back = (tree: ReturnType<typeof page>, kits: ReturnType<typeof createKit>[] = []) => {
+    const doc = importDocument(exportTree(tree, 'markdown', kits), 'markdown');
+    return JSON.stringify(doc.kind === 'tree' ? doc.tree.root : doc.forest.trees[0].root);
+  };
+
+  it('escapes a URL glued to the word before it in Markdown', () => {
+    const out = back(page([createBranch({ tag: 'p', children: [text('see_http://evil.example/x and foo_www.evil.example')] })]));
+    expect(out).not.toContain('"tag":"a"');
+    expect(out).toContain('see_http://evil.example/x and foo_www.evil.example');
+  });
+
+  it('keeps whitespace a root or a non-block container keeps, in Markdown', () => {
+    const tree = page([createBranch({ tag: 'p', children: [text('a\n   b  c')] }), text(' d\n  e ')]);
+    tree.root.styles = { lg: { 'white-space': 'pre-wrap' } };
+    const out = back(tree);
+    expect(out).toContain('a\\n   b  c');
+    expect(out).toContain(' d\\n  e ');
+    const kitted = page([createBranch({ tag: 'p', children: [text('f\n   g')] })]);
+    kitted.root.classes = ['mono'];
+    expect(back(kitted, [createKit('M', '.mono { white-space: pre-wrap }')])).toContain('f\\n   g');
+    for (const tag of ['hgroup', 'search']) {
+      const t = page([createBranch({ tag, styles: { lg: { 'white-space': 'pre-wrap' } }, children: [createBranch({ tag: 'p', children: [text('h\n   i')] })] })]);
+      const o = back(t);
+      expect(o, tag).toContain('h\\n   i');
+      expect(o, tag).not.toMatch(/"tag":"p","[^]*"tag":"hgroup"/);
+    }
+  });
+});
+
+describe('pass 47 fixes', () => {
+  it('keeps marks nested in marks in Markdown, else writes HTML', () => {
+    const em = createBranch({ tag: 'em', children: [text('Read '), createBranch({ tag: 'strong', children: [text('(Dune)')] }), text(', now')] });
+    const doc = importDocument(exportTree(page([createBranch({ tag: 'p', children: [em] })]), 'markdown'), 'markdown');
+    const out = JSON.stringify(doc.kind === 'tree' ? doc.tree.root : null);
+    expect(out).toContain('"tag":"em"');
+    expect(out).not.toContain('*');
+  });
+
+  it('binds an option’s selected prop in React', () => {
+    const select = createBranch({ tag: 'select', children: [createBranch({ tag: 'option', attrs: { value: 'm' }, children: [text('M')] }), createBranch({ tag: 'option', attrs: { value: 'y', selected: '{{yearly}}' }, children: [text('Y')] })] });
+    const def = { ...createComponent('Plan', select), props: [{ name: 'yearly', type: 'boolean' as const }] };
+    const jsx = exportComponentDef(def, { framework: 'react' }).files[0].contents;
+    expect(jsx).toContain('defaultValue={(yearly ? "y" : undefined)}');
+  });
+
+  it('writes Tailwind classes holding a backslash with String.raw', () => {
+    const root = createBranch({ tag: 'div', classes: ['tone-{{tone}}'], styles: { lg: { display: 'grid', 'grid-template-areas': '"main_area"' } }, children: [text('x')] });
+    const def = { ...createComponent('Box', root), props: [{ name: 'tone', default: 'a' }] };
+    const jsx = exportComponentDef(def, { framework: 'react', styling: 'tailwind' }).files[0].contents;
+    expect(jsx).toContain("[grid-template-areas:'main\\_area']");
+    expect(jsx).toContain('globalThis.String.raw`tone-');
+    expect(exportComponentDef(def, { framework: 'vue', styling: 'tailwind' }).files[0].contents).toContain('String.raw`tone-');
+  });
+
+  it('refuses an SVG-only element as a shorthand key outside an SVG, and spells autoCapitalize', async () => {
+    const { expandShorthandDocument } = await import('@tree-weaver/branches');
+    expect(() => expandShorthandDocument({ tree: { name: 'Home', root: [{ title: 'Welcome back' }] } })).toThrow(/only works inside an SVG/);
+    const tree = page([createBranch({ tag: 'input', attrs: { autocapitalize: 'off' } })]);
+    expect(exportComponent(tree, { framework: 'react' }).files[0].contents).toContain('autoCapitalize="off"');
+  });
+});
+
+describe('pass 48 fixes', () => {
+  it('writes a variant rule that puts back a value the template changes on a narrower display', () => {
+    const root = { ...createBranch({ tag: 'div', styles: { lg: { display: 'flex' }, 'mobile-portrait': { display: 'block' } }, children: [text('x')] }), id: 'r' };
+    const def = { ...createComponent('Card', root), variants: [{ name: 'Row', styles: { r: { 'mobile-portrait': { display: 'flex' } } } }] };
+    const css = exportComponentDef(def, { framework: 'react' }).files.map((f) => f.contents).join('\n');
+    expect(css).toMatch(/--tablet-row\.[\w-]*--mobile-portrait-row[^{]*\{[^}]*display: flex/);
+  });
+
+  it('writes inert as a string in React', () => {
+    const tree = page([createBranch({ tag: 'div', attrs: { inert: '' }, children: [text('x')] })]);
+    expect(exportComponent(tree, { framework: 'react' }).files[0].contents).toContain('inert="true"');
+  });
+
+  it('drops the XHTML namespace its SVG export added inside a foreignObject', () => {
+    const svg = createBranch({ tag: 'svg', type: 'root', attrs: { viewBox: '0 0 10 10' }, children: [createBranch({ tag: 'foreignObject', children: [createBranch({ tag: 'p', children: [text('hi')] })] })] });
+    const tree = createTree('Draw', svg);
+    const back = importDocument(exportTree(tree, 'svg'), 'svg');
+    expect(JSON.stringify(back)).not.toContain('1999/xhtml');
+  });
+
+  it('keeps Tailwind v4 default line heights off font-size tokens', () => {
+    const kits = [withTokens(createKit('T', ''), [{ name: '--lg', value: '30px', kind: 'font-size' }])];
+    const tree = page([createBranch({ tag: 'p', styles: { lg: { 'font-size': 'var(--lg)' } }, children: [text('x')] })]);
+    const theme = exportComponent(tree, { framework: 'react', styling: 'tailwind', kits }).files.find((f) => f.path === 'tailwind.theme.css')?.contents ?? '';
+    expect(theme).toMatch(/--text-lg--line-height: initial;/);
+  });
+});
+
+describe('pass 49 fixes', () => {
+  it('reads a leading rule, text and rule as Markdown, not front matter', () => {
+    for (const md of ['---\n\nIntro paragraph\n\n---\n\nMore text', '---\n- a\n- b\n---\nBody', '---\nJust a sentence\n---\nBody']) {
+      const doc = importDocument(md, 'markdown');
+      const html = exportTree(doc.kind === 'tree' ? doc.tree : doc.forest.trees[0], 'html');
+      expect(html, md).toMatch(/<hr/);
+    }
+  });
+
+  it('writes a token clashing with a Tailwind sizing keyword as an arbitrary value', () => {
+    const kits = [withTokens(createKit('T', ''), [{ name: '--lg', value: '700px', kind: 'space' }, { name: '--gap', value: '8px', kind: 'space' }])];
+    const tree = page([createBranch({ tag: 'div', styles: { lg: { 'max-width': 'var(--lg)', padding: 'var(--gap)' } }, children: [text('x')] })]);
+    const jsx = exportComponent(tree, { framework: 'react', styling: 'tailwind', kits }).files[0].contents;
+    expect(jsx).not.toMatch(/\bmax-w-lg\b/);
+    expect(jsx).toContain('max-w-[var(--lg)]');
+    expect(jsx).toMatch(/\bp-gap\b/);
+  });
+});
+
+describe('pass 50 fixes', () => {
+  it('ships base.css undoing Preflight with every Tailwind export', () => {
+    const tree = page([createBranch({ tag: 'h2', children: [text('Pricing')] })]);
+    const files = exportComponent(tree, { framework: 'html', styling: 'tailwind' }).files;
+    expect(files.find((f) => f.path === 'kits.css')?.contents).toContain('@import url("./base.css") layer(components);');
+    expect(files.find((f) => f.path === 'base.css')?.contents).toMatch(/h1, h2, h3, h4, h5, h6 \{ font-size: revert; font-weight: revert; \}/);
+    expect(files.find((f) => f.path === 'index.html')?.contents).toContain('href="kits.css"');
+  });
+});
+
+describe('pass 51 fixes', () => {
+  it('keeps references in Markdown link titles and URLs', () => {
+    const a = createBranch({ tag: 'a', attrs: { href: '/a?x=1&amp;y=2', title: 'a &amp; b' }, children: [text('go')] });
+    const doc = importDocument(exportTree(page([createBranch({ tag: 'p', children: [a] })]), 'markdown'), 'markdown');
+    const out = JSON.stringify(doc.kind === 'tree' ? doc.tree.root : null);
+    expect(out).toContain('"href":"/a?x=1&amp;y=2"');
+    expect(out).toContain('"title":"a &amp; b"');
+  });
+
+  it('names <search> for Vue, and base.css restores table cell padding', () => {
+    const tree = page([createBranch({ tag: 'search', children: [createBranch({ tag: 'table', children: [] })] })]);
+    expect(exportComponent(tree, { framework: 'vue' }).files[0].contents).toContain("['search']");
+    const base = exportComponent(tree, { framework: 'react', styling: 'tailwind' }).files.find((f) => f.path === 'base.css')?.contents;
+    expect(base).toContain('td, th { padding: 1px; }');
+  });
+});
+
+describe('pass 52 fixes', () => {
+  it('escapes braces in Vue attributes, so an element in a <textarea> runs nothing', () => {
+    const img = createLeaf('a.png', 'image', { alt: '{{ x() }}' });
+    const tree = page([createBranch({ tag: 'textarea', children: [img] })]);
+    const vue = exportComponent(tree, { framework: 'vue' }).files[0].contents;
+    expect(vue).not.toContain('{{ x() }}');
+    expect(vue).toContain('&#123;&#123; x() &#125;&#125;');
+  });
+
+  it('writes a void element without children in React', () => {
+    const tree = page([createBranch({ tag: 'img', attrs: { src: 'a.png', alt: '' }, children: [text('x')] })]);
+    const jsx = exportComponent(tree, { framework: 'react' }).files[0].contents;
+    expect(jsx).toMatch(/<img [^>]*\/>/);
+    expect(jsx).not.toContain('</img>');
+  });
+
+  it('keeps an empty nested list item and a link with an odd code span in Markdown', () => {
+    const nested = createBranch({ tag: 'ul', children: [createBranch({ tag: 'li' }), createBranch({ tag: 'li', children: [text('Milk')] })] });
+    const list = createBranch({ tag: 'ul', children: [createBranch({ tag: 'li', children: [text('Groceries'), nested] })] });
+    const link = createBranch({ tag: 'p', children: [text('See '), createBranch({ tag: 'a', attrs: { href: '/q' }, children: [createBranch({ tag: 'code', children: [text('`')] }), text(' rules')] })] });
+    const doc = importDocument(exportTree(page([list, link]), 'markdown'), 'markdown');
+    const out = JSON.stringify(doc.kind === 'tree' ? doc.tree.root : null);
+    expect(out).not.toContain('"tag":"h2"');
+    expect(out).toContain('"tag":"a"');
+  });
+});
+
+describe('pass 53 fixes', () => {
+  it('ignores comments in an inline style attribute on import', () => {
+    const doc = importDocument('<p style="/* color: red; */ color: blue; font-weight: bold">Note</p>', 'html');
+    const p = doc.kind === 'tree' ? (doc.tree.root.children[0] as Branch) : undefined;
+    expect(p?.styles.lg).toEqual({ color: 'blue', 'font-weight': 'bold' });
+  });
+
+  it('keeps two nested lists in one item apart in Markdown', () => {
+    const li = (t: string) => createBranch({ tag: 'li', children: [text(t)] });
+    for (const tag of ['ul', 'ol']) {
+      const item = createBranch({ tag: 'li', children: [text('x'), createBranch({ tag, children: [li('a'), li('b')] }), createBranch({ tag, children: [li('c')] })] });
+      const md = exportTree(page([createBranch({ tag, children: [item] })]), 'markdown');
+      const doc = importDocument(md, 'markdown');
+      const outer = doc.kind === 'tree' ? (doc.tree.root.children[0] as Branch) : undefined;
+      const kids = (outer?.children[0] as Branch).children.filter((c): c is Branch => 'tag' in c && c.tag === tag);
+      expect(kids.map((k) => k.children.length)).toEqual([2, 1]);
+    }
+  });
+
+  it('numbers only the list items shown on each width in native exports', () => {
+    const li = (t: string, styles = {}) => createBranch({ tag: 'li', styles, children: [text(t)] });
+    const tree = page([createBranch({ tag: 'ol', children: [li('One'), li('Desktop only', { 'mobile-portrait': { display: 'none' } }), li('Three')] })]);
+    const swift = exportComponent(tree, { framework: 'swiftui' }).files[0].contents;
+    expect(swift).toContain('(compact ? "2." : "3.")');
+    // The hidden item's marker goes with it.
+    expect(swift).toMatch(/if !compact \{\s*HStack/);
+    const dart = exportComponent(tree, { framework: 'flutter' }).files[0].contents;
+    expect(dart).toContain("(phone ? '2. ' : '3. ')");
+  });
+
+  it('writes a colour token named like a text size as an arbitrary value in Tailwind', async () => {
+    const { createTokenKit } = await import('@tree-weaver/core');
+    const kits = [createTokenKit([{ name: '--lg', value: '#0f0' }])];
+    const tree = page([createBranch({ tag: 'p', styles: { lg: { color: 'var(--lg)' } }, children: [text('Hi')] })]);
+    const jsx = exportComponent(tree, { framework: 'react', styling: 'tailwind', kits }).files[0].contents;
+    expect(jsx).not.toMatch(/\btext-lg\b/);
+    expect(jsx).toContain('[color:var(--lg)]');
+  });
+});
+
+describe('pass 54 fixes', () => {
+  it('points relative url()s in runtime Storybook styles at the Storybook', async () => {
+    const { storyKits } = await import('./index');
+    const snap = { id: 's', title: 'T', name: 'N', html: '', sheets: [{ css: '.logo { background: url("./assets/logo.png"); }' }] };
+    const kits = storyKits([snap], { name: 'SB', styles: 'copy', source: 'https://sb.example.com/' });
+    expect(kits[0]?.css).toContain('url("https://sb.example.com/assets/logo.png")');
+  });
+
+  it('restores border widths and sub/sup placement under Preflight', () => {
+    const out = exportComponent(page([createBranch({ tag: 'p', children: [text('x')] })]), { framework: 'react', styling: 'tailwind' });
+    const base = out.files.find((f) => f.path.endsWith('base.css'))?.contents ?? '';
+    expect(base).toContain('border-width: revert');
+    expect(base).toMatch(/sub, sup \{ vertical-align: revert/);
   });
 });

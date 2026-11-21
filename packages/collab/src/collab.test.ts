@@ -315,3 +315,137 @@ describe('entries from peers that are not maps', () => {
     expect(() => readForest(doc)).not.toThrow();
   });
 });
+
+describe('pass 19 fixes', () => {
+  it('keeps a re-attached orphan where the editor shows it after an edit', async () => {
+    const core = await import('@tree-weaver/core');
+    const S = core.createBranch({ tag: 'section', name: 'S' });
+    const T = core.createBranch({ tag: 'div', name: 'T' });
+    const tree = core.createTree('Home');
+    tree.root = { ...tree.root, children: [S, T] };
+    const base = core.createForest('F', [tree]);
+    const a = new Y.Doc();
+    const b = new Y.Doc();
+    writeForest(a, null, base);
+    Y.applyUpdate(b, Y.encodeStateAsUpdate(a));
+    let fa = readForest(a)!;
+    let fb = readForest(b)!;
+    const names = (f: typeof base) => f.trees[0].root.children.map((c) => ('name' in c ? c.name : '')).join(',');
+    const na = core.replaceTree(fa, { ...fa.trees[0], root: core.removeNode(fa.trees[0].root, S.id) });
+    writeForest(a, fa, na);
+    const X = core.createBranch({ tag: 'p', name: 'X' });
+    const nb = core.replaceTree(fb, { ...fb.trees[0], root: core.insertNode(fb.trees[0].root, S.id, X) });
+    writeForest(b, fb, nb);
+    Y.applyUpdate(b, Y.encodeStateAsUpdate(a));
+    Y.applyUpdate(a, Y.encodeStateAsUpdate(b));
+    fb = readForest(b)!;
+    const nb2 = core.replaceTree(fb, { ...fb.trees[0], root: core.setStyle(fb.trees[0].root, X.id, 'lg', 'color', 'red') });
+    writeForest(b, fb, nb2);
+    expect(names(readForest(b)!)).toBe(names(nb2));
+    Y.applyUpdate(a, Y.encodeStateAsUpdate(b));
+    fa = readForest(a)!;
+    expect(names(fa)).toBe(names(nb2));
+  });
+});
+
+describe('pass 29 fixes', () => {
+  it('merges concurrent edits to different tokens, rules and style properties', async () => {
+    const { setToken, createTokenKit, createCustomKit, createRule } = await import('@tree-weaver/core');
+    const start = { ...sample(), kits: [createTokenKit([{ name: '--brand', value: 'red' }, { name: '--space', value: '8px' }]), createCustomKit('Custom', [createRule('.card', { lg: { padding: '8px' } }), createRule('.btn', { lg: { color: 'red' } })])] };
+    const { a, c, sync } = offline();
+    writeForest(a, null, start);
+    sync();
+    const fa = readForest(a)!;
+    const fc = readForest(c)!;
+    const editRule = (f: Forest, sel: string, styles: Record<string, string>): Forest => ({
+      ...f,
+      kits: f.kits.map((k, i) => (i === 1 ? { ...k, rules: k.rules!.map((r) => (r.selector === sel ? { ...r, styles: { lg: styles } } : r)) } : k)),
+    });
+    writeForest(a, fa, withRoot(editRule({ ...fa, kits: setToken(fa.kits, { name: '--brand', value: 'blue' }) }, '.card', { padding: '24px' }), (r) => setStyle(r, 'h', 'lg', 'color', 'blue')));
+    writeForest(c, fc, withRoot(editRule({ ...fc, kits: setToken(fc.kits, { name: '--space', value: '16px' }) }, '.btn', { color: 'green' }), (r) => setStyle(r, 'h', 'lg', 'margin', '0')));
+    sync();
+    for (const doc of [a, c]) {
+      const f = readForest(doc)!;
+      expect(f.kits[0].tokens).toEqual([{ name: '--brand', value: 'blue' }, { name: '--space', value: '16px' }]);
+      expect(f.kits[0].css).toContain('--brand: blue');
+      expect(f.kits[1].rules!.map((r) => [r.selector, r.styles.lg])).toEqual([['.card', { padding: '24px' }], ['.btn', { color: 'green' }]]);
+      expect(f.kits[1].css).toContain('padding: 24px');
+      expect((f.trees[0].root.children[0] as Branch).styles.lg).toEqual({ color: 'blue', margin: '0' });
+    }
+  });
+
+  it('reads a style or attribute named __proto__ as data', () => {
+    const doc = new Y.Doc();
+    writeForest(doc, null, sample());
+    const node = doc.getMap<Y.Map<unknown>>('nodes').get('h')!;
+    doc.transact(() => {
+      node.set('a:__proto__', 'x');
+      node.set('sp:lg:__proto__', 'y');
+    });
+    const h = readForest(doc)!.trees[0].root.children[0] as Branch;
+    expect(Object.getPrototypeOf(h.attrs)).toBe(Object.prototype);
+    expect(Object.hasOwn(h.attrs, '__proto__')).toBe(true);
+    expect(Object.hasOwn(h.styles.lg!, '__proto__')).toBe(true);
+  });
+});
+
+describe('pass 31 fixes', () => {
+  it('merges concurrent edits to different attributes of one leaf', async () => {
+    const { createLeaf } = await import('@tree-weaver/core');
+    const img = { ...createLeaf('a.png', 'image', { alt: 'old', width: '100' }), id: 'img' };
+    const start = withRoot(sample(), (r) => ({ ...r, children: [...r.children, img] }));
+    const { a, c, sync } = offline();
+    writeForest(a, null, start);
+    sync();
+    const fa = readForest(a)!;
+    const fc = readForest(c)!;
+    const setAttr = (f: Forest, k: string, v: string) => withRoot(f, (r) => ({ ...r, children: r.children.map((n) => (n.id === 'img' ? { ...n, attrs: { ...(n as typeof img).attrs, [k]: v } } : n)) }));
+    writeForest(a, fa, setAttr(fa, 'alt', 'A alt'));
+    writeForest(c, fc, setAttr(fc, 'width', '300'));
+    sync();
+    for (const doc of [a, c]) expect((readForest(doc)!.trees[0].root.children.find((n) => n.id === 'img') as typeof img).attrs).toEqual({ alt: 'A alt', width: '300' });
+  });
+});
+
+describe('pass 33 fixes', () => {
+  it('keeps attributes with empty values', () => {
+    const input = b('in', { tag: 'input', attrs: { type: 'checkbox', checked: '', disabled: '' } });
+    const f = withRoot(sample(), (r) => ({ ...r, children: [...r.children, input] }));
+    const { a, c } = pair();
+    writeForest(a, null, f);
+    const read = readForest(c)!.trees[0].root.children.find((n) => n.id === 'in') as Branch;
+    expect(read.attrs).toEqual({ type: 'checkbox', checked: '', disabled: '' });
+  });
+});
+
+describe('pass 41 fixes', () => {
+  it('reads style properties in the same order on every peer', () => {
+    const f = withRoot(sample(), (r) => ({ ...r, children: [...r.children, b('box', { tag: 'div' })] }));
+    const a = new Y.Doc();
+    const c = new Y.Doc();
+    writeForest(a, null, f);
+    Y.applyUpdate(c, Y.encodeStateAsUpdate(a));
+    const fa = readForest(a)!;
+    const fc = readForest(c)!;
+    writeForest(a, fa, withRoot(fa, (r) => setStyle(r, 'box', 'lg', 'padding-left', '40px')));
+    writeForest(c, fc, withRoot(fc, (r) => setStyle(r, 'box', 'lg', 'padding', '0')));
+    const ua = Y.encodeStateAsUpdate(a);
+    const uc = Y.encodeStateAsUpdate(c);
+    Y.applyUpdate(a, uc);
+    Y.applyUpdate(c, ua);
+    const fresh = new Y.Doc();
+    Y.applyUpdate(fresh, Y.encodeStateAsUpdate(c));
+    const order = (doc: InstanceType<typeof Y.Doc>) => Object.keys((readForest(doc)!.trees[0].root.children.find((n) => n.id === 'box') as Branch).styles.lg ?? {});
+    expect(order(a)).toEqual(order(c));
+    expect(order(fresh)).toEqual(order(a));
+  });
+
+  it('keeps the order properties were set in', () => {
+    const f = withRoot(sample(), (r) => ({ ...r, children: [...r.children, b('box', { tag: 'div', styles: { lg: { padding: '0', 'padding-left': '40px', margin: '0' } } })] }));
+    const a = new Y.Doc();
+    writeForest(a, null, f);
+    const fresh = new Y.Doc();
+    Y.applyUpdate(fresh, Y.encodeStateAsUpdate(a));
+    expect(Object.keys((readForest(fresh)!.trees[0].root.children.find((n) => n.id === 'box') as Branch).styles.lg!)).toEqual(['padding', 'padding-left', 'margin']);
+  });
+});

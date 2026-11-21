@@ -16,7 +16,11 @@ export function stripCssComments(css: string): string {
   let i = 0;
   while (i < css.length) {
     const ch = css[i];
-    if (ch === '"' || ch === "'") {
+    // An escaped character (`\'` in Tailwind's `.content-\[\'\'\]`) is part of a name, not a quote.
+    if (ch === '\\') {
+      out += css.slice(i, i + 2);
+      i += 2;
+    } else if (ch === '"' || ch === "'") {
       const end = findStringEnd(css, i);
       out += css.slice(i, end);
       i = end;
@@ -47,7 +51,8 @@ function matchBrace(css: string, open: number): number {
   let depth = 0;
   for (let i = open; i < css.length; i++) {
     const ch = css[i];
-    if (ch === '"' || ch === "'") {
+    if (ch === '\\') i++;
+    else if (ch === '"' || ch === "'") {
       i = findStringEnd(css, i) - 1;
     } else if (ch === '{') depth++;
     else if (ch === '}') {
@@ -61,6 +66,13 @@ function matchBrace(css: string, open: number): number {
 /** Split `a: b; c: d` into a style map. Later declarations win. */
 export function parseDeclarations(body: string): StyleMap {
   const out: StyleMap = {};
+  for (const [prop, value] of declarationList(body)) out[prop] = value;
+  return out;
+}
+
+/** The declarations of a block in order, repeats included. */
+export function declarationList(body: string): [string, string][] {
+  const out: [string, string][] = [];
   let current = '';
   let paren = 0;
   const flush = () => {
@@ -68,12 +80,17 @@ export function parseDeclarations(body: string): StyleMap {
     if (idx > 0) {
       const prop = current.slice(0, idx).trim();
       const value = current.slice(idx + 1).trim();
-      if (prop && value) out[prop.startsWith('--') ? prop : prop.toLowerCase()] = value;
+      if (prop && value) out.push([prop.startsWith('--') ? prop : prop.toLowerCase(), value]);
     }
     current = '';
   };
   for (let i = 0; i < body.length; i++) {
     const ch = body[i];
+    if (ch === '\\') {
+      current += body.slice(i, i + 2);
+      i++;
+      continue;
+    }
     if (ch === '"' || ch === "'") {
       const end = findStringEnd(body, i);
       current += body.slice(i, end);
@@ -108,7 +125,8 @@ function parseStripped(css: string, depth: number): CssNode[] {
     // Find whichever comes first: a block or (for at-rules) a terminating semicolon.
     let j = i;
     while (j < css.length && css[j] !== '{' && !(css[i] === '@' && css[j] === ';')) {
-      if (css[j] === '"' || css[j] === "'") j = findStringEnd(css, j);
+      if (css[j] === '\\') j += 2;
+      else if (css[j] === '"' || css[j] === "'") j = findStringEnd(css, j);
       else j++;
     }
     const head = css.slice(i, j).trim();

@@ -21,6 +21,7 @@ import {
   resolveStyles,
   trackLabel,
   isSvgRoot,
+  instanceRoleIn,
   renderTreeBody,
   renderTreeCss,
   type Branch,
@@ -29,7 +30,7 @@ import {
   type GridTrack,
 } from '@tree-weaver/core';
 import { allKits, currentTree, insertBlueprint,
-  insertComponent, moveTo, pathTo, select, selectedNode, setStyleValue, updateLeaf, type DropPosition } from '../../store/actions';
+  insertComponent, INSIDE_INSTANCE, moveTo, pathTo, select, selectedNode, setStyleValue, toast, updateLeaf, type DropPosition } from '../../store/actions';
 import { onChange, state } from '../../store/editor';
 import { dropLibraryBranch } from '../../store/storybook';
 import { nodeKind, nodeLabel } from '../../utils/describe';
@@ -57,25 +58,25 @@ svg[data-tw]:empty { min-height: 0; min-width: 0; }
 a, button { cursor: default; }
 html { min-height: 100%; }
 body { min-height: 100vh; }
-#tw-grid-overlay { position: absolute; left: 0; top: 0; width: 0; height: 0; pointer-events: none; z-index: 2147483646;
+:root > #tw-grid-overlay { position: absolute; left: 0; top: 0; width: 0; height: 0; pointer-events: none; z-index: 2147483646;
   font: 600 11px/1.2 system-ui, sans-serif; }
-#tw-grid-overlay .col { position: absolute; box-sizing: border-box; background: rgba(37,99,235,.06);
+:root > #tw-grid-overlay .col { position: absolute; box-sizing: border-box; background: rgba(37,99,235,.06);
   border-left: 1px dashed rgba(37,99,235,.6); border-right: 1px dashed rgba(37,99,235,.6); }
-#tw-grid-overlay .gap { position: absolute; background: repeating-linear-gradient(45deg, rgba(37,99,235,.14) 0 3px, transparent 3px 7px); }
-#tw-grid-overlay .row-line { position: absolute; border-top: 1px dashed rgba(37,99,235,.45); }
-#tw-grid-overlay .label { position: absolute; transform: translate(-50%, 3px); padding: 2px 6px; border-radius: 3px; white-space: nowrap;
+:root > #tw-grid-overlay .gap { position: absolute; background: repeating-linear-gradient(45deg, rgba(37,99,235,.14) 0 3px, transparent 3px 7px); }
+:root > #tw-grid-overlay .row-line { position: absolute; border-top: 1px dashed rgba(37,99,235,.45); }
+:root > #tw-grid-overlay .label { position: absolute; transform: translate(-50%, 3px); padding: 2px 6px; border-radius: 3px; white-space: nowrap;
   color: #fff; background: #2563eb; box-shadow: 0 1px 2px rgba(0,0,0,.2); }
-#tw-grid-overlay .handle { position: absolute; width: 14px; margin-left: -7px; pointer-events: auto; cursor: col-resize; touch-action: none; }
-#tw-grid-overlay .handle::after { content: ''; position: absolute; left: 5px; top: 50%; width: 4px; height: 32px; margin-top: -16px;
+:root > #tw-grid-overlay .handle { position: absolute; width: 14px; margin-left: -7px; pointer-events: auto; cursor: col-resize; touch-action: none; }
+:root > #tw-grid-overlay .handle::after { content: ''; position: absolute; left: 5px; top: 50%; width: 4px; height: 32px; margin-top: -16px;
   border-radius: 2px; background: #2563eb; box-shadow: 0 0 0 2px #fff; }
-#tw-grid-overlay .handle:hover::after { background: #1d4ed8; height: 40px; margin-top: -20px; }
-#tw-grid-overlay .handle.span { cursor: ew-resize; }
-#tw-grid-overlay .handle.span::after { background: #f59e0b; }
-#tw-grid-overlay .label.span { background: #b45309; }
-#tw-grid-overlay.dragging > :not(.live) { display: none; }
-#tw-grid-overlay .label.above { transform: translate(-50%, calc(-100% - 3px)); }
-#tw-grid-overlay .area { position: absolute; box-sizing: border-box; border: 2px dashed var(--area); border-radius: 3px; }
-#tw-grid-overlay .area span { position: absolute; left: 0; bottom: 0; padding: 1px 6px; border-radius: 0 3px 0 0; background: var(--area); color: #fff; font: 600 1em/1.4 system-ui, sans-serif; }
+:root > #tw-grid-overlay .handle:hover::after { background: #1d4ed8; height: 40px; margin-top: -20px; }
+:root > #tw-grid-overlay .handle.span { cursor: ew-resize; }
+:root > #tw-grid-overlay .handle.span::after { background: #f59e0b; }
+:root > #tw-grid-overlay .label.span { background: #b45309; }
+:root > #tw-grid-overlay.dragging > :not(.live) { display: none; }
+:root > #tw-grid-overlay .label.above { transform: translate(-50%, calc(-100% - 3px)); }
+:root > #tw-grid-overlay .area { position: absolute; box-sizing: border-box; border: 2px dashed var(--area); border-radius: 3px; }
+:root > #tw-grid-overlay .area span { position: absolute; left: 0; bottom: 0; padding: 1px 6px; border-radius: 0 3px 0 0; background: var(--area); color: #fff; font: 600 1em/1.4 system-ui, sans-serif; }
 `;
 
 const SKELETON = `<!doctype html><html><head><meta charset="utf-8">
@@ -103,6 +104,8 @@ export class TwCanvas {
   private editing: HTMLElement | null = null;
   // What the frame currently shows, so updates only touch what changed.
   private shownRoot: Branch | null = null;
+  /** The display settings the tree CSS was written for: its media queries follow the breakpoints. */
+  private shownDisplays = -1;
   private shownKits: DesignKit[] = [];
   private shownDisplay: DisplayId | null = null;
   private dropMark: { el: Element; position: DropPosition; id: string } | null = null;
@@ -160,7 +163,7 @@ export class TwCanvas {
     doc.addEventListener('submit', (e) => e.preventDefault(), true);
     doc.addEventListener('keydown', (e) => handleShortcut(e));
     doc.addEventListener('pointerdown', (e) => {
-      const handle = (e.target as Element).closest?.('#tw-grid-overlay .handle');
+      const handle = (e.target as Element).closest?.(':root > #tw-grid-overlay .handle');
       if (handle) this.handles.get(handle)?.(e);
     });
     doc.addEventListener('dragover', (e) => this.onDragOver(e));
@@ -222,7 +225,7 @@ export class TwCanvas {
       this.shownKits = kits;
       changed = true;
     }
-    if (this.shownRoot !== tree.root && !this.editing) {
+    if ((this.shownRoot !== tree.root || this.shownDisplays !== state.displaysVersion) && !this.editing) {
       const root = tree.root;
       doc.getElementById('tw-tree')!.textContent = renderTreeCss(root);
       const body = doc.body;
@@ -245,6 +248,7 @@ export class TwCanvas {
       body.innerHTML = renderTreeBody(root, { designer: true });
       body.querySelectorAll(`[${BRANCH_ATTR}]`).forEach((el) => el.setAttribute('draggable', 'true'));
       this.shownRoot = root;
+      this.shownDisplays = state.displaysVersion;
       changed = true;
     }
     if (this.shownDisplay !== state.display) {
@@ -295,7 +299,7 @@ export class TwCanvas {
 
   private onClick(e: MouseEvent) {
     if (this.editing && this.editing.contains(e.target as Node)) return;
-    if (this.suppressClick || (e.target as Element).closest?.('#tw-grid-overlay')) {
+    if (this.suppressClick || (e.target as Element).closest?.(':root > #tw-grid-overlay')) {
       this.suppressClick = false;
       e.preventDefault();
       e.stopPropagation();
@@ -321,6 +325,12 @@ export class TwCanvas {
     if (!span || span.tagName === 'IMG' || span.namespaceURI !== 'http://www.w3.org/1999/xhtml') return;
     e.preventDefault();
     const id = span.getAttribute(LEAF_ATTR)!;
+    // An instance's text comes from its component; an edit here would be undone at once.
+    const tree = currentTree();
+    if (tree && instanceRoleIn(tree.root, id) === 'inside') {
+      toast(INSIDE_INSTANCE, 'error');
+      return;
+    }
     const original = span.textContent ?? '';
     this.editing = span;
     span.setAttribute('contenteditable', 'plaintext-only');
@@ -342,11 +352,14 @@ export class TwCanvas {
     };
     const onBlur = () => finish(true);
     const onKey = (ev: KeyboardEvent) => {
+      // The key ends the edit; it isn't also a shortcut (Escape would select the parent).
       if (ev.key === 'Enter' && !ev.shiftKey) {
         ev.preventDefault();
+        ev.stopPropagation();
         span.blur();
       } else if (ev.key === 'Escape') {
         ev.preventDefault();
+        ev.stopPropagation();
         span.removeEventListener('blur', onBlur);
         finish(false);
       }
@@ -447,7 +460,7 @@ export class TwCanvas {
   }
 
   private overlay(doc: Document): HTMLElement {
-    let overlay = doc.getElementById('tw-grid-overlay');
+    let overlay = doc.querySelector<HTMLElement>(':root > #tw-grid-overlay');
     if (!overlay) {
       overlay = doc.createElement('div');
       overlay.id = 'tw-grid-overlay';

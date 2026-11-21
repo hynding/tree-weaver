@@ -81,10 +81,13 @@ export function storybookRoot(paths: string[]): string {
   return candidates.sort((a, b) => a.split('/').length - b.split('/').length)[0];
 }
 
-/** Store an uploaded Storybook and return the URL it is served from. Uploading the same name again replaces it. */
+/**
+ * Store an uploaded Storybook and return the URL it is served from. Each upload gets an id of its
+ * own (`storybook-static` is every project's folder name), so one never replaces another's files.
+ */
 export async function saveUploadedStorybook(name: string, files: UploadedFile[]): Promise<string> {
   const root = storybookRoot(files.map((f) => f.path));
-  const id = slugify(name, 'storybook');
+  const id = `${slugify(name, 'storybook')}-${Math.random().toString(36).slice(2, 8)}`;
   await ensureStorybookWorker();
   await removeUploadedStorybook(id);
   const db = await openDb();

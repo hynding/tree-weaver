@@ -8,7 +8,8 @@ import { countTracks, equalColumns } from './layout';
 import { formatSpan, parseSpan, parseTracks } from './grid';
 import type { Branch, DisplayId, StyleMap } from './model';
 import { isBranch } from './model';
-import { findNode, setStyle, updateNode } from './ops';
+import { canHaveChildren, findNode, setStyle, updateNode } from './ops';
+import { insertionProblem } from './patch';
 
 /* ------------------------------------------------------------ named areas */
 
@@ -312,6 +313,10 @@ const childBranches = (branch: Branch): Branch[] => branch.children.filter(isBra
 export function applyGridLayout(root: Branch, branchId: string, display: DisplayId, layout: GridLayout): { root: Branch; created: string[] } {
   const branch = findNode(root, branchId);
   if (!isBranch(branch)) return { root, created: [] };
+  // A layout fills the grid with boxes, which a void element or an SVG can't hold.
+  if (!canHaveChildren(branch)) throw new Error(`<${(branch as Branch).tag}> can't hold children, so it can't take a grid layout`);
+  const boxProblem = insertionProblem(root, branchId, createBranch({ tag: 'div' }));
+  if (boxProblem) throw new Error(boxProblem);
   const inherited = inheritedStyles(branch.styles, display);
   const resolved = resolveStyles(branch.styles, display);
   let next = root;
@@ -320,8 +325,9 @@ export function applyGridLayout(root: Branch, branchId: string, display: Display
   set(branchId, 'grid-template-columns', layout.columns);
   const hadAreas = !!parseAreas(inherited['grid-template-areas'])?.length;
   set(branchId, 'grid-template-areas', layout.areas ? formatAreas(layout.areas) : hadAreas ? 'none' : null);
-  set(branchId, 'grid-template-rows', null);
-  if (!resolved.gap) set(branchId, 'gap', GAP_PRESETS.find((g) => g.id === 'medium')!.value);
+  // Rows inherited from a wider display would still size the new layout's rows.
+  set(branchId, 'grid-template-rows', inherited['grid-template-rows'] ? 'none' : null);
+  if (!resolved.gap && !resolved['row-gap'] && !resolved['column-gap'] && !resolved['grid-gap']) set(branchId, 'gap', GAP_PRESETS.find((g) => g.id === 'medium')!.value);
 
   const children = childBranches(branch);
   const created: string[] = [];

@@ -54,6 +54,17 @@ describe('tree-weaver CLI', () => {
     expect((await cli(['validate', 'home.tree.json'], r.files)).code).toBe(0);
   });
 
+  it('refuses to replace an existing file without --force', async () => {
+    const files = { 'home.json': '{"keep":true}' };
+    const r = await cli(['init', 'home.json'], files);
+    expect(r.code).not.toBe(0);
+    expect(r.err).toContain('already exists');
+    expect(r.files['home.json']).toBe('{"keep":true}');
+    const forced = await cli(['new', 'home.json', '--force'], files);
+    expect(forced.code).toBe(0);
+    expect(JSON.parse(forced.files['home.json']).format).toBe('tree-weaver');
+  });
+
   it('creates forests in forest formats and lists templates', async () => {
     const r = await cli(['new', 'site.forest.yaml', '--forest', '--bare', '-n', 'Site']);
     expect(r.files['site.forest.yaml']).toMatch(/^forest:/m);
@@ -507,6 +518,13 @@ describe('tree-weaver tokens', () => {
     expect(JSON.parse(reset.out).tokens[0]).toMatchObject({ name: '--brand', value: '#2f6f4f', edited: false });
   });
 
+  it('writes edited tokens in the -o file\'s format', async () => {
+    const r = await cli(['tokens', 'page.json', '--set', 'brand=#ff0000', '-o', 'page.xml'], doc());
+    expect(r.code).toBe(0);
+    expect(r.files['page.xml']).toMatch(/^<\?xml/);
+    expect(r.files['page.json']).not.toContain('#ff0000');
+  });
+
   it('writes tokens for each platform', async () => {
     expect((await cli(['tokens', 'page.json', '-f', 'swift'], doc())).out).toContain('static let brand = Color(');
     expect((await cli(['tokens', 'page.json', '-f', 'dart'], doc())).out).toContain('static const double gap = 16;');
@@ -566,6 +584,8 @@ describe('tree-weaver components', () => {
     expect(inst.styles['mobile-portrait']).toEqual({ 'flex-direction': 'column' });
     expect(JSON.stringify(inst.children)).toContain('Hello');
     expect((await cli(['components', 'site.json', 'insert', 'Card', '--variant', 'nope'], files)).code).toBe(2);
+    // `-` is the base look on a display, as in the MCP tool and the docs.
+    expect((await cli(['components', 'site.json', 'insert', 'Card', '--variant', 'lg=stacked', '--variant', 'mobile-portrait=-', '--no-version'], { ...files })).code).toBe(0);
 
     const list = await cli(['components', 'site.json', '--json'], ins.files);
     expect(JSON.parse(list.out).components[0]).toMatchObject({ name: 'Card', variants: ['stacked'], instances: 2 });
@@ -641,5 +661,13 @@ describe('versions counted from the newest', () => {
     expect(r.code).toBe(0);
     const log = Object.entries(r.files).find(([f]) => f.includes('versions'))![1];
     expect(JSON.parse(log).versions[0].name).toBe('-1');
+  });
+
+  it('writes an edit in the format of the -o file it names', async () => {
+    const made = await cli(['new', 'page.tree.json', '--bare']);
+    const r = await cli(['patch', 'page.tree.json', '--ops', '[{"op":"insert","node":"h1: Hi"}]', '-o', 'page.html'], made.files);
+    expect(r.code).toBe(0);
+    expect(r.files['page.html']).toMatch(/^<!doctype html>/i);
+    expect(r.files['page.html']).toContain('>Hi</h1>');
   });
 });

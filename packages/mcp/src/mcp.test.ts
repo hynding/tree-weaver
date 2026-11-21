@@ -368,5 +368,17 @@ describe('Tree Weaver MCP server', () => {
     expect(text).toContain('from-a');
     expect(text).toContain('from-b');
   });
+  it('writes an edit to another file in that file’s format, refusing one that can’t hold a forest', async () => {
+    const { call } = await connect();
+    await call('create_tree', { path: 'page.json', template: 'landing' });
+    const r = await call('patch_tree', { path: 'page.json', ops: [{ op: 'setText', target: '/0/0', value: 'Hi' }], output: 'page.html' });
+    expect(r.isError).toBeFalsy();
+    expect(readFileSync(join(root, 'page.html'), 'utf8')).toMatch(/^<!doctype html>/);
+    await call('create_tree', { path: 'site.forest.json', starter: 'dashboard' });
+    const bad = await call('patch_tree', { path: 'site.forest.json', ops: [{ op: 'setText', target: '/0/0', value: 'Hi' }], output: 'site.html' });
+    expect(bad.isError).toBe(true);
+    expect(bad.text).toContain('holds one tree');
+    expect(existsSync(join(root, 'site.html'))).toBe(false);
+  });
 });
 

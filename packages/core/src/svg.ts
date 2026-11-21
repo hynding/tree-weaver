@@ -1,6 +1,7 @@
 import { createBranch, createLeaf, createTree } from './create';
 import type { Branch, Leaf, Tree, TreeNode } from './model';
 import { isBranch } from './model';
+import { nestingProblem } from './nesting';
 
 /**
  * SVG in Tree Weaver.
@@ -121,7 +122,20 @@ export function placementProblem(root: Branch, parentId: string, node: TreeNode)
     return null;
   }
   if (isSvgOnly(node)) return `${isBranch(node) ? `<${node.tag}>` : `A ${node.value} shape`} needs an SVG around it; add an SVG canvas first and drop it inside`;
-  return null;
+  return nestingProblem(pathTo(root, parentId), node);
+}
+
+/** The branches from `root` down to branch `id`, both included (empty when it isn't there). */
+function pathTo(root: Branch, id: string): Branch[] {
+  const path: Branch[] = [];
+  const search = (b: Branch): boolean => {
+    path.push(b);
+    if (b.id === id || b.children.some((c) => isBranch(c) && search(c))) return true;
+    path.pop();
+    return false;
+  };
+  search(root);
+  return path;
 }
 
 /** The attributes the editor shows for each shape, in order. */

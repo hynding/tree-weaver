@@ -1,5 +1,6 @@
 import {
   canonicalTag,
+  isSvgBranchTag,
   cloneNode,
   createBranch,
   createLeaf,
@@ -57,8 +58,26 @@ const HTML_TAGS = [
   'summary', 'sup', 'table', 'tbody', 'td', 'textarea', 'tfoot', 'th', 'thead', 'time', 'tr', 'u', 'ul', 'var', 'video', 'wbr',
 ];
 const KNOWN_TAGS = new Set([...HTML_TAGS, ...SVG_BRANCH_TAGS.map((t) => t.toLowerCase())]);
+const HTML_TAG_SET = new Set(HTML_TAGS);
+/**
+ * Where a string is being expanded, when known: 'html' outside any <svg> (or inside a
+ * foreignObject), 'svg' inside one. Unknown (null) for a lone node, such as a patch insert.
+ */
+let place: 'html' | 'svg' | null = null;
+const within = <T>(next: typeof place, fn: () => T): T => {
+  const before = place;
+  place = next;
+  try {
+    return fn();
+  } finally {
+    place = before;
+  }
+};
 
 const SELECTOR = /^([A-Za-z][A-Za-z0-9-]*)((?:\.[A-Za-z_][\w-]*)*)(?:#([A-Za-z][\w-]*))?((?:\[[A-Za-z_:][\w:.-]*(?:=(?:"[^"]*"|'[^']*'|[^\]]*))?\])*)$/;
+/** The most columns a `grid` takes, so a number can't make a million cells. */
+const MAX_GRID_COLUMNS = 24;
+
 const ATTR = /\[([A-Za-z_:][\w:.-]*)(?:=("[^"]*"|'[^']*'|[^\]]*))?\]/g;
 
 /**
@@ -130,12 +149,15 @@ function expandString(value: string, path: string): TreeNode {
   const m = splitStringForm(value);
   if (!m) return text(value);
   const content = m[1] ?? '';
-  if (m[0].toLowerCase() === 'img') {
+  // Lower case only, like other tags: a capitalised label (`IMG: …`) stays text.
+  if (m[0] === 'img') {
     const [src, ...alt] = content.split(' | ');
     return imageLeaf(src, alt.length ? alt.join(' | ') : '');
   }
   const sel = parseSelector(m[0]);
   if (!sel) return text(value);
+  // Outside an SVG, an SVG-only name in lowercase (`title: Welcome back`, `text: Hello`) is a label.
+  if (place === 'html' && sel.tag !== 'svg' && !HTML_TAG_SET.has(sel.tag) && m[0] === m[0].toLowerCase()) return text(value);
   return createBranch({ tag: sel.tag, classes: sel.classes, attrs: sel.attrs, children: content ? [text(content)] : [] });
 }
 
@@ -208,16 +230,22 @@ function table(rows: unknown, header: boolean, path: string): Branch {
 
 function expandObject(value: Obj, path: string): TreeNode {
   // Canonical branches and leaves: keep them, expanding shorthand in their children and flat styles.
-  if (value.kind !== undefined || value.tag !== undefined || value.value !== undefined || value.text !== undefined || value.src !== undefined) {
+  // Inside an SVG, a lone `text` key is the <text> element (`{ "text": "Hi", "attrs": { "x": "4" } }`), not a text leaf.
+  const textLeaf = value.text !== undefined && (place !== 'svg' || value.type !== undefined);
+  if (value.kind !== undefined || value.tag !== undefined || value.value !== undefined || textLeaf || value.src !== undefined) {
     const children = value.children;
     const copy: Obj = { ...value };
     if (Array.isArray(children)) copy.children = [];
     if (value.styles !== undefined) copy.styles = expandStyles(value.styles, `${path}.styles`);
     const node = normalizeNode(copy, path);
-    if (isBranch(node) && Array.isArray(children)) node.children = children.map((c, i) => expandAt(c, `${path}.children[${i}]`));
+    if (isBranch(node) && Array.isArray(children)) {
+      const inner = node.tag === 'svg' ? 'svg' : node.tag === 'foreignObject' ? 'html' : place;
+      node.children = within(inner, () => children.map((c, i) => expandAt(c, `${path}.children[${i}]`)));
+    }
     return node;
   }
-  const keys = Object.keys(value).filter((k) => !MODIFIERS.has(k));
+  // `header` is the table's modifier (`"header": false`) only beside a `table` key; otherwise it's the element.
+  const keys = Object.keys(value).filter((k) => !MODIFIERS.has(k) || (k === 'header' && value.table === undefined));
   if (keys.length !== 1) {
     fail(
       keys.length
@@ -234,6 +262,7 @@ function expandObject(value: Obj, path: string): TreeNode {
   switch (key as (typeof LAYOUT_KEYS)[number]) {
     case 'grid': {
       const children = kids(listOf(value.children, path));
+      if (typeof body === 'number' && Number.isInteger(body) && body > MAX_GRID_COLUMNS) fail(`"grid" takes 1 to ${MAX_GRID_COLUMNS} columns`, path);
       if (typeof body === 'number' && Number.isInteger(body) && body > 0) {
         node = responsiveGrid(body, children, typeof value.name === 'string' ? value.name : 'Grid');
       } else if (typeof body === 'string' && body.trim()) {
@@ -265,7 +294,10 @@ function expandObject(value: Obj, path: string): TreeNode {
     case 'use': {
       if (typeof body !== 'string') fail('"use" is a blueprint id, such as "card" or "hero"', `${path}.use`);
       node = blueprint(body as string, `${path}.use`);
-      if (value.children !== undefined && isBranch(node)) node = { ...node, children: kids(listOf(value.children, path)) };
+      if (value.children !== undefined && isBranch(node)) {
+        const b = node;
+        node = { ...b, children: within(b.tag === 'svg' || (isSvgBranchTag(b.tag) && !HTML_TAG_SET.has(b.tag)) ? 'svg' : place, () => kids(listOf(value.children, path))) };
+      }
       break;
     }
     default: {
@@ -275,8 +307,11 @@ function expandObject(value: Obj, path: string): TreeNode {
         return fail(`"${key}" is not an element, layout (grid, row, column, section, table, img, use) or field`, path);
       }
       if (value.children !== undefined && body !== null) fail(`Give the children either as "${key}" or as "children", not both`, path);
+      // Outside an SVG, an SVG-only element (`title`, `text`, `g`) would be hidden or dropped.
+      if (place === 'html' && sel.tag !== 'svg' && isSvgBranchTag(sel.tag) && !HTML_TAG_SET.has(sel.tag)) fail(`<${sel.tag}> only works inside an SVG; use an HTML element here${sel.tag.toLowerCase() === 'title' ? ' (a heading such as "h1")' : ''}`, `${path}.${key}`);
       // A string value is the element's text, taken as written (not read as shorthand).
-      const content = value.children !== undefined ? kids(listOf(value.children, path)) : typeof body === 'string' ? [text(body)] : kids(listOf(body, path));
+      const inner = sel.tag === 'svg' ? 'svg' : sel.tag === 'foreignObject' ? 'html' : place;
+      const content = within(inner, () => (value.children !== undefined ? kids(listOf(value.children, path)) : typeof body === 'string' ? [text(body)] : kids(listOf(body, path))));
       node = createBranch({ tag: sel.tag, classes: sel.classes, attrs: sel.attrs, children: content });
     }
   }
@@ -307,6 +342,10 @@ export function expandShorthand(value: unknown, path = 'node'): TreeNode {
  * canonical document as plain data, ready for `importDocument` or `normalizeTree`.
  */
 export function expandShorthandDocument(value: unknown): Obj {
+  return within('html', () => expandDocument(value));
+}
+
+function expandDocument(value: unknown): Obj {
   const expandRoot = (root: unknown, path: string): TreeNode => {
     if (Array.isArray(root)) return expandShorthand({ tag: 'body', children: root }, path);
     const node = expandShorthand(root, path);

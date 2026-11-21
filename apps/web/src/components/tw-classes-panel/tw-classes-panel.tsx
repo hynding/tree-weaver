@@ -97,7 +97,7 @@ export class TwClassesPanel {
       input.value = rule.selector;
       return;
     }
-    renameRule(kit.id, rule.id, selector);
+    if (!renameRule(kit.id, rule.id, selector)) input.value = rule.selector;
   }
 
   private toggle(id: string) {
@@ -107,7 +107,7 @@ export class TwClassesPanel {
 
   private applyCss(kit: DesignKit, css: string) {
     const skipped = setRulesCss(kit.id, css);
-    if (skipped.length) toast(`Left out ${skipped.join(', ')}: custom styles hold plain rules and the display media queries only`, 'error');
+    if (skipped.length) toast(`Not kept as written: ${skipped.join(', ')}. Custom styles hold plain rules with standard properties, merged by selector, and the display media queries only`, 'error');
   }
 
   /** Put the class on the selected branch, or take it off. */

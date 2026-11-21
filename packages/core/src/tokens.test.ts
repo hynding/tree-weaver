@@ -45,7 +45,7 @@ describe('design tokens', () => {
   it('refuses bad names and values that would break out of the rule', () => {
     expect(() => setToken([], { name: 'brand', value: 'red' })).toThrow(/not a token name/);
     const kits = setToken([], { name: '--x', value: 'red; } body { color: blue' });
-    expect(kits[0].css).toBe(':root {\n  --x: red body color: blue;\n}\n');
+    expect(kits[0].css).toBe(':root {\n  --x: red, body color: blue;\n}\n');
   });
 
   it('round-trips through normalize, including from CSS only', () => {

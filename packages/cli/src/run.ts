@@ -19,6 +19,7 @@ import {
   resetToken,
   setToken,
   themeTokens,
+  tokenShadowed,
   TOKEN_KINDS,
   type TokenKind,
   canHaveChildren,
@@ -182,6 +183,7 @@ from the template gallery with its own design tokens and components.
   -n, --name <name>     Name of the tree (and the forest)
       --forest          Write a forest holding the tree, instead of a tree
       --bare            Leave out the starter kit
+      --force           Replace the file if it already exists
   -f, --format <fmt>    Output format when there is no file extension (default: json)
       --list            List the templates and starters
 `,
@@ -450,6 +452,16 @@ class Cli {
     }
   }
 
+  async exists(path: string): Promise<boolean> {
+    try {
+      await this.io.readFile(path);
+      return true;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return false;
+      throw err;
+    }
+  }
+
   /** Write to a file, or to stdout when there is no file. */
   async emit(output: string | undefined, data: string): Promise<void> {
     if (output && output !== '-') await this.io.writeFile(output, data);
@@ -542,15 +554,29 @@ function editTarget(output: string | undefined, file: string): string | undefine
 /** Whether two spellings name the same file (`t.json` and `./t.json`). */
 const sameFile = (a: string, b: string) => b !== '-' && resolvePath(a) === resolvePath(b);
 
-/** Put an updated tree back into its document and write it, in the document's own format. */
+/**
+ * The format an edit is written in: the format `-o`'s extension names when it writes to another
+ * file, else the document's own. A forest can't go to a format that holds one tree.
+ */
+function editFormat(loaded: Loaded, file: string, target: string | undefined, forest: boolean): FormatId {
+  const format = (target && !sameFile(target, file) ? formatFromFileName(target) : null) ?? loaded.format;
+  if (forest && !getFormat(format).forest) throw new Error(`${getFormat(format).label} holds one tree; write a forest as JSON, YAML or XML. Nothing was written.`);
+  return format;
+}
+
+/**
+ * Put an updated tree back into its document and write it: in the document's own format, or
+ * the format `-o`'s extension names when it writes somewhere else.
+ */
 async function writeTree(cli: Cli, loaded: Loaded, file: string, tree: Tree, output: string | undefined, versionAs?: string): Promise<string | undefined> {
-  const { doc, format } = loaded;
+  const { doc } = loaded;
+  const target = editTarget(output, file);
+  const format = editFormat(loaded, file, target, doc.kind === 'forest');
   let next: TreeDocument;
   if (doc.kind === 'forest') next = { kind: 'forest', forest: { ...replaceTree(doc.forest, tree), updatedAt: now() } };
   else next = { ...doc, tree: { ...tree, updatedAt: now() } };
-  if (!getFormat(format).lossless) cli.note(`${file} is ${getFormat(format).label}, which doesn't keep every style or attribute; consider converting it to JSON first`);
+  if (!getFormat(format).lossless) cli.note(`${target ?? file} is ${getFormat(format).label}, which doesn't keep every style or attribute; consider converting it to JSON first`);
   const data = next.kind === 'forest' ? exportForest(next.forest, format) : exportTree(next.tree, format, next.kits);
-  const target = editTarget(output, file);
   // Overwriting the file: keep what it was, so "versions restore" can bring it back.
   if (versionAs && target && sameFile(target, file) && loaded.text !== data) await keepVersion(cli, file, loaded.text, format, { name: versionAs, source: 'agent', auto: true });
   await cli.emit(target, data);
@@ -569,6 +595,7 @@ async function cmdNew(cli: Cli, args: string[]): Promise<number> {
     format: { type: 'string', short: 'f' },
     output: { type: 'string', short: 'o' },
     list: { type: 'boolean' },
+    force: { type: 'boolean' },
   });
   const json = !!values.json;
   if (values.list) {
@@ -582,6 +609,10 @@ async function cmdNew(cli: Cli, args: string[]): Promise<number> {
   }
   if (positionals.length > 1) throw new UsageError('new takes at most one file');
   const output = values.output ?? positionals[0];
+  // `init` and `create` make it easy to run this over a document by accident, and nothing would be kept.
+  if (output && output !== '-' && !values.force && (await cli.exists(output))) {
+    throw new Error(`${output} already exists; pass --force to replace it`);
+  }
   if (values.starter !== undefined) {
     if (values.template !== undefined) throw new UsageError('Give --template or --starter, not both');
     const starter = getStarter(values.starter);
@@ -1041,8 +1072,8 @@ async function cmdComponents(cli: Cli, args: string[]): Promise<number> {
   const json = !!values.json;
   const components = doc.kind === 'forest' ? (doc.forest.components ?? []) : [];
   const write = async (forest: Forest, label: string) => {
-    const data = exportForest(forest, loaded.format);
     const target = editTarget(values.output, file);
+    const data = exportForest(forest, editFormat(loaded, file, target, true));
     if (!values['no-version'] && target && sameFile(target, file) && loaded.text !== data) await keepVersion(cli, file, loaded.text, loaded.format, { name: label, source: 'agent', auto: true });
     await cli.emit(target, data);
     return target;
@@ -1096,7 +1127,7 @@ async function cmdComponents(cli: Cli, args: string[]): Promise<number> {
         const i = a.indexOf('=');
         const [display, name] = i < 0 ? ['lg', a] : [a.slice(0, i), a.slice(i + 1)];
         if (!isDisplayId(display)) throw new UsageError(`Unknown display "${display}". Displays: ${DISPLAY_IDS.join(', ')}`);
-        if (!def.variants.some((v) => v.name === name)) throw new UsageError(`"${def.name}" has no variant "${name}"${def.variants.length ? `. Variants: ${def.variants.map((v) => v.name).join(', ')}` : ''}`);
+        if (name !== '-' && !def.variants.some((v) => v.name === name)) throw new UsageError(`"${def.name}" has no variant "${name}"${def.variants.length ? `. Variants: ${def.variants.map((v) => v.name).join(', ')}` : ''}`);
         variants[display] = name;
       }
       const unknown = Object.keys(props).filter((p) => !componentProps(def).some((q) => q.name === p));
@@ -1162,11 +1193,13 @@ async function cmdTokens(cli: Cli, args: string[]): Promise<number> {
       kits = setToken(kits, { name, value: current.value, kind: kind as TokenKind });
     }
     const next: TreeDocument = doc.kind === 'forest' ? { kind: 'forest', forest: { ...doc.forest, kits, updatedAt: now() } } : { ...doc, kits };
-    const data = next.kind === 'forest' ? exportForest(next.forest, loaded.format) : exportTree(next.tree, loaded.format, next.kits);
     const target = editTarget(values.output, file);
+    const format = editFormat(loaded, file, target, next.kind === 'forest');
+    const data = next.kind === 'forest' ? exportForest(next.forest, format) : exportTree(next.tree, format, next.kits);
     if (!values['no-version'] && target && sameFile(target, file) && loaded.text !== data) await keepVersion(cli, file, loaded.text, loaded.format, { name: 'Before tokens', source: 'agent', auto: true });
     await cli.emit(target, data);
     if (target) cli.note(`Wrote ${target}`);
+    for (const [name] of sets) if (tokenShadowed(kits, name)) cli.note(`${name}: a kit loading after the token kit sets it too, so that value wins; move the token kit last to use yours`);
   }
   const tokens = themeTokens(kits);
   if (values.format) {

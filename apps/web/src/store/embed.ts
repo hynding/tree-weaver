@@ -2,7 +2,7 @@ import { applyPatch, idsOutside, formatDiff, diffLines, isDisplayId, replaceTree
 import { expandShorthand } from '@tree-weaver/branches';
 import { exportForest, exportTree, FORMATS, importDocument, type FormatId } from '@tree-weaver/formats';
 import type { EditorMessage, HostMessage } from '@tree-weaver/embed';
-import { allKits, commit, currentTree, importText, openDocument, redo, setDisplay, switchTree, toast, undo } from './actions';
+import { allKits, commit, currentTree, importText, openDocument, pageTree, redo, setDisplay, switchTree, toast, undo } from './actions';
 import { compareWithCurrent, restoreVersion, saveVersion, versionBefore } from './versions';
 import { onChange, state, type ForestVersion } from './editor';
 import { allowedOrigins, isEmbedded, sourceUrl } from './embed-flags';
@@ -23,7 +23,11 @@ const FORMAT_IDS = FORMATS.map((f) => f.id) as string[];
 let hostOrigin: string | null = null;
 
 function post(message: EditorMessage, origin: string): void {
-  window.parent.postMessage(message, origin);
+  try {
+    window.parent.postMessage(message, origin);
+  } catch (err) {
+    console.warn(`Tree Weaver: could not message the host page: ${(err as Error).message}`);
+  }
 }
 
 /** Decode `#doc=` (base64url, UTF-8). */
@@ -40,7 +44,15 @@ async function fetchDocument(src: string): Promise<{ text: string; fileName: str
   if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('Only http(s) links can be opened');
   const res = await fetch(url.href, { credentials: 'omit' });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return { text: await res.text(), fileName: decodeURIComponent(url.pathname.split('/').pop() ?? '') };
+  // The file name is only a format hint, so a stray `%` (`100%.json`) leaves it as written.
+  const last = url.pathname.split('/').pop() ?? '';
+  let fileName = last;
+  try {
+    fileName = decodeURIComponent(last);
+  } catch {
+    /* kept as written */
+  }
+  return { text: await res.text(), fileName };
 }
 
 /** Open the document named in the URL, if any. */
@@ -163,7 +175,8 @@ async function handle(msg: HostMessage): Promise<unknown> {
       if (!forest) throw new Error('Nothing is open');
       const info = FORMATS.find((f) => f.id === format)!;
       if (msg.scope === 'tree' || !info.forest) {
-        const tree = currentTree();
+        // While a component is open, the page it was opened from (the component isn't a tree of the forest).
+        const tree = pageTree();
         if (!tree) throw new Error('No tree is open');
         return exportTree(tree, format, allKits().filter((k) => k.source !== 'env'));
       }
@@ -192,6 +205,15 @@ function listen(): void {
     if (ev.source !== window.parent || window.parent === window) return;
     const msg = ev.data as HostMessage;
     if (!msg || typeof msg !== 'object' || msg.source !== 'tree-weaver-host') return;
+    // A page with an opaque origin (file://, a sandboxed frame) can't be named as a target, and
+    // answering with '*' would hand documents to whatever the parent frame shows next. Say why.
+    if (ev.origin === 'null') {
+      if (msg.id !== undefined) {
+        const error = 'The editor can only be driven from a page served over http(s), not from file:// or a sandboxed frame';
+        post({ source: 'tree-weaver-editor', type: 'response', id: String(msg.id), ok: false, error } as EditorMessage, '*');
+      }
+      return;
+    }
     if (allowed.length ? !allowed.includes(ev.origin) : hostOrigin !== null && hostOrigin !== ev.origin) {
       console.warn(`Tree Weaver: ignoring a message from ${ev.origin}`);
       return;
@@ -213,7 +235,7 @@ function listen(): void {
     timer = setTimeout(() => {
       const origin = hostOrigin ?? (allowed.length === 1 ? allowed[0] : null);
       if (!origin || !state.forest) return;
-      post({ source: 'tree-weaver-editor', type: 'change', forest: forestJson(), treeId: state.treeId }, origin);
+      post({ source: 'tree-weaver-editor', type: 'change', forest: forestJson(), treeId: pageTree()?.id ?? state.treeId }, origin);
     }, 300);
   };
   onChange('forest', changed);

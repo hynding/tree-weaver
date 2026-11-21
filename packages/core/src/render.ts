@@ -24,6 +24,19 @@ export const INLINE_TAGS = new Set([
   'kbd', 'label', 'mark', 'q', 's', 'samp', 'select', 'small', 'span', 'strong', 'sub', 'sup', 'textarea', 'time', 'u', 'var', 'wbr',
 ]);
 
+/** Elements that sit in a line of text by default, beyond the phrasing tags above. */
+const MORE_INLINE = new Set([
+  'audio', 'canvas', 'iframe', 'math', 'meter', 'object', 'output', 'picture', 'progress', 'ruby', 'slot', 'svg', 'tspan', 'textpath', 'video',
+  // Obsolete phrasing elements, still inline in browsers.
+  'acronym', 'big', 'blink', 'font', 'nobr', 'strike', 'tt',
+]);
+
+/** Whether an element is inline by default: a phrasing tag, one like `<svg>` or `<progress>`, or a custom element (`my-badge`). */
+export const isInlineByDefault = (tag: string): boolean => {
+  const t = tag.toLowerCase();
+  return INLINE_TAGS.has(t) || MORE_INLINE.has(t) || t.includes('-');
+};
+
 export function escapeHtml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
@@ -40,9 +53,14 @@ export function safeTag(tag: string): string {
 
 export function isSafeAttr(name: string, value: string): boolean {
   const n = name.toLowerCase();
-  if (!SAFE_ATTR.test(name) || n.startsWith('on') || n === 'style' || n === 'srcdoc' || n === BRANCH_ATTR || n.startsWith(`${BRANCH_ATTR}-`)) return false;
+  // In XML (a standalone .svg) a prefix can be bound to any namespace (`xmlns:q` = XLink makes
+  // `q:href` a link), so prefixes other than the standard ones aren't kept, and checks use the local name.
+  const local = n.slice(n.lastIndexOf(':') + 1);
+  if (n.startsWith('xmlns:') && !(n === 'xmlns:xlink' && value.trim() === 'http://www.w3.org/1999/xlink')) return false;
+  if (n.includes(':') && !/^(xlink|xml|xmlns):/.test(n)) return false;
+  if (!SAFE_ATTR.test(name) || local.startsWith('on') || local === 'style' || local === 'srcdoc' || n === BRANCH_ATTR || n.startsWith(`${BRANCH_ATTR}-`)) return false;
   // Browsers drop tabs, newlines and leading control characters before reading a URL's scheme.
-  if (URL_ATTRS.has(n) && /^(javascript|vbscript|data:text\/html)/i.test(value.replace(/[\x00-\x20]/g, ''))) return false;
+  if ((URL_ATTRS.has(n) || URL_ATTRS.has(local)) && /^(javascript|vbscript|data:text\/html)/i.test(value.replace(/[\x00-\x20]/g, ''))) return false;
   return true;
 }
 
@@ -85,7 +103,7 @@ export function bracketsBalance(value: string): boolean {
  * `;` would end the declaration, so it becomes `,`, except inside a quoted string or `url(…)`,
  * where it can't (`url(data:image/png;base64,…)` must keep it).
  */
-function semicolonsOutsideStrings(value: string): string {
+export function semicolonsOutsideStrings(value: string): string {
   let out = '';
   let quote = '';
   let url = false;
@@ -120,7 +138,8 @@ export function sanitizeCssValue(value: string): string {
   // Comment markers too: an unclosed `/*` would swallow every rule after it. So would an
   // unclosed bracket, so a value whose brackets don't balance is dropped.
   // Line breaks become spaces: a CSS string ends at one, so a quote can't hide a `(` on the next line.
-  const out = untilStable(semicolonsOutsideStrings(value.replace(/[{}]/g, '').replace(/[\n\r\f]+/g, ' ')), (v) => v.replace(/<\/?(style|script)/gi, '').replace(/\/\*|\*\//g, '')).trim();
+  // A trailing `;` (typed out of habit) is dropped rather than kept as a `,` that breaks the value.
+  const out = untilStable(semicolonsOutsideStrings(value.replace(/[{}]/g, '').replace(/[\n\r\f]+/g, ' ').replace(/[\s;]+$/, '')), (v) => v.replace(/<\/?(style|script)/gi, '').replace(/\/\*|\*\//g, '')).trim();
   return bracketsBalance(out) ? out : '';
 }
 
@@ -182,7 +201,17 @@ export interface HtmlOptions {
   xml?: boolean;
   /** Whether the node being rendered sits inside an `<svg>`. Set while rendering; callers rarely need it. */
   inSvg?: boolean;
+  /** Set while rendering XML for the direct children of a `<foreignObject>`, which need the XHTML namespace. */
+  inForeign?: boolean;
+  /** Set while rendering MathML content outside its text points (`<mi>`, `<mtext>` …), where an HTML <span> would end the formula. */
+  inMath?: boolean;
+  /** Classes the design kits make keep their whitespace (see `whitespaceClasses`); such branches aren't pretty printed. */
+  keepClasses?: ReadonlySet<string>;
+  /** Set while rendering the direct children of a <table>, <thead>, <tbody>, <tfoot> or <tr>. */
+  inTablePart?: boolean;
 }
+
+const XHTML = ' xmlns="http://www.w3.org/1999/xhtml"';
 
 function renderAttrs(branch: Branch, xml = false): string {
   const parts = [`${BRANCH_ATTR}="${escapeAttr(branch.id)}"`];
@@ -224,28 +253,95 @@ function renderLeaf(leaf: Leaf, opts: HtmlOptions): string {
       .join('');
     const src = isSafeAttr('src', leaf.value) ? leaf.value : '';
     const alt = leaf.attrs?.alt === undefined ? ' alt=""' : '';
-    return `<img ${LEAF_ATTR}="${escapeAttr(leaf.id)}" src="${escapeAttr(src)}"${alt}${attrs}>`;
+    return `<img${opts.inForeign && !opts.inSvg ? XHTML : ''} ${LEAF_ATTR}="${escapeAttr(leaf.id)}" src="${escapeAttr(src)}"${alt}${attrs}${opts.xml ? '/' : ''}>`;
   }
   const content = escapeHtml(leaf.value);
-  // Inside an SVG a <span> would end the drawing, so selectable text uses <tspan>.
-  if (!opts.designer) return content;
-  return opts.inSvg ? `<tspan ${LEAF_ATTR}="${escapeAttr(leaf.id)}">${content}</tspan>` : `<span ${LEAF_ATTR}="${escapeAttr(leaf.id)}">${content}</span>`;
+  // Inside an SVG a <span> would end the drawing, so selectable text uses <tspan>. In MathML it
+  // would end the formula, so text there goes in bare (selected through its parent).
+  // Directly in a table part a <span> would be moved out in front of the table; only whitespace may be there.
+  if (!opts.designer || (opts.inMath && !opts.inSvg) || (opts.inTablePart && !opts.inSvg)) return content;
+  return opts.inSvg ? `<tspan ${LEAF_ATTR}="${escapeAttr(leaf.id)}">${content}</tspan>` : `<span${opts.inForeign ? XHTML : ''} ${LEAF_ATTR}="${escapeAttr(leaf.id)}">${content}</span>`;
+}
+
+/** Whether a declaration shows whitespace as written (`white-space: pre`, `white-space-collapse: preserve` …). */
+export function keepsWhitespaceDecl(prop: string, value: string | undefined): boolean {
+  const p = prop.trim().toLowerCase();
+  if (p === 'white-space') return /^\s*(pre|pre-wrap|pre-line|break-spaces|preserve)\b/i.test(value ?? '') || /\b(preserve|break-spaces)\b/i.test(value ?? '');
+  if (p === 'white-space-collapse') return /^\s*(preserve|preserve-breaks|preserve-spaces|break-spaces)\b/i.test(value ?? '');
+  return false;
+}
+
+/**
+ * Classes that design kits make keep their whitespace: a rule whose selector ends in a plain
+ * class (`.mono`, `pre.code`, `.card .mono`) and sets `white-space: pre` or the like.
+ */
+export function whitespaceClasses(kits: readonly { css?: string; enabled?: boolean }[] = []): Set<string> {
+  const out = new Set<string>();
+  for (const kit of kits) {
+    if (kit.enabled === false || !kit.css) continue;
+    const css = kit.css.replace(/\/\*[\s\S]*?\*\//g, '');
+    for (const m of css.matchAll(/([^{};]+)\{([^{}]*)\}/g)) {
+      const keeps = m[2].split(';').some((d) => {
+        const i = d.indexOf(':');
+        return i > 0 && keepsWhitespaceDecl(d.slice(0, i), d.slice(i + 1).replace(/!important/i, ''));
+      });
+      if (!keeps) continue;
+      for (const sel of m[1].split(',')) {
+        const last = sel.trim().split(/[\s>+~]+/).pop() ?? '';
+        if (last.includes(':') || last.includes('[')) continue;
+        for (const c of last.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)) out.add(c[1]);
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Whether a branch shows its whitespace as written: a `<pre>` or `<textarea>`, a declaration such
+ * as `white-space: pre` or `white-space-collapse: preserve` on any display, or one of
+ * `keepClasses` (from `whitespaceClasses`). Pretty printing would add to it.
+ */
+export function keepsWhitespace(node: Pick<Branch, 'tag' | 'styles'> & { classes?: readonly string[] | string }, keepClasses?: ReadonlySet<string>): boolean {
+  if (/^(pre|textarea|listing|xmp|plaintext)$/i.test(node.tag)) return true;
+  if (Object.values(node.styles ?? {}).some((map) => Object.entries(map ?? {}).some(([p, v]) => keepsWhitespaceDecl(p, v)))) return true;
+  if (!keepClasses?.size || !node.classes) return false;
+  const classes = typeof node.classes === 'string' ? node.classes.split(/\s+/) : node.classes;
+  return classes.some((c) => keepClasses.has(c));
+}
+
+/** Whether a branch's own styles make it `inline`, `inline-block`, `inline-flex` … on any display. */
+export function hasInlineDisplay(node: Branch): boolean {
+  return Object.values(node.styles ?? {}).some((map) => /^\s*inline/i.test(map?.display ?? ''));
 }
 
 /** Whether a child keeps its parent's content on one line when pretty printed. */
-const isInline = (node: TreeNode): boolean => (isBranch(node) ? INLINE_TAGS.has(node.tag) : node.type !== 'shape');
+const isInline = (node: TreeNode): boolean => (isBranch(node) ? isInlineByDefault(node.tag) : node.type !== 'shape');
 
 export function renderNodeHtml(node: TreeNode, opts: HtmlOptions = {}, depth = 0): string {
   if (!isBranch(node)) return renderLeaf(node, opts);
   const tag = safeTag(node.tag);
   const inSvg = childrenInSvg(node, !!opts.inSvg);
-  const svgRoot = tag === 'svg' && !opts.inSvg && opts.xml && node.attrs.xmlns === undefined ? ` xmlns="${SVG_NAMESPACE}"` : '';
+  // In a standalone .svg, HTML in a <foreignObject> would otherwise take the SVG namespace and draw nothing.
+  const svgRoot = tag === 'svg' && !opts.inSvg && opts.xml && node.attrs.xmlns === undefined ? ` xmlns="${SVG_NAMESPACE}"` : opts.inForeign && !opts.inSvg && node.attrs.xmlns === undefined ? XHTML : '';
   const open = `<${tag}${svgRoot} ${renderAttrs(node, opts.xml)}>`;
-  if (VOID_TAGS.has(tag) && !opts.inSvg) return opts.xml ? `${open.slice(0, -1)}/>` : open;
+  // In MathML (outside its text points) an <input> or <wbr> isn't void, so it gets an end tag, as in
+  // SVG. (A <br>, <img> … there breaks out of the formula and stays void; `</br>` would add another.)
+  if (VOID_TAGS.has(tag) && !opts.inSvg && (!opts.inMath || /^(br|embed|hr|img|meta)$/.test(tag))) return opts.xml ? `${open.slice(0, -1)}/>` : open;
   if (!node.children.length) return `${open}</${tag}>`;
-  const inner = { ...opts, inSvg };
-  const inline = !opts.pretty || node.children.some(isInline);
-  if (inline) return `${open}${node.children.map((c) => renderNodeHtml(c, inner, depth + 1)).join('')}</${tag}>`;
+  const keep = keepsWhitespace(node, opts.keepClasses);
+  // Text in a <textarea> or <title> isn't markup, so the designer's leaf spans would show as text.
+  const rawText = !opts.inSvg && /^(textarea|title)$/i.test(tag);
+  const lower = tag.toLowerCase();
+  const inMath = lower === 'math' || (!!opts.inMath && !/^(mi|mo|mn|ms|mtext|annotation-xml)$/.test(lower));
+  const inner = { ...opts, inSvg, inMath, inTablePart: !inSvg && /^(table|thead|tbody|tfoot|tr)$/.test(lower), pretty: opts.pretty && !keep, designer: opts.designer && !rawText, inForeign: !!opts.xml && !!opts.inSvg && lower === 'foreignobject' };
+  // Also beside an inline-block child: a line break there would show as a gap the canvas doesn't have.
+  const inline = !opts.pretty || keep || node.children.some((c) => isInline(c) || (isBranch(c) && hasInlineDisplay(c)));
+  if (inline) {
+    const content = node.children.map((c) => renderNodeHtml(c, inner, depth + 1)).join('');
+    // HTML parsers drop one newline right after <pre>, <textarea> or <listing>, so a leading one is doubled.
+    const lead = !opts.xml && !opts.inSvg && /^(pre|textarea|listing)$/i.test(tag) && /^(\r\n|\n|\r)/.test(content) ? '\n' : '';
+    return `${open}${lead}${content}</${tag}>`;
+  }
   const pad = '  '.repeat(depth + 1);
   const body = node.children.map((c) => `${pad}${renderNodeHtml(c, inner, depth + 1)}`).join('\n');
   return `${open}\n${body}\n${'  '.repeat(depth)}</${tag}>`;
@@ -257,7 +353,10 @@ export function renderNodeHtml(node: TreeNode, opts: HtmlOptions = {}, depth = 0
  */
 export function renderTreeBody(root: Branch, opts: HtmlOptions = {}): string {
   if (isSvgRoot(root)) return renderNodeHtml(root, opts, opts.pretty ? 1 : 0);
-  return root.children.map((c) => renderNodeHtml(c, opts, opts.pretty ? 1 : 0)).join(opts.pretty ? '\n  ' : '');
+  // Line breaks between inline children would show as spaces, as inside any other branch.
+  const pretty = opts.pretty && !keepsWhitespace(root, opts.keepClasses) && !root.children.some((c) => isInline(c) || (isBranch(c) && hasInlineDisplay(c)));
+  const inner = { ...opts, pretty: opts.pretty && !keepsWhitespace(root, opts.keepClasses) };
+  return root.children.map((c) => renderNodeHtml(c, inner, opts.pretty ? 1 : 0)).join(pretty ? '\n  ' : '');
 }
 
 /** Attributes for the `<body>` element that represents the tree root (none for an SVG tree, whose root is the `<svg>`). */
@@ -286,7 +385,8 @@ export function renderDocument(tree: Tree, opts: DocumentOptions = {}): string {
       return `<style ${attrs}>\n${styleText(k.css)}\n</style>`;
     })
     .join('\n');
-  const body = renderTreeBody(tree.root, { ...opts, pretty: opts.pretty ?? true });
+  const keepClasses = whitespaceClasses(kits);
+  const body = renderTreeBody(tree.root, { ...opts, keepClasses, pretty: opts.pretty ?? true });
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -302,9 +402,7 @@ ${kitStyles ? `${kitStyles}\n` : ''}<style data-tw-styles>
 ${styleText(renderTreeCss(tree.root))}
 </style>${opts.extraCss ? `\n<style>${styleText(opts.extraCss)}</style>` : ''}
 </head>
-<body${isSvgRoot(tree.root) ? '' : ` ${rootAttrs(tree.root)}`}>
-  ${body}
-</body>
+<body${isSvgRoot(tree.root) ? '' : ` ${rootAttrs(tree.root)}`}>${!isSvgRoot(tree.root) && keepsWhitespace(tree.root, keepClasses) ? body : `\n  ${body}\n`}</body>
 </html>
 `;
 }

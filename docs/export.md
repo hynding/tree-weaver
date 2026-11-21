@@ -59,13 +59,32 @@ its media query:
 | --- | --- |
 | `lg` | none (the base) |
 | `xl` | `min-[1440px]:` |
-| `tablet` | `max-[1024px]:` |
-| `mobile-landscape` | `max-[932px]:landscape:` |
-| `mobile-portrait` | `max-[600px]:portrait:` |
+| `tablet` | `max-[1024.02px]:` |
+| `mobile-landscape` | `max-[932.02px]:landscape:` |
+| `mobile-portrait` | `max-[600.02px]:portrait:` |
+
+The `.02px` keeps the breakpoint width itself in the smaller display, as `max-width` does: Tailwind v4
+writes `max-*` as `width < N`.
 
 Common keyword values map to named utilities (`display: flex` → `flex`, `text-align: center` →
 `text-center`), single values to the matching utility with an arbitrary value (`gap: 1rem` →
-`gap-[1rem]`), and everything else to an arbitrary property (`[grid-template-columns:repeat(3,minmax(0,1fr))]`).
+`gap-[1rem]`, `margin: 0 auto` → `m-[0_auto]`), and everything else to an arbitrary property
+(`[border:1px_solid]`). Tailwind orders arbitrary properties by name, so when a branch sets a
+shorthand and then a longhand it covers (`border`, then `border-top`), the longhand gets more
+specificity (`[&&]:[border-top:2px_solid_red]`) to keep winning, as it does in CSS.
+With Tailwind, `kits.css` puts the design kits in the `components` cascade layer, below Tailwind's
+utilities, so a branch's own styles override its kit classes. In v3, whose utilities aren't in a
+layer, add the kit CSS to your Tailwind input after `@tailwind components` instead.
+Tailwind's Preflight resets the browser's own styles (heading sizes and weights, block margins,
+list bullets, button and field looks), which the editor keeps. So a Tailwind export always
+writes `base.css`, which `kits.css` loads first in the `components` layer: it puts those browser
+defaults back, and the kits and utilities after it still win. In v3, add `base.css` to your
+Tailwind input too, before the kit CSS.
+Preflight also hides an element with the `hidden` attribute using `!important`, which a branch's
+own `display` can't override in the export (the editor shows it).
+A kit class with the same name as a Tailwind utility (`container`, `hidden`, `table` …) gets
+Tailwind's rule too, which wins: Weaver Basic's `container` becomes Tailwind's stepped-width
+container. Rename such a class in your kit, or turn off that utility in your Tailwind config.
 This needs Tailwind CSS v3.4 or later (for `max-*` variants), or v4. Make sure Tailwind scans the
 exported files. If the forest's display settings use other breakpoints, the variants follow them.
 
@@ -123,3 +142,5 @@ the older import so they still build on 3.27, and the analyzer only reports it a
 - Native exports are a starting point that looks like the layout, not a pixel-exact copy: check it in
   Xcode or with `flutter run`, then refine.
 - Images keep their URLs; copy any images the app should host itself.
+- Vue reads custom elements (`<my-badge>`) as components unless the app's `compilerOptions.isCustomElement`
+  says otherwise; server rendering drops them until it does. The Vue file names them in a comment.

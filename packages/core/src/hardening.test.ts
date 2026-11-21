@@ -10,11 +10,13 @@ import {
   isSafeAttr,
   parseVersionLog,
   renderDocument,
+  renderNodeHtml,
   sanitizeCssValue,
   saveComponent,
   text,
   validateDocument,
   VersionLogError,
+  type Branch,
 } from './index';
 
 describe('rendering untrusted trees', () => {
@@ -370,5 +372,413 @@ describe('pass 14 fixes', () => {
     const opened = findTree(forest, componentTreeId(def.id))!;
     expect(opened.root.tag).toBe('svg');
     expect(insertionProblem(opened.root, def.root.id, createBranch({ tag: 'p' }))).toBeTruthy();
+  });
+});
+
+describe('pass 15 fixes', () => {
+  it('reports CSS whose meaning depends on rule order', async () => {
+    const { parseRulesCss } = await import('./index');
+    expect(parseRulesCss('.a{color:red} .b{color:blue} .a{color:green}').reordered).toHaveLength(1);
+    expect(parseRulesCss('@media (max-width: 1024px){.c{color:red}} .c{color:blue}').reordered).toHaveLength(1);
+    expect(parseRulesCss('.d{width:300px; width:some-future-keyword}').reordered).toHaveLength(1);
+    expect(parseRulesCss('.a{color:red} .b{margin:0} .a{padding:0}').reordered).toEqual([]);
+    expect(parseRulesCss('.a{color:red} @media (max-width: 1024px){.a{color:blue}}').reordered).toEqual([]);
+  });
+
+  it('gives a component saved from a tree root its own ids', async () => {
+    const { saveComponent } = await import('./index');
+    const tree = createTree('T', createBranch({ tag: 'body', type: 'root', children: [createBranch({ tag: 'p', children: [text('x')] })] }));
+    const saved = saveComponent(createForest('F', [tree]), tree.id, tree.root.id, 'Page')!;
+    const ids = (n: { id: string; children?: unknown[] }): string[] => [n.id, ...((n.children ?? []) as { id: string }[]).flatMap((c) => ids(c as never))];
+    const treeIds = new Set(ids(saved.forest.trees[0].root as never));
+    expect(ids(saved.component.root as never).some((id) => treeIds.has(id))).toBe(false);
+    const result = validateDocument({ format: 'tree-weaver', version: 1, kind: 'forest', forest: saved.forest });
+    expect(result.warnings.filter((i) => /Duplicate id/.test(i.message))).toEqual([]);
+  });
+});
+
+describe('pass 16 fixes', () => {
+  it('rejects an empty repeat() at once', async () => {
+    const { parseTracks } = await import('./index');
+    const start = Date.now();
+    expect(parseTracks('repeat(1000000000000, )')).toBeNull();
+    expect(Date.now() - start).toBeLessThan(100);
+    expect(parseTracks('repeat(3, 1fr)')).toHaveLength(3);
+  });
+});
+
+describe('pass 18 fixes', () => {
+  it('reports display media blocks out of display order', async () => {
+    const { parseRulesCss } = await import('./index');
+    const css = '@media (max-width: 600px) and (orientation: portrait) { .a { color: red; } } @media (max-width: 1024px) { .a { color: blue; } }';
+    expect(parseRulesCss(css).reordered).toHaveLength(1);
+    const inOrder = '@media (max-width: 1024px) { .a { color: blue; } } @media (max-width: 600px) and (orientation: portrait) { .a { color: red; } }';
+    expect(parseRulesCss(inOrder).reordered).toEqual([]);
+  });
+
+  it('prints elements that show whitespace on one line', async () => {
+    const { renderNodeHtml } = await import('./index');
+    const div = createBranch({ tag: 'div', styles: { lg: { 'white-space': 'pre-line' } }, children: [createBranch({ tag: 'p', children: [text('one')] }), createBranch({ tag: 'p', children: [text('two')] })] });
+    expect(renderNodeHtml(div, { pretty: true })).not.toContain('\n');
+  });
+});
+
+describe('pass 19 fixes', () => {
+  it('gives an imported tree with a component: id a fresh id', async () => {
+    const { normalizeTree } = await import('./index');
+    const t = normalizeTree({ id: 'component:c_1', name: 'X', root: { kind: 'branch', tag: 'body', children: [] } });
+    expect(t.id.startsWith('component:')).toBe(false);
+  });
+
+  it('writes text inside a textarea without leaf spans on the canvas', async () => {
+    const { renderNodeHtml } = await import('./index');
+    const ta = createBranch({ tag: 'textarea', children: [text('Hello')] });
+    expect(renderNodeHtml(ta, { designer: true })).not.toContain('<span');
+  });
+});
+
+describe('pass 20 fixes', () => {
+  it('refuses a grid layout on a void element or an SVG', async () => {
+    const { applyGridLayout, GRID_LAYOUTS } = await import('./index');
+    const layout = GRID_LAYOUTS.find((l: { boxes?: number; areas?: unknown }) => l.boxes || l.areas)!;
+    const hr = createBranch({ tag: 'hr' });
+    const svg = createBranch({ tag: 'svg' });
+    const root = createBranch({ tag: 'body', type: 'root', children: [hr, svg] });
+    expect(() => applyGridLayout(root, hr.id, 'lg', layout)).toThrow(/can't hold children/);
+    expect(() => applyGridLayout(root, svg.id, 'lg', layout)).toThrow();
+  });
+});
+
+describe('pass 21 fixes', () => {
+  it('reports CSS that rules would drop or tidy', async () => {
+    const { parseRulesCss } = await import('./index');
+    for (const css of ['.a { color: red; &:hover { color: blue } }', '.a { *zoom: 1 }', '.a { content: "{" }']) {
+      expect(parseRulesCss(css).changed.length).toBeGreaterThan(0);
+    }
+    expect(parseRulesCss('.x\\@md { color: red }').changed).toEqual([]);
+    expect(parseRulesCss('.a { color: red }\n.grid { grid-template-areas:\n  "a b"\n  "c d"; }\n@media (max-width: 767px) { .a { color: blue } }').changed).toEqual([]);
+  });
+});
+
+describe('pass 22 fixes', () => {
+  it('keeps semicolons inside url() and strings in token values', async () => {
+    const { sanitizeTokenValue } = await import('./index');
+    const url = 'url("data:image/svg+xml;charset=utf-8,%3Csvg%3E")';
+    expect(sanitizeTokenValue(url)).toBe(url);
+    expect(sanitizeTokenValue('red; } body { color: blue')).not.toMatch(/[;{}]/);
+  });
+
+  it('doubles a leading newline in <pre> so HTML parsers keep it', () => {
+    const tree = createTree('T', createBranch({ tag: 'body', type: 'root', children: [createBranch({ tag: 'pre', children: [text('\nline2')] })] }));
+    expect(renderDocument(tree)).toMatch(/<pre[^>]*>\n\nline2<\/pre>/);
+  });
+});
+
+describe('pass 23 fixes', () => {
+  it('drops a trailing semicolon from style and token values', async () => {
+    const { sanitizeTokenValue } = await import('./index');
+    expect(sanitizeCssValue('red;')).toBe('red');
+    expect(sanitizeCssValue('url(data:a;b) ; ')).toBe('url(data:a;b)');
+    expect(sanitizeTokenValue('#2f6f4f;')).toBe('#2f6f4f');
+  });
+});
+
+describe('pass 26 fixes', () => {
+  it('reports display sizes that hide a display\'s own styles', async () => {
+    const { displayProblems, DEFAULT_DISPLAYS } = await import('./index');
+    expect(displayProblems(DEFAULT_DISPLAYS)).toEqual([]);
+    const wide = DEFAULT_DISPLAYS.map((d) => (d.id === 'tablet' ? { ...d, width: 1100 } : d));
+    expect(displayProblems(wide)[0]).toMatch(/wider than its breakpoint/);
+    const order = DEFAULT_DISPLAYS.map((d) => (d.id === 'mobile-portrait' ? { ...d, breakpoint: 2000, media: '(max-width: 2000px) and (orientation: portrait)', width: 390 } : d));
+    expect(displayProblems(order).join(' ')).toMatch(/breakpoint \(2000px\) is above/);
+  });
+});
+
+describe('pass 27 fixes', () => {
+  it('turns the token kit on when a token is edited, and says when a later kit wins', async () => {
+    const { setToken, tokenValues, tokenShadowed, createTokenKit } = await import('./index');
+    const off = { ...createTokenKit([{ name: '--brand', value: 'red' }]), enabled: false };
+    const kits = setToken([off], { name: '--brand', value: 'green' });
+    expect(kits[0].enabled).toBe(true);
+    expect(tokenValues(kits).get('--brand')).toBe('green');
+    const later = createKit('Later', ':root { --brand: blue; }');
+    const shadowed = setToken([createTokenKit([]), later], { name: '--brand', value: 'green' });
+    expect(tokenShadowed(shadowed, '--brand')).toBe(true);
+    expect(tokenShadowed(setToken([later, createTokenKit([])], { name: '--brand', value: 'green' }), '--brand')).toBe(false);
+  });
+});
+
+describe('pass 28 fixes', () => {
+  it('treats the "-" pick as base, never a variant named "-"', async () => {
+    const { createComponent, variantPerDisplay, normalizeComponent } = await import('./index');
+    const def = { ...createComponent('Card', createBranch({ tag: 'div' })), variants: [{ name: '-', styles: {} }, { name: 'big', styles: {} }] };
+    expect(variantPerDisplay(def, { tablet: '-' }).tablet).toBeUndefined();
+    expect(variantPerDisplay(def, { tablet: 'big' }).tablet?.name).toBe('big');
+    expect(normalizeComponent(JSON.parse(JSON.stringify(def))).variants.map((v) => v.name)).toEqual(['big']);
+  });
+});
+
+describe('pass 29 fixes', () => {
+  it('refuses to put branches inside a void component root', async () => {
+    const { createComponent, componentTreeId, updateTreeRoot, insertNode, createForest } = await import('./index');
+    const def = createComponent('Rule', createBranch({ tag: 'hr' }));
+    const forest = { ...createForest('F', [createTree('Home')]), components: [def] };
+    expect(() => updateTreeRoot(forest, componentTreeId(def.id), (body) => insertNode(body, body.id, createBranch({ tag: 'p' })))).toThrow(/can't hold/);
+  });
+});
+
+describe('pass 30 fixes', () => {
+  it('refuses nestings the HTML parser would rearrange, and lint reports them', async () => {
+    const { insertionProblem, checkTree } = await import('./index');
+    const p = createBranch({ tag: 'p', children: [createBranch({ tag: 'span' })] });
+    const a = createBranch({ tag: 'a', attrs: { href: '#' } });
+    const table = createBranch({ tag: 'table' });
+    const root = createBranch({ tag: 'body', type: 'root', children: [p, a, table] });
+    const span = p.children[0] as Branch;
+    expect(insertionProblem(root, p.id, createBranch({ tag: 'div' }))).toMatch(/inside a <p>/);
+    expect(insertionProblem(root, span.id, createBranch({ tag: 'ul' }))).toMatch(/inside a <p>/);
+    expect(insertionProblem(root, p.id, createBranch({ tag: 'em' }))).toBeNull();
+    expect(insertionProblem(root, a.id, createBranch({ tag: 'span', children: [createBranch({ tag: 'a' })] }))).toMatch(/inside another link/);
+    expect(insertionProblem(root, table.id, createBranch({ tag: 'div' }))).toMatch(/in front of the table/);
+    expect(insertionProblem(root, table.id, createBranch({ tag: 'tbody' }))).toBeNull();
+    const bad = createTree('Bad', { ...root, children: [{ ...p, children: [createBranch({ tag: 'div' })] }] });
+    expect(checkTree(bad).issues.map((i) => i.rule)).toContain('nesting');
+  });
+});
+
+describe('pass 31 fixes', () => {
+  it('refuses setText that puts text straight in a table row, and keeps a __proto__ token', async () => {
+    const { applyPatch: patch, setToken, themeTokens, tokensToDtcg } = await import('./index');
+    const tr = createBranch({ tag: 'tr', children: [createBranch({ tag: 'td' })] });
+    const tree = createTree('T', createBranch({ tag: 'body', type: 'root', children: [createBranch({ tag: 'table', children: [createBranch({ tag: 'tbody', children: [tr] })] })] }));
+    expect(() => patch(tree.root, [{ op: 'setText', target: tr.id, value: 'hello' }] as never)).toThrow(/can only hold/);
+    const kits = setToken([], { name: '--__proto__', value: '#ff0000' });
+    expect(Object.keys(tokensToDtcg(themeTokens(kits)))).toContain('__proto__');
+  });
+});
+
+describe('pass 32 fixes', () => {
+  it('treats a prop only data-show-if declares as boolean for bound attributes', async () => {
+    const { createComponent, expandComponent } = await import('./index');
+    const def = { ...createComponent('Save', createBranch({ tag: 'div', children: [createBranch({ tag: 'span', attrs: { 'data-show-if': 'busy' } }), createBranch({ tag: 'button', attrs: { disabled: '{{busy}}' } })] })), props: [] };
+    const out = expandComponent(def, { component: def.id }, 'i1');
+    expect((out.children.find((c) => 'tag' in c && c.tag === 'button') as Branch).attrs.disabled).toBeUndefined();
+  });
+});
+
+describe('pass 34 fixes', () => {
+  it('notes a longhand rule that a converted kit would move past a media query', async () => {
+    const { parseRulesCss } = await import('./index');
+    const parsed = parseRulesCss('.btn { padding: 8px; }\n@media (max-width: 1024px) { .btn { padding: 4px; } }\n.btn-wide { padding-left: 24px; }');
+    expect(parsed.reordered.join(' ')).toContain('.btn-wide');
+  });
+
+  it('refuses branches inside raw-text elements', async () => {
+    const { insertionProblem } = await import('./index');
+    const area = createBranch({ tag: 'textarea' });
+    const root = createBranch({ tag: 'body', type: 'root', children: [area] });
+    expect(insertionProblem(root, area.id, createBranch({ tag: 'b' }))).toMatch(/only hold text/);
+    expect(insertionProblem(root, area.id, text('ok'))).toBeNull();
+  });
+});
+
+describe('pass 35 fixes', () => {
+  it('drops attributes whose prefix could be rebound to XLink', () => {
+    expect(isSafeAttr('xmlns:q', 'http://www.w3.org/1999/xlink')).toBe(false);
+    expect(isSafeAttr('q:href', 'javascript:alert(1)')).toBe(false);
+    expect(isSafeAttr('xlink:href', 'javascript:alert(1)')).toBe(false);
+    expect(isSafeAttr('xlink:href', '#icon')).toBe(true);
+    expect(isSafeAttr('xmlns:xlink', 'http://www.w3.org/1999/xlink')).toBe(true);
+    expect(isSafeAttr('xml:lang', 'en')).toBe(true);
+    const svg = renderNodeHtml(createBranch({ tag: 'a', attrs: { 'xmlns:q': 'http://www.w3.org/1999/xlink', 'q:href': 'javascript:alert(1)' } }), { xml: true, inSvg: true });
+    expect(svg).not.toContain('javascript');
+  });
+});
+
+describe('pass 36 fixes', () => {
+  it('refuses table parts outside their table, nested bodies, and HTML in math', async () => {
+    const { insertionProblem } = await import('./index');
+    const div = createBranch({ tag: 'div' });
+    const math = createBranch({ tag: 'math' });
+    const sel = createBranch({ tag: 'select' });
+    const root = createBranch({ tag: 'body', type: 'root', children: [div, math, sel] });
+    expect(insertionProblem(root, div.id, createBranch({ tag: 'td' }))).toMatch(/only works inside <tr>/);
+    expect(insertionProblem(root, div.id, createBranch({ tag: 'body' }))).toMatch(/drops it/);
+    expect(insertionProblem(root, math.id, createBranch({ tag: 'div' }))).toMatch(/inside <math>/);
+    expect(insertionProblem(root, sel.id, createBranch({ tag: 'input' }))).toMatch(/inside a <select>/);
+    expect(insertionProblem(root, div.id, createBranch({ tag: 'table', children: [createBranch({ tag: 'tr', children: [createBranch({ tag: 'td' })] })] }))).toBeNull();
+  });
+});
+
+describe('pass 38 fixes', async () => {
+  const core = await import('./index');
+
+  it('lets a display inherit when its picked variant was deleted', () => {
+    const card = core.createBranch({ tag: 'div', styles: { lg: { padding: '32px' } }, children: [core.createLeaf('Hi')] });
+    const base = core.createComponent('Card', card);
+    const def = { ...base, variants: [{ name: 'compact', styles: { [base.root.id]: { lg: { padding: '8px' } } } }] };
+    const per = core.variantPerDisplay(def, { lg: 'compact', tablet: 'stacked' });
+    expect(per.tablet?.name).toBe('compact');
+    expect(per['mobile-portrait']?.name).toBe('compact');
+  });
+
+  it('treats param, keygen, basefont and bgsound as void', () => {
+    for (const tag of ['param', 'keygen', 'basefont', 'bgsound']) expect(core.canHaveChildren(core.createBranch({ tag }))).toBe(false);
+  });
+});
+
+describe('pass 39 fixes', async () => {
+  const core = await import('./index');
+  const problem = (path: string[], tag: string) => core.nestingProblem(path.map((t) => core.createBranch({ tag })) .map((b, i) => ({ ...b, tag: path[i] })), core.createBranch({ tag }));
+
+  it('refuses an optgroup in an option or optgroup, and ruby parts the parser would close', () => {
+    expect(problem(['select', 'option'], 'optgroup')).toMatch(/optgroup/);
+    expect(problem(['select', 'optgroup'], 'optgroup')).toMatch(/optgroup/);
+    expect(problem(['select'], 'optgroup')).toBeNull();
+    expect(problem(['ruby', 'rt'], 'rtc')).toMatch(/rtc/);
+    expect(problem(['ruby', 'rb'], 'rt')).toMatch(/rt/);
+    expect(problem(['ruby', 'rtc'], 'rt')).toBeNull();
+  });
+});
+
+describe('pass 41 fixes', async () => {
+  const core = await import('./index');
+  const at = (tags: string[]) => tags.map((tag) => core.createBranch({ tag }));
+
+  it('lets a list item sit in a section inside another item, and still catches a div', () => {
+    expect(core.nestingProblem(at(['ul', 'li', 'section']), core.createBranch({ tag: 'li' }))).toBeNull();
+    expect(core.nestingProblem(at(['dl', 'dd', 'nav']), core.createBranch({ tag: 'dt' }))).toBeNull();
+    expect(core.nestingProblem(at(['ul', 'li', 'div']), core.createBranch({ tag: 'li' }))).toMatch(/li/);
+  });
+});
+
+describe('pass 42 fixes', async () => {
+  const core = await import('./index');
+
+  it('counts a change in style declaration order as a change', () => {
+    const tree = (styles: Record<string, string>) => core.createTree('T', { ...core.createBranch({ tag: 'body', children: [{ ...core.createBranch({ tag: 'div', styles: { lg: styles } }), id: 'box' }] }), id: 'root' });
+    const a = core.createForest('F', [{ ...tree({ padding: '0', 'padding-left': '24px' }), id: 't' }]);
+    const b = { ...a, trees: [{ ...tree({ 'padding-left': '24px', padding: '0' }), id: 't' }] };
+    expect(core.diffForests(a, b).empty).toBe(false);
+  });
+});
+
+describe('pass 43 fixes', async () => {
+  const core = await import('./index');
+
+  it('renders <plaintext> as a div and the validator refuses it', () => {
+    const root = core.createBranch({ tag: 'body', children: [core.createBranch({ tag: 'plaintext' }), core.createBranch({ tag: 'h1', children: [core.text('T')] })] });
+    expect(core.renderTreeBody(root)).not.toContain('<plaintext');
+    expect(core.validateDocument({ format: 'tree-weaver', version: 1, tree: { name: 'T', root } }).errors.length).toBeGreaterThan(0);
+  });
+
+  it('writes text in MathML without a span on the canvas', () => {
+    const root = core.createBranch({ tag: 'body', children: [core.createBranch({ tag: 'math', children: [core.text('x = 2'), core.createBranch({ tag: 'mi', children: [core.text('y')] })] })] });
+    const html = core.renderTreeBody(root, { designer: true });
+    expect(html).toMatch(/<math[^>]*>x = 2<mi[^>]*><span[^>]*>y<\/span><\/mi><\/math>/);
+  });
+});
+
+describe('pass 44 fixes', async () => {
+  const core = await import('./index');
+
+  it('checks a branch added beside a component root against the root it lands in', () => {
+    const p = core.createBranch({ tag: 'p', children: [core.text('x')] });
+    const forest = core.createForest('F', [core.createTree('T', core.createBranch({ tag: 'body', children: [p] }))]);
+    const saved = core.saveComponent(forest, forest.trees[0].id, p.id, 'Para')!;
+    const treeId = core.componentTreeId(saved.component.id);
+    const add = (tag: string) => core.updateTreeRoot(saved.forest, treeId, (root) => core.insertNode(root, root.id, core.createBranch({ tag }), 0));
+    expect(() => add('div')).toThrow(/paragraph/);
+    expect(() => add('span')).not.toThrow();
+  });
+});
+
+describe('pass 45 fixes', async () => {
+  const core = await import('./index');
+  it('finds kit classes that keep whitespace, and the newer white-space forms', () => {
+    const kits = [{ css: '/* x */ .mono { white-space: pre } .a .wrap{white-space-collapse:preserve} .x:hover{white-space:pre} .n{white-space:nowrap}', enabled: true }];
+    expect([...core.whitespaceClasses(kits)].sort()).toEqual(['mono', 'wrap']);
+    expect(core.keepsWhitespace({ tag: 'div', styles: { lg: { 'white-space': 'preserve nowrap' } } })).toBe(true);
+    expect(core.keepsWhitespace({ tag: 'div', styles: { lg: { 'white-space': 'nowrap' } } })).toBe(false);
+    expect(core.keepsWhitespace({ tag: 'div', styles: {}, classes: ['mono'] }, new Set(['mono']))).toBe(true);
+  });
+});
+
+describe('pass 46 fixes', async () => {
+  const core = await import('./index');
+  it('closes void HTML tags inside MathML, and refuses ruby parts that would end a parent', () => {
+    const math = core.createBranch({ tag: 'math', children: [core.createBranch({ tag: 'input' }), core.createBranch({ tag: 'mi', children: [core.text('x')] })] });
+    expect(core.renderNodeHtml(math)).toContain('></input>');
+    const ruby = core.createBranch({ tag: 'ruby', children: [core.createBranch({ tag: 'p' })] });
+    const p = ruby.children[0] as import('./model').Branch;
+    expect(core.nestingProblem([ruby, p], core.createBranch({ tag: 'rt' }))).toMatch(/end the <p>/);
+  });
+});
+
+describe('pass 48 fixes', async () => {
+  const core = await import('./index');
+  it('reads { src, alt } as an image leaf', () => {
+    const leaf = core.normalizeNode({ src: 'https://x.test/a.jpg', alt: 'A dog' });
+    expect(leaf).toMatchObject({ type: 'image', value: 'https://x.test/a.jpg', attrs: { alt: 'A dog' } });
+  });
+  it('finds a version by a number-only name before its position', () => {
+    const v = (id: string, name: string) => ({ id, name, createdAt: '', document: '', format: 'json' }) as unknown as import('./versions').DocumentVersion;
+    const log = { version: 1 as const, versions: [v('a', 'draft'), v('b', '1'), v('c', '2024')] };
+    expect(core.findVersion(log, '1')?.id).toBe('b');
+    expect(core.findVersion(log, '2024')?.id).toBe('c');
+    expect(core.findVersion(log, '2')?.id).toBe('b');
+    expect(core.findVersion(log, '-1')?.id).toBe('c');
+  });
+});
+
+describe('pass 50 fixes', async () => {
+  const core = await import('./index');
+  it('keeps escaped @ and punctuation inside strings in selectors', () => {
+    expect(core.sanitizeSelector('.\\@container')).toBe('.\\@container');
+    expect(core.sanitizeSelector('.\\@md\\:flex')).toBe('.\\@md\\:flex');
+    expect(core.sanitizeSelector('[data-state="open;closed"]')).toBe('[data-state="open;closed"]');
+    expect(core.sanitizeSelector('.a{} b')).toBe('.a b');
+    expect(core.sanitizeSelector('.x/@*evil*/')).toBe('.x');
+    expect(core.sanitizeSelector('[a="x')).toBe('');
+  });
+  it('writes whitespace in a table row without a designer span', () => {
+    const row = core.createBranch({ tag: 'tr', children: [core.createBranch({ tag: 'td', children: [core.text('a')] }), core.text(' ')] });
+    expect(core.renderNodeHtml(row, { designer: true })).not.toMatch(/<\/td><span/);
+  });
+});
+
+describe('pass 51 fixes', async () => {
+  const core = await import('./index');
+  it('reads an escaped quote outside a string as part of a name', () => {
+    const css = ".content-\\[\\'\\'\\]{--tw-content:'';content:var(--tw-content)}.b{color:red}:root{--brand:blue}";
+    const nodes = core.parseCss(css);
+    expect(nodes.map((n) => (n.type === 'rule' ? n.selector : ''))).toEqual([".content-\\[\\'\\'\\]", '.b', ':root']);
+    expect(core.themeTokens([{ id: 'k', name: 'K', css, enabled: true }]).map((t) => t.name)).toEqual(['--brand']);
+    expect(core.parseDeclarations("font-family:Tom\\'s Font;color:red")).toEqual({ 'font-family': "Tom\\'s Font", color: 'red' });
+  });
+});
+
+describe('pass 52 fixes', async () => {
+  const core = await import('./index');
+  it('counts a line-name list as no track', () => {
+    expect(core.countTracks('[full-start] minmax(0,1fr) [content-start main-start] 2fr [content-end]')).toBe(2);
+  });
+  it('clears inherited rows and keeps a branch’s own column gap when applying a grid layout', () => {
+    const grid = { ...core.createBranch({ tag: 'div', styles: { lg: { display: 'grid', 'grid-template-rows': '40px', 'column-gap': '0' } } }), id: 'g' };
+    const root = core.createBranch({ tag: 'body', children: [grid] });
+    const layout = core.GRID_LAYOUTS[0];
+    const tablet = core.applyGridLayout(root, 'g', 'tablet', layout).root;
+    const g = core.findNode(tablet, 'g') as import('./model').Branch;
+    expect(g.styles.tablet?.['grid-template-rows']).toBe('none');
+    const lg = core.findNode(core.applyGridLayout(root, 'g', 'lg', layout).root, 'g') as import('./model').Branch;
+    expect(lg.styles.lg?.gap).toBeUndefined();
+  });
+});
+
+describe('pass 52 nesting', async () => {
+  const core = await import('./index');
+  it('refuses an image in a <textarea>', () => {
+    const ta = core.createBranch({ tag: 'textarea' });
+    expect(core.nestingProblem([ta], core.createLeaf('a.png', 'image'))).toMatch(/only hold text/);
   });
 });

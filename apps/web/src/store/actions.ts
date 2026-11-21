@@ -1,6 +1,9 @@
 import { getBlueprint, getStarter, getTemplate } from '@tree-weaver/branches';
 import {
   addTableColumn,
+  BASE_DISPLAY,
+  cssOverlaps,
+  isDisplayId,
   applyDisplaySettings,
   changedDisplaySettings,
   cleanDisplaySettings,
@@ -57,6 +60,9 @@ import {
   type Tree,
   type TreeNode,
   addKitsBeforeTokens,
+  tokenShadowed,
+  displayProblems,
+  isTokenKit,
   resetToken,
   setToken,
   type DesignToken,
@@ -70,6 +76,8 @@ import {
   insertionProblem,
   instanceRoleIn,
   VOID_TAGS,
+  BLOCKED_TAGS,
+  isShapeTag,
   instantiateComponent,
   isComponentTreeId,
   updateComponent,
@@ -92,11 +100,11 @@ import {
   type FormatId,
   type TreeDocument,
 } from '@tree-weaver/formats';
-import { createEnvKits, createStarterKit, fetchKitCss, isEnvKit } from '@tree-weaver/kits';
+import { createEnvKits, createStarterKit, fetchKitCss, isEnvKit, kitClasses } from '@tree-weaver/kits';
 import { DISPLAYS_LOCKED, ENV_CSS_URLS, ENV_DISPLAYS } from '../config';
 import { createForestStore, MemoryForestStore, Preferences, type ForestStore } from '@tree-weaver/storage';
 import { isEmbedded } from './embed-flags';
-import { state, type SidebarTab, type Toast } from './editor';
+import { SIDEBAR_TABS, state, type SidebarTab, type Toast } from './editor';
 
 /* ------------------------------------------------------------- selectors */
 
@@ -136,6 +144,13 @@ const prefs = new Preferences({
 });
 const history = new History<Forest>(150);
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
+/**
+ * The stored version this tab last loaded or saved, by its `updatedAt` (set on every save). A
+ * different one in storage at save time means another tab saved the forest in between.
+ */
+let baseline: { id: string; at: string } | null = null;
+/** Tells this browser's other tabs that a forest was saved, so an idle one can pick it up. */
+const tabs: BroadcastChannel | null = typeof BroadcastChannel === 'function' && !isEmbedded() ? new BroadcastChannel('tree-weaver-forests') : null;
 
 /** Undo and redo in a shared forest, which undo only this editor's changes (see store/collab.ts). */
 export interface HistoryOverride {
@@ -164,13 +179,30 @@ function scheduleSave() {
 }
 
 /** Save the open forest now. Resolves false (after telling the user) when the save failed. */
-export async function saveNow(): Promise<boolean> {
+export async function saveNow(checkOtherTabs = true): Promise<boolean> {
   clearTimeout(saveTimer);
   const forest = state.forest;
   if (!forest) return true;
   state.saveState = 'saving';
   try {
-    await store.save(forest);
+    const at = new Date().toISOString();
+    // While the forest is shared, the room keeps this browser's tabs in step, so a save from
+    // another tab in the room is the same edits, not a conflict.
+    if (checkOtherTabs && baseline?.id === forest.id && state.collabStatus !== 'live') {
+      const stored = await store.load(forest.id);
+      if (stored && stored.updatedAt !== baseline.at) {
+        // Another tab saved this forest since: keep both, this tab's version as a copy.
+        const copy: Forest = { ...forest, id: createId('f'), name: uniqueName(`${forest.name} (other tab)`, state.forests.map((f) => f.name)), updatedAt: at };
+        await store.save(copy);
+        state.forests = await store.list();
+        openLoaded(copy, state.treeId);
+        toast(`“${forest.name}” was changed in another tab, so your changes here are kept as “${copy.name}”.`, 'error');
+        return true;
+      }
+    }
+    await store.save({ ...forest, updatedAt: at });
+    baseline = { id: forest.id, at };
+    tabs?.postMessage({ id: forest.id, at });
     state.forests = await store.list();
     if (state.forest === forest) state.saveState = 'saved';
     else scheduleSave();
@@ -229,7 +261,16 @@ function editTree(fn: (root: Branch) => Branch): void {
   const forest = state.forest;
   if (!forest || !state.treeId) return;
   try {
-    commit(updateTreeRoot(forest, state.treeId, fn, state.componentVariant));
+    const next = updateTreeRoot(forest, state.treeId, fn, state.componentVariant);
+    // An edit to a component instance is undone by the instance, which is redrawn from its
+    // component; say so rather than seem to accept it.
+    // (A no-op edit leaves the forest as it was too, so the change is checked by content.)
+    const tree = next === forest ? currentTree() : null;
+    if (tree && JSON.stringify(fn(tree.root)) !== JSON.stringify(tree.root)) {
+      toast(INSTANCE_EDIT, 'error');
+      return;
+    }
+    commit(next);
   } catch (err) {
     toast((err as Error).message, 'error');
   }
@@ -254,8 +295,9 @@ export async function init(): Promise<void> {
   state.displaySettings = cleanDisplaySettings(saved.displays);
   applyDisplays();
   if (ENV_DISPLAYS.errors.length) console.warn(`TW_DISPLAYS: ${ENV_DISPLAYS.errors.join(' ')}`);
-  state.display = saved.display;
-  state.tab = saved.tab;
+  // Stored preferences can be damaged or written by something else: keep only known values.
+  if (isDisplayId(saved.display)) state.display = saved.display;
+  if (SIDEBAR_TABS.includes(saved.tab)) state.tab = saved.tab;
   state.forests = await store.list();
   const id = saved.forestId && state.forests.some((f) => f.id === saved.forestId) ? saved.forestId : state.forests[0]?.id;
   const forest = id ? await store.load(id) : null;
@@ -265,12 +307,26 @@ export async function init(): Promise<void> {
     await saveNow();
   }
   state.ready = true;
+  // Another tab saved the forest open here: with nothing unsaved in this tab, show its version.
+  tabs?.addEventListener('message', (e: MessageEvent<{ id: string; at: string }>) => {
+    const { id, at } = e.data ?? {};
+    if (!id || id !== state.forest?.id || state.saveState !== 'saved' || baseline?.at === at) return;
+    // While shared, the room already brought that tab's edits here.
+    if (state.collabStatus === 'live') return;
+    void store.load(id).then((latest) => {
+      if (!latest || state.forest?.id !== id || state.saveState !== 'saved') return;
+      openLoaded(latest, state.treeId);
+      toast('Updated with changes saved in another tab');
+    });
+  });
   window.addEventListener('beforeunload', () => {
-    if (state.saveState !== 'saved') void saveNow();
+    // No read first: the page may be gone before it answers.
+    if (state.saveState !== 'saved') void saveNow(false);
   });
 }
 
 function openLoaded(forest: Forest, treeId: string) {
+  baseline = { id: forest.id, at: forest.updatedAt };
   history.clear();
   state.forest = withCurrentBreakpoints(forest);
   state.treeId = forest.trees.some((t) => t.id === treeId) ? treeId : (forest.trees[0]?.id ?? '');
@@ -361,6 +417,9 @@ export function setDisplaySetting(id: DisplayId, field: DisplayField, value: num
   if (value === null) delete entry[field];
   else entry[field] = value;
   saveDisplaySettings({ ...state.displaySettings, [id]: entry });
+  // Saved as asked, but a size that hides a display's own styles is worth saying.
+  const problem = displayProblems()[0];
+  if (problem) toast(problem, 'error');
 }
 
 /** Change several display values in this browser at once, skipping any the deployment locks. Returns the displays changed. */
@@ -424,6 +483,10 @@ function placement(root: Branch, targetId: string, position: DropPosition): { pa
 }
 
 /** Shapes and SVG groups only go inside an `<svg>`, and HTML can't be drawn inside one. Says why with a toast. */
+/** Said when an edit would change what an instance holds, which comes from its component. */
+export const INSTANCE_EDIT = 'This is a component instance: it follows its component. Edit the component, or detach the instance, to change it';
+export const INSIDE_INSTANCE = 'This is part of a component instance: edit the component, or detach the instance, to change it';
+
 /** The instance a node is part of (itself, or its nearest instance ancestor). */
 export function instanceOwner(root: Branch, id: string): Branch | null {
   const node = findNode(root, id);
@@ -433,6 +496,9 @@ export function instanceOwner(root: Branch, id: string): Branch | null {
 
 /** Why a branch can't take another tag where it is, or null (the same rules as a patch's `update`). */
 function tagChangeProblem(root: Branch, node: Branch, tag: string): string | null {
+  // What the validator refuses: the page would show a <div> instead (or a branch where a shape leaf belongs).
+  if (BLOCKED_TAGS.some((t) => t.toLowerCase() === tag.toLowerCase())) return `<${tag}> isn't supported; it would render as a <div>`;
+  if (isShapeTag(tag)) return `<${tag}> is an SVG shape, which is a leaf: add it as a shape inside an <svg> instead`;
   if (node.children.length && VOID_TAGS.has(tag.toLowerCase())) return `<${tag}> can't hold children, and this branch has ${node.children.length}`;
   const parent = findParent(root, node.id)?.parent;
   if (!parent) return null;
@@ -502,10 +568,23 @@ export function insertBlueprint(blueprintId: string, targetId?: string, position
   if (bp) insertAt(bp.create(), targetId, position);
 }
 
+/** In a component instance's insides, edits would be undone by the instance at once: say so instead. */
+function refusedInsideInstance(id: string): boolean {
+  const tree = currentTree();
+  if (!tree || instanceRoleIn(tree.root, id) !== 'inside') return false;
+  toast(INSIDE_INSTANCE, 'error');
+  return true;
+}
+
 export function moveTo(id: string, targetId: string, position: DropPosition): void {
   const tree = currentTree();
   const node = tree && findNode(tree.root, id);
   if (id === targetId || !tree || !node) return;
+  // Moved out, the instance would put it straight back, leaving two nodes with one id.
+  if (instanceRoleIn(tree.root, id) === 'inside') {
+    toast(INSIDE_INSTANCE, 'error');
+    return;
+  }
   const { parentId, index } = placement(tree.root, targetId, position);
   // Checked against the tree without the node, as it will be once moved.
   const without = removeNode(tree.root, id);
@@ -519,14 +598,24 @@ export function nudge(id: string, delta: -1 | 1): void {
   if (!parent) return;
   const index = parent.children.findIndex((c) => c.id === id);
   const to = index + delta;
-  if (to < 0 || to >= parent.children.length) return;
+  if (to < 0 || to >= parent.children.length || refusedInsideInstance(id)) return;
   editTree((root) => moveNode(root, id, parent.id, delta > 0 ? to + 1 : to));
+}
+
+/** In a component's view, the template's root stands for the whole component. */
+function isTemplateRoot(tree: Tree, id: string): boolean {
+  return isComponentTreeId(tree.id) && tree.root.children.some((c) => c.id === id);
 }
 
 export function removeSelected(): void {
   const id = state.selectedId;
   const tree = currentTree();
   if (!id || !tree || id === tree.root.id) return;
+  if (isTemplateRoot(tree, id)) {
+    toast('This is the component itself: delete it from the Components list instead', 'error');
+    return;
+  }
+  if (refusedInsideInstance(id)) return;
   const parent = parentOf(id);
   editTree((root) => removeNode(root, id));
   state.selectedId = parent && parent.id !== tree.root.id ? parent.id : null;
@@ -535,24 +624,40 @@ export function removeSelected(): void {
 export function duplicateSelected(): void {
   const id = state.selectedId;
   const tree = currentTree();
-  if (!id || !tree || id === tree.root.id) return;
+  if (!id || !tree || id === tree.root.id || isTemplateRoot(tree, id) || refusedInsideInstance(id)) return;
   let newId = id;
-  editTree((root) => {
+  const dup = (root: Branch) => {
     const res = duplicateNode(root, id);
     newId = res.id;
     return res.root;
-  });
+  };
+  // In a variant view the node shows base and variant styles merged, and a copy (with new ids)
+  // would keep them as its base styles; so it is copied from the base template instead.
+  if (state.componentVariant && state.forest && state.treeId) {
+    try {
+      commit(updateTreeRoot(state.forest, state.treeId, dup, null));
+    } catch (err) {
+      toast((err as Error).message, 'error');
+    }
+  } else editTree(dup);
   state.selectedId = newId;
 }
 
 export function wrapSelected(tag = 'div', type = 'box'): void {
   const id = state.selectedId;
   const tree = currentTree();
-  if (!id || !tree || id === tree.root.id) return;
+  if (!id || !tree || id === tree.root.id || isTemplateRoot(tree, id) || refusedInsideInstance(id)) return;
   // Inside a drawing the wrapper is an SVG group.
   const parent = parentOf(id);
   const svg = !!parent && inSvgContext(tree.root, parent.id);
   const wrapper = svg ? createBranch({ tag: 'g', name: 'Group' }) : createBranch({ tag, type, name: 'Wrapper' });
+  // The wrapper must suit where the node sits (a <div> can't go in a <p> or straight in a <table>).
+  const node = findNode(tree.root, id);
+  const problem = parent && node ? insertionProblem(removeNode(tree.root, id), parent.id, { ...wrapper, children: [node] }) : null;
+  if (problem) {
+    toast(problem, 'error');
+    return;
+  }
   editTree((root) => wrapNode(root, id, wrapper));
   state.selectedId = wrapper.id;
 }
@@ -564,6 +669,7 @@ export function selectParent(): void {
 }
 
 export function updateBranch(id: string, patch: Partial<Omit<Branch, 'kind' | 'id' | 'children'>>): void {
+  if (refusedInsideInstance(id)) return;
   const tree = currentTree();
   const node = tree && findNode(tree.root, id);
   if (tree && node && isBranch(node) && patch.tag !== undefined && patch.tag !== node.tag) {
@@ -584,22 +690,25 @@ export function updateBranch(id: string, patch: Partial<Omit<Branch, 'kind' | 'i
 }
 
 export function updateLeaf(id: string, patch: Partial<Omit<Leaf, 'kind' | 'id'>>): void {
+  if (refusedInsideInstance(id)) return;
   editTree((root) => updateNode(root, id, (node) => (isBranch(node) ? node : { ...node, ...patch })));
 }
 
 export function setStyleValue(id: string, prop: string, value: string | null, display: DisplayId = state.display): void {
+  if (refusedInsideInstance(id)) return;
   editTree((root) => setStyle(root, id, display, prop, value));
 }
 
 /** Set several style properties on one display as a single undo step. */
 export function setStyleValues(id: string, patch: Record<string, string | null>, display: DisplayId = state.display): void {
+  if (refusedInsideInstance(id)) return;
   editTree((root) => setStyles(root, id, display, patch));
 }
 
 /** Turn a branch into a ready-made grid layout on the current display. */
 export function applyLayout(branchId: string, layoutId: string): void {
   const layout = getGridLayout(layoutId);
-  if (!layout) return;
+  if (!layout || refusedInsideInstance(branchId)) return;
   let created: string[] = [];
   editTree((root) => {
     const result = applyGridLayout(root, branchId, state.display, layout);
@@ -611,6 +720,7 @@ export function applyLayout(branchId: string, layoutId: string): void {
 
 /** Choose what a grid does on a smaller display. */
 export function setSmallScreen(branchId: string, display: DisplayId, choice: SmallScreenChoice): void {
+  if (refusedInsideInstance(branchId)) return;
   editTree((root) => applySmallScreen(root, branchId, display, choice));
 }
 
@@ -660,12 +770,16 @@ export function saveAsComponent(branchId: string, name: string): ComponentDef | 
     toast('This branch is part of a component instance. Edit the component, or detach the instance first.', 'error');
     return null;
   }
+  // Components don't nest: instances inside become plain branches of the new template.
+  const nested = (b: Branch): number => b.children.reduce((n, c) => n + (isBranch(c) ? (c.instance ? 1 : nested(c)) : 0), 0);
+  const inner = nested(node);
   // The branch itself becomes an instance, so it follows the component from now on.
   const saved = saveComponent(forest, tree.id, node.id, name);
   if (!saved) return null;
   const def = saved.component;
   commit(saved.forest, true, { label: `Saved “${def.name}” as a component` });
-  toast(`Saved “${def.name}” as a component. It is in the Branches tab.`, 'success');
+  const note = inner ? ` ${inner === 1 ? 'The component instance inside it is now plain branches' : `The ${inner} component instances inside it are now plain branches`}, so it won't follow those components.` : '';
+  toast(`Saved “${def.name}” as a component. It is in the Branches tab.${note}`, 'success');
   return def;
 }
 
@@ -682,6 +796,14 @@ export function insertComponent(componentId: string, targetId?: string, position
 export function editComponent(componentId: string, variant: string | null = null): void {
   switchTree(componentTreeId(componentId));
   state.componentVariant = variant;
+}
+
+/** The page tree in view: the open tree, or while a component is open the tree it was opened from. */
+export function pageTree(): Tree | undefined {
+  const forest = state.forest;
+  if (!forest) return undefined;
+  const id = isComponentTreeId(state.treeId) ? lastTreeId : state.treeId;
+  return forest.trees.find((t) => t.id === id) ?? (isComponentTreeId(state.treeId) ? forest.trees[0] : undefined);
 }
 
 export function leaveComponent(): void {
@@ -835,7 +957,9 @@ export function setTokenValue(token: DesignToken): boolean {
   const forest = state.forest;
   if (!forest) return false;
   try {
-    commit({ ...forest, kits: setToken(forest.kits, token) });
+    const kits = setToken(forest.kits, token);
+    commit({ ...forest, kits });
+    if (tokenShadowed(kits, token.name)) toast(`A kit that loads after the Tokens kit also sets ${token.name}, so it wins. Move the Tokens kit later in the Kits tab.`, 'error');
     return true;
   } catch (err) {
     toast((err as Error).message, 'error');
@@ -926,8 +1050,37 @@ function editRules(forest: Forest, kitId: string, fn: (rules: StyleRule[]) => St
 }
 
 /** The forest with an editable kit to add rules to, created (last, so it wins over other kits) when missing. */
+/**
+ * An editable kit no other kit loads after (tokens kits aside), for styles moved off a branch:
+ * they came after every kit as the branch's own styles, and must still beat the kits it matches.
+ */
+function withLastCustomKit(forest: Forest, styles: StyleRule['styles'] = {}): { forest: Forest; kitId: string } {
+  const kits = forest.kits;
+  // A kit writes every rule's base styles before its media blocks, so a rule there setting one of
+  // these properties for a narrower display would now come after the moved base styles.
+  const props = new Set(Object.values(styles).flatMap((map) => Object.keys(map ?? {})));
+  const clashes = (kit: DesignKit) =>
+    (kit.rules ?? []).some((r) => Object.entries(r.styles).some(([d, map]) => d !== BASE_DISPLAY && Object.keys(map ?? {}).some((p) => [...props].some((q) => p === q || cssOverlaps(p, q)))));
+  for (let i = kits.length - 1; i >= 0; i--) {
+    // A kit that is turned off neither shows the rule nor overrides it.
+    if (!kits[i].enabled) continue;
+    if (isEditableKit(kits[i])) {
+      if (clashes(kits[i])) break;
+      return { forest, kitId: kits[i].id };
+    }
+    if (!isTokenKit(kits[i])) break;
+  }
+  // Right after the last kit it competes with: before the tokens kits that follow it, but never
+  // before a kit that comes after a tokens kit (the user may have moved the tokens kit up).
+  const kit = createCustomKit();
+  let at = kits.length;
+  while (at > 0 && isTokenKit(kits[at - 1])) at--;
+  return { forest: { ...forest, kits: [...kits.slice(0, at), kit, ...kits.slice(at)] }, kitId: kit.id };
+}
+
 function withCustomKit(forest: Forest): { forest: Forest; kitId: string } {
-  const existing = forest.kits.find(isEditableKit);
+  // Only one that is on: a rule added to a kit that is turned off would do nothing.
+  const existing = forest.kits.find((k) => isEditableKit(k) && k.enabled);
   if (existing) return { forest, kitId: existing.id };
   const kit = createCustomKit();
   return { forest: { ...forest, kits: [...forest.kits, kit] }, kitId: kit.id };
@@ -950,9 +1103,19 @@ export function addRule(selector: string): string | null {
   return rule.id;
 }
 
-export function renameRule(kitId: string, ruleId: string, selector: string): void {
+/** Change a rule's selector; false (with a toast) when another rule already has it. */
+export function renameRule(kitId: string, ruleId: string, selector: string): boolean {
   const forest = state.forest;
-  if (forest) commit(editRules(forest, kitId, (rules) => rules.map((r) => (r.id === ruleId ? { ...r, selector: createRule(selector).selector || r.selector } : r))));
+  if (!forest) return false;
+  const next = createRule(selector).selector;
+  // Two rules for one selector: lookups by selector would only ever reach the first.
+  const other = next ? findRule({ selector: next }) : null;
+  if (other && other.rule.id !== ruleId) {
+    toast(`“${next}” already has a rule; edit that one instead`, 'error');
+    return false;
+  }
+  commit(editRules(forest, kitId, (rules) => rules.map((r) => (r.id === ruleId ? { ...r, selector: next || r.selector } : r))));
+  return true;
 }
 
 export function setRuleStyle(kitId: string, ruleId: string, prop: string, value: string | null, display: DisplayId = state.display): void {
@@ -981,14 +1144,14 @@ export function moveRule(kitId: string, ruleId: string, delta: -1 | 1): void {
   );
 }
 
-/** Replace an editable kit's rules from CSS text. Returns what had to be left out. */
+/** Replace an editable kit's rules from CSS text. Returns what had to be left out or tidied. */
 export function setRulesCss(kitId: string, css: string): string[] {
   const forest = state.forest;
   const kit = customKits().find((k) => k.id === kitId);
   if (!forest || !kit) return [];
-  const { rules, skipped } = parseRulesCss(css, kit.rules);
+  const { rules, skipped, reordered, changed } = parseRulesCss(css, kit.rules);
   commit(editRules(forest, kitId, () => rules));
-  return skipped;
+  return [...skipped, ...reordered, ...changed];
 }
 
 /**
@@ -999,11 +1162,11 @@ export function makeKitEditable(kitId: string): string[] {
   const forest = state.forest;
   const kit = forest?.kits.find((k) => k.id === kitId);
   if (!forest || !kit || kit.href || isEditableKit(kit)) return [];
-  const { rules, skipped } = parseRulesCss(kit.css);
-  // Only convert when nothing would be lost.
-  if (skipped.length) return skipped;
+  const { rules, skipped, reordered, changed } = parseRulesCss(kit.css);
+  // Only convert when nothing would be lost or would render differently.
+  if (skipped.length || reordered.length || changed.length) return [...skipped, ...reordered, ...changed];
   commit({ ...forest, kits: forest.kits.map((k) => (k.id === kitId ? withRules(k, rules) : k)) });
-  return skipped;
+  return [];
 }
 
 /**
@@ -1015,13 +1178,39 @@ export function extractClass(branchId: string, className: string): void {
   const tree = currentTree();
   const node = tree ? findNode(tree.root, branchId) : null;
   if (!forest || !tree || !isBranch(node)) return;
+  // An instance (its root too) is redrawn from its component, which would undo the change.
+  const role = instanceRoleIn(tree.root, branchId);
+  if (role === 'inside' || role === 'root') {
+    toast(role === 'inside' ? INSIDE_INSTANCE : 'This is a component instance: edit the component to save its styles as a class', 'error');
+    return;
+  }
+  // A class a kit defines, or another branch already wears, would pick up these styles too.
+  const inUse =
+    kitClasses(allKits()).includes(className) ||
+    [...forest.trees.map((t) => t.root), ...(forest.components ?? []).map((c) => c.root)].some((root) => {
+      let found = false;
+      walk(root, (n) => {
+        if (found) return false;
+        if (isBranch(n) && n.id !== branchId && n.classes.includes(className)) found = true;
+      });
+      return found;
+    });
+  if (inUse) {
+    toast(`“.${className}” is already used, so these styles would restyle everything with it. Pick another name.`, 'error');
+    return;
+  }
+  // A variant view shows base and variant styles merged; moving those into a class would lose the base.
+  if (state.componentVariant) {
+    toast('Switch to the base view to save styles as a class', 'error');
+    return;
+  }
   const selector = `.${className}`;
   if (findRule({ selector })) {
     toast(`“${selector}” already exists. Pick another name, or add the class from the list.`, 'error');
     return;
   }
   const rule = createRule(selector, node.styles);
-  const { forest: withKit, kitId } = withCustomKit(forest);
+  const { forest: withKit, kitId } = withLastCustomKit(forest, node.styles);
   const next = updateTreeRoot(editRules(withKit, kitId, (rules) => [...rules, rule]), tree.id, (root) =>
     updateNode(root, branchId, (n) => (isBranch(n) ? { ...n, classes: [...new Set([...n.classes, className])], styles: {} } : n)),
   );
@@ -1114,7 +1303,9 @@ export async function openDocument(doc: TreeDocument, meta: ChangeMeta = {}): Pr
   // Edits still waiting for the debounced save would be lost when the forest is replaced.
   if (open && state.saveState !== 'saved' && !(await saveNow())) throw new Error('The open forest’s changes could not be saved, so it stays open');
   openLoaded(forest, '');
-  await saveNow();
+  // The opened document replaces any stored copy with its id (a rejoined share, an embed host
+  // loading it again): that copy's save time isn't another tab's edit.
+  await saveNow(false);
   return { kind: doc.kind, trees: forest.trees.length };
 }
 
@@ -1142,7 +1333,8 @@ export function exportCurrent(format: FormatId, scope: 'tree' | 'forest'): Expor
 /** A Storybook project (zipped) for the current tree or the whole forest. */
 export function exportStorybookCurrent(scope: 'tree' | 'forest'): ExportOutput {
   const forest = state.forest!;
-  const tree = currentTree()!;
+  // While a component is open, the page it was opened from (a component isn't one of the forest's trees).
+  const tree = pageTree() ?? currentTree()!;
   // The deployment's stylesheets load first in the Storybook preview too.
   const project = exportStorybook({ ...forest, kits: allKits() }, scope === 'tree' ? { treeIds: [tree.id] } : {});
   const stories = project.files.find((f) => f.path.endsWith('.stories.js'));

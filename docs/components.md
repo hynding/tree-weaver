@@ -8,6 +8,9 @@ display.
 
 Components live in forests (`forest.components`). A single-tree document has none.
 
+Components don't nest. Saving a branch that holds an instance of another component copies that
+instance into the new template as plain branches, so it no longer follows the other component.
+
 ## Props
 
 Props are placeholders in the template, written `{{name}}`:

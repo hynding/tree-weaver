@@ -1,13 +1,20 @@
 import {
+  closesParagraph,
+  cssCovers,
+  cssOverlaps,
+  type ThemeToken,
+  keepsWhitespace,
+  whitespaceClasses,
+  BOOLEAN_ATTRS,
   canonicalSvgAttr,
   canonicalTag,
   DISPLAYS,
   escapeAttr,
   escapeHtml,
-  INLINE_TAGS,
   isBranch,
   isSafeAttr,
   isSafeCssProp,
+  hasInlineDisplay,
   isSvgRoot,
   renderDisplayCss,
   safeTag,
@@ -38,7 +45,9 @@ import {
   type DisplayStyles,
   resolveStyles,
   walk,
+  drawsInSvg,
 } from '@tree-weaver/core';
+import { isInlineTag, PRE_TAGS } from './inline';
 import { commentText, slugify } from './slug';
 import { DESIGN_TOKENS_DART, DESIGN_TOKENS_SWIFT, dartFileName, exportFlutter, exportFlutterTokens, exportSwiftUI, exportSwiftUITokens, nativeTypeName } from './native';
 import { tailwindPreset, tailwindThemeCss, tailwindTokenClass } from './tokens';
@@ -119,12 +128,20 @@ function pascalName(value: string): string {
 /** Readable, unique class names for branches that carry styles: `home__hero`, `home__feature-grid`, `home__card-2`. */
 function classNamer(prefix: string) {
   const used = new Map<string, number>();
+  // Every name handed out: "Card", "Card" and "Card 2" must not give two `card-2`s.
+  const taken = new Set<string>();
   return (branch: Branch): string => {
     const base = slugify(branch.name || branch.type || branch.tag, branch.tag);
     const stem = `${prefix}${base}`.replace(/[^a-z0-9_-]/gi, '-').replace(/^-+|-+$/g, '') || `${prefix}node`;
-    const n = (used.get(stem) ?? 0) + 1;
+    let n = used.get(stem) ?? 0;
+    let name: string;
+    do {
+      n++;
+      name = n === 1 ? stem : `${stem}-${n}`;
+    } while (taken.has(name));
     used.set(stem, n);
-    return n === 1 ? stem : `${stem}-${n}`;
+    taken.add(name);
+    return name;
   };
 }
 
@@ -135,14 +152,16 @@ const hasStyles = (b: Branch): boolean => Object.values(b.styles).some((m) => m 
 
 /* ------------------------------------------------------------ tailwind */
 
-/** The Tailwind variant prefix for a display, from its media query: `max-[1024px]:`, `max-[600px]:portrait:`. */
+/** The Tailwind variant prefix for a display, from its media query: `max-[1024.02px]:`, `max-[600.02px]:portrait:`. */
 export function tailwindVariant(display: DisplayDef): string {
   if (!display.media) return '';
   const parts: string[] = [];
   const min = /min-width:\s*(\d+(?:\.\d+)?)px/.exec(display.media);
   const max = /max-width:\s*(\d+(?:\.\d+)?)px/.exec(display.media);
   if (min) parts.push(`min-[${min[1]}px]`);
-  if (max) parts.push(`max-[${max[1]}px]`);
+  // Tailwind v4 writes `max-*` as `width < N`, which leaves out N itself; `max-width: N` takes
+  // it in. A fiftieth of a pixel more keeps that width in both v3 (`max-width`) and v4.
+  if (max) parts.push(`max-[${Number((Number(max[1]) + 0.02).toFixed(4))}px]`);
   if (/orientation:\s*landscape/.test(display.media)) parts.push('landscape');
   if (/orientation:\s*portrait/.test(display.media)) parts.push('portrait');
   return parts.map((p) => `${p}:`).join('');
@@ -165,11 +184,11 @@ const KEYWORD_UTILITIES: Record<string, Record<string, string>> = {
   'flex-direction': { row: 'flex-row', column: 'flex-col', 'row-reverse': 'flex-row-reverse', 'column-reverse': 'flex-col-reverse' },
   'flex-wrap': { wrap: 'flex-wrap', nowrap: 'flex-nowrap', 'wrap-reverse': 'flex-wrap-reverse' },
   'text-align': { left: 'text-left', center: 'text-center', right: 'text-right', justify: 'text-justify', start: 'text-start', end: 'text-end' },
-  'align-items': { start: 'items-start', 'flex-start': 'items-start', end: 'items-end', 'flex-end': 'items-end', center: 'items-center', baseline: 'items-baseline', stretch: 'items-stretch' },
+  'align-items': { 'flex-start': 'items-start', 'flex-end': 'items-end', center: 'items-center', baseline: 'items-baseline', stretch: 'items-stretch' },
+  // Only flex-start/flex-end: `justify-start` compiles to flex-start, which flips in a reversed
+  // flex box where `start` doesn't, so `start` and `end` stay arbitrary properties.
   'justify-content': {
-    start: 'justify-start',
     'flex-start': 'justify-start',
-    end: 'justify-end',
     'flex-end': 'justify-end',
     center: 'justify-center',
     'space-between': 'justify-between',
@@ -207,32 +226,77 @@ const VALUE_UTILITIES: Record<string, string> = {
   'z-index': 'z',
 };
 
-/** A CSS value inside Tailwind's brackets: spaces become `_`, literal underscores are escaped. */
+/**
+ * A CSS value inside Tailwind's brackets: spaces become `_`, literal underscores are escaped.
+ * Double-quoted strings become single-quoted (the same to CSS): a `"` would be escaped in the
+ * markup, and Tailwind, which reads class names from the source text, would miss the class.
+ */
 const bracket = (value: string): string =>
   value
     .trim()
-    .replace(/_/g, '\\_')
-    .replace(/\s*,\s*/g, ',')
-    .replace(/\s+/g, '_');
+    // Strings are read in order, so a `"` inside a single-quoted string stays inside it.
+    // A `"` left inside a string would be escaped in the markup too: it becomes the CSS escape
+    // `\22` (its `_` turns into the space that ends the escape), written in after the spaces below.
+    .replace(/'(?:[^'\\]|\\.)*'|"((?:[^"\\]|\\.)*)"/g, (whole, inner: string | undefined) =>
+      (inner === undefined ? whole : `'${inner.replace(/\\"/g, '"').replace(/(^|[^\\])'/g, "$1\\'")}'`).replace(/\\?"/g, '\u0000'),
+    )
+    // Tailwind leaves `url(…)` as written, so spaces there are percent-encoded instead.
+    .split(/(url\(\s*(?:"[^"]*"|'[^']*'|[^)]*?)\s*\))/i)
+    .map((part, i) =>
+      i % 2
+        ? // Padding inside the parentheses means nothing to CSS; only the address's own spaces are kept.
+          part
+            .replace(/^(url\()\s+/i, '$1')
+            .replace(/\s+\)$/, ')')
+            // `<` and `>` too (inline SVG data URIs): markup would escape them, and Tailwind reads the source.
+            .replace(/[\s<>]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`)
+            // …and its quotes (`"` in an inline SVG), as `%22`.
+            .replace(/\u0000/g, '%22')
+        : part
+            // Inside a string every space counts (`"\\2022  "`), so each becomes its own `_`.
+            .split(/('(?:[^'\\]|\\.)*')/)
+            .map((piece, j) =>
+              j % 2
+                ? piece.replace(/_/g, '\\_').replace(/\s/g, '_')
+                : piece
+                    .replace(/_/g, '\\_')
+                    .replace(/\s*,\s*/g, ',')
+                    .replace(/\s+/g, '_'),
+            )
+            .join(''),
+    )
+    .join('')
+    .replace(/\u0000/g, '\\22_');
+
+/** Whether every `[` in a value is closed by a later `]`, with none nested. */
+const balancedBrackets = (v: string): boolean => /^[^[\]]*(\[[^[\]]*\][^[\]]*)*$/.test(v);
 
 /**
  * One declaration as a Tailwind class (without the display variant). With the forest's token
  * kinds, a value that is exactly `var(--token)` becomes the theme utility (`bg-brand`).
  */
 export function tailwindClass(prop: string, value: string, tokenKinds?: ReadonlyMap<string, TokenKind>): string {
+  // Tailwind v4 generates nothing for `!important` inside the brackets; its `!` modifier works in v3 and v4.
+  const important = /\s*!\s*important\s*$/i;
+  if (important.test(value)) return tailwindClass(prop, value.replace(important, ''), tokenKinds).split(' ').map((c) => `!${c}`).join(' ');
   const v = value.trim();
   const themed = tokenKinds ? tailwindTokenClass(prop, v, tokenKinds) : undefined;
   if (themed) return themed;
   const keyword = Object.hasOwn(KEYWORD_UTILITIES, prop) && Object.hasOwn(KEYWORD_UTILITIES[prop], v) ? KEYWORD_UTILITIES[prop][v] : undefined;
   if (keyword) return keyword;
   const utility = Object.hasOwn(VALUE_UTILITIES, prop) ? VALUE_UTILITIES[prop] : undefined;
-  // Single values only: `p-[1rem_2rem]` works too, but the arbitrary property reads plainer.
-  if (utility && !/\s/.test(v) && !/[[\]]/.test(v)) return `${utility}-[${bracket(v)}]`;
+  // The utility even for `0 auto` (`m-[0_auto]`): Tailwind v3 writes arbitrary properties after
+  // every utility, so `[margin:0_auto]` would beat an `mt-[2rem]` meant to override it.
+  // Grid line names (`[a] 1fr [b]`) go in the utility too: Tailwind v3 can't read brackets nested
+  // in an arbitrary property, but takes balanced ones in a utility's value.
+  const lineNames = /^grid-template-(columns|rows)$/.test(prop) && balancedBrackets(v);
+  if (utility && (!/[[\]]/.test(v) || lineNames)) return `${utility}-[${bracket(v)}]`;
   return `[${prop}:${bracket(v)}]`;
 }
 
+
 function tailwindClasses(branch: Branch, tokenKinds: ReadonlyMap<string, TokenKind>): string[] {
-  const out: string[] = [];
+  const decls: { prop: string; cls: string; variant: string; tier: number }[] = [];
   for (const display of DISPLAYS) {
     const styles: StyleMap | undefined = branch.styles[display.id];
     if (!styles) continue;
@@ -240,10 +304,24 @@ function tailwindClasses(branch: Branch, tokenKinds: ReadonlyMap<string, TokenKi
     for (const [prop, raw] of Object.entries(styles)) {
       const value = sanitizeCssValue(raw);
       if (!isSafeCssProp(prop) || !value) continue;
-      out.push(`${variant}${tailwindClass(prop, value, tokenKinds)}`);
+      // Tailwind orders arbitrary properties by name, not as written, so a shorthand and a
+      // longhand it covers could swap. Each declaration that must beat an earlier overlapping
+      // one gets one more `&` of specificity (`[&&]:`); the same property on a later display
+      // keeps its tier, since Tailwind already writes display variants after the base.
+      // Two named utilities (`m-[0_auto]`, `mt-[2rem]`) are written shorthand first, so only a
+      // shorthand that comes after its longhand (`pt-[20px]`, then `p-[3px]`) needs the bump.
+      const cls = tailwindClass(prop, value, tokenKinds);
+      let tier = 1;
+      for (const d of decls) {
+        if (d.prop === prop) tier = Math.max(tier, d.tier);
+        // Only a named shorthand followed by a named longhand it covers is already in order.
+        else if (cssOverlaps(d.prop, prop)) tier = Math.max(tier, /^!?\[/.test(d.cls) || /^!?\[/.test(cls) || !cssCovers(d.prop, prop) ? d.tier + 1 : d.tier);
+      }
+      decls.push({ prop, cls, variant, tier });
     }
   }
-  return out;
+  // A declaration can take two classes (`bg-none bg-brand`); each gets the variant.
+  return decls.flatMap((d) => d.cls.split(' ').map((c) => `${d.variant}${d.tier > 1 ? `[${'&'.repeat(d.tier)}]:` : ''}${c}`));
 }
 
 /* ------------------------------------------------------- element model */
@@ -260,8 +338,32 @@ type El =
       cond?: { prop: string; negate: boolean };
       /** Component exports: the root's class list gets the variant modifier classes from the `variant` prop. */
       variantClass?: boolean;
+      /** Inside a `<pre>` (or a textarea): whitespace is written exactly as it is. */
+      pre?: boolean;
+      /** Its own styles make it `inline*`, so a line break beside it would show as a gap. */
+      inlineDisplay?: boolean;
     }
-  | { kind: 'text'; value: string };
+  | { kind: 'text'; value: string; pre?: boolean };
+
+/** Mark `<pre>` and `<textarea>` elements and everything inside them. */
+function markPre(el: El, inPre = false): void {
+  if (el.kind !== 'el') {
+    if (inPre) el.pre = true;
+    return;
+  }
+  const pre = inPre || el.pre || PRE_TAGS.has(el.tag);
+  if (pre) el.pre = true;
+  el.children.forEach((c) => markPre(c, pre));
+}
+
+/** A `data-show-if` test as the editor makes it: a boolean prop as it is; any other prop is off when '', 'false' or '0'. */
+function condExpr(cond: { prop: string; negate: boolean }, props: ReadonlySet<string>, vue = false): string {
+  // Vue templates may use only a fixed list of globals, which has `String` but not `globalThis`.
+  // Elsewhere `globalThis.String`, since a component may itself be called String.
+  const str = vue ? 'String' : 'globalThis.String';
+  const on = props.has(cond.prop) ? cond.prop : `(${cond.prop} && ${str}(${cond.prop}) !== 'false' && ${str}(${cond.prop}) !== '0')`;
+  return cond.negate ? `!${on}` : on;
+}
 
 interface Build {
   /** Prop defaults (component exports), to check URLs as they will be filled. */
@@ -276,17 +378,20 @@ interface Build {
   forceClass?: Set<string>;
   /** Generated class per branch id, for variant rules. */
   classes?: Map<string, string>;
+  /** Kit classes that keep whitespace as written (`whitespaceClasses`). */
+  keepClasses?: ReadonlySet<string>;
 }
 
 /**
  * Attribute names a framework template takes as plain attributes. Vue reads `:x`, `v-*`, `@x` and
  * `#x` as directives and Svelte reads `on:x`, `bind:x` and the like, which would run imported
- * attribute values as code, so only plain names and the XML namespaces are kept.
+ * attribute values as code, so only plain names and the XML namespaces are kept. No `.` either: on a
+ * bound attribute Vue reads `.camel` and `.prop` as modifiers (`:inner-h-t-m-l.camel` sets innerHTML).
  */
-const PLAIN_ATTR = /^(?:(?:xlink|xml|xmlns):)?[a-zA-Z_][\w.-]*$/;
+const PLAIN_ATTR = /^(?:(?:xlink|xml|xmlns):)?[a-zA-Z_][\w-]*$/;
 // `is` too: Vue renders `<component is="script">` and `is="vue:script"` as the element it names.
-/** Attribute names the frameworks take for themselves: `is` (Vue), `ref` and `key` (React, Vue), `slot` (Svelte, Vue). */
-const FRAMEWORK_ATTRS = new Set(['is', 'ref', 'key', 'slot']);
+/** Attribute names the frameworks take for themselves: `is` (Vue), `ref` and `key` (React, Vue), `slot` (Svelte, Vue), `children` and `dangerouslySetInnerHTML` (React). */
+const FRAMEWORK_ATTRS = new Set(['is', 'ref', 'key', 'slot', 'children', 'dangerouslysetinnerhtml']);
 const isExportAttr = (name: string, value: string, defaults?: Record<string, string>) =>
   PLAIN_ATTR.test(name) && !/^v-/i.test(name) && !FRAMEWORK_ATTRS.has(name.toLowerCase()) && !isDomPropName(name) && landsAs(name).every((n) => isSafeFilled(n, value, defaults));
 /**
@@ -339,44 +444,92 @@ function leafEl(leaf: Leaf, inSvg: boolean, defaults?: Record<string, string>): 
  * warns about): a link in a link becomes a span, a paragraph or heading holding blocks a div,
  * rows straight under a table go in a tbody, and whitespace between table parts goes.
  */
-/** Whether a block element sits anywhere below `node` (Svelte refuses one at any depth under a `<p>`). */
-function blockBelow(node: Branch, inSvg = false): boolean {
+/**
+ * Whether an element matching `test` sits anywhere below `node`, outside SVG. Svelte refuses a
+ * paragraph-closing element (`<div>`, `<ul>` …) at any depth under a `<p>`, and a heading under
+ * a heading; others (`<select>`, `<picture>`, `<ruby>`) are fine there, in browsers too.
+ */
+function tagBelow(node: Branch, test: (tag: string) => boolean, inSvg = false): boolean {
   return node.children.some((c) => {
     if (!isBranch(c)) return false;
     const lower = c.tag.toLowerCase();
-    if (inSvg) return blockBelow(c, lower !== 'foreignobject');
-    if (lower === 'svg') return blockBelow(c, true);
-    return !INLINE_TAGS.has(lower) || blockBelow(c);
+    if (inSvg) return tagBelow(c, test, lower !== 'foreignobject');
+    if (lower === 'svg') return tagBelow(c, test, true);
+    return test(lower) || tagBelow(c, test);
   });
 }
 
-export function repairNesting(node: Branch, ctx: { a?: boolean; form?: boolean; button?: boolean } = {}): Branch {
+/** Elements whose start tag closes an open one of the same group, so one can't sit directly in another. */
+const AUTO_CLOSE_GROUP: Record<string, string> = { li: 'li', dd: 'dl', dt: 'dl', td: 'cell', th: 'cell', rt: 'ruby', rp: 'ruby' };
+
+/** Table parts and the parents the parser keeps them in (cells and rows outside a row or body are wrapped below). */
+const TABLE_PARENTS: Record<string, RegExp> = {
+  caption: /^table$/,
+  colgroup: /^table$/,
+  thead: /^table$/,
+  tbody: /^table$/,
+  tfoot: /^table$/,
+  col: /^(table|colgroup)$/,
+  tr: /^(table|thead|tbody|tfoot)$/,
+  td: /^(tr|table|thead|tbody|tfoot)$/,
+  th: /^(tr|table|thead|tbody|tfoot)$/,
+};
+
+/** Runs of children matching `test` gathered into new `tag` wrappers (ids derived from the parent's). */
+function wrapRuns(parent: Branch, children: TreeNode[], tag: string, test: (c: TreeNode) => boolean): TreeNode[] {
+  if (!children.some(test)) return children;
+  const out: TreeNode[] = [];
+  let run: Branch | null = null;
+  for (const c of children) {
+    if (test(c)) {
+      if (!run) {
+        run = { kind: 'branch', id: `${parent.id}~${tag}${out.length}`, tag, classes: [], attrs: {}, styles: {}, children: [] };
+        out.push(run);
+      }
+      run.children.push(c);
+    } else {
+      run = null;
+      out.push(c);
+    }
+  }
+  return out;
+}
+
+const tagIs = (c: TreeNode, re: RegExp) => isBranch(c) && re.test(c.tag.toLowerCase());
+
+export function repairNesting(node: Branch, ctx: { a?: boolean; form?: boolean; button?: boolean; parent?: string } = {}): Branch {
   const lower = node.tag.toLowerCase();
   if (lower === 'svg') return node;
   let tag = node.tag;
   if ((lower === 'a' && ctx.a) || (lower === 'button' && ctx.button)) tag = 'span';
   if (lower === 'form' && ctx.form) tag = 'div';
-  const holdsBlock = blockBelow(node);
-  if ((lower === 'p' || /^h[1-6]$/.test(lower)) && holdsBlock) tag = 'div';
-  const inner = { a: ctx.a || lower === 'a', form: ctx.form || lower === 'form', button: ctx.button || lower === 'button' };
-  let children: TreeNode[] = node.children.map((c) => (isBranch(c) ? repairNesting(c, inner) : c));
-  if (/^(table|thead|tbody|tfoot|tr)$/.test(lower)) children = children.filter((c) => isBranch(c) || c.type !== 'text' || c.value.trim() !== '');
-  if (lower === 'table' && children.some((c) => isBranch(c) && c.tag.toLowerCase() === 'tr')) {
-    const out: TreeNode[] = [];
-    let body: Branch | null = null;
-    for (const c of children) {
-      if (isBranch(c) && c.tag.toLowerCase() === 'tr') {
-        if (!body) {
-          body = { kind: 'branch', id: `${node.id}~tbody${out.length}`, tag: 'tbody', classes: [], attrs: {}, styles: {}, children: [] };
-          out.push(body);
-        }
-        body.children.push(c);
-      } else {
-        body = null;
-        out.push(c);
-      }
-    }
-    children = out;
+  if (lower === 'p' && tagBelow(node, closesParagraph)) tag = 'div';
+  if (/^h[1-6]$/.test(lower) && tagBelow(node, (t) => /^h[1-6]$/.test(t))) tag = 'div';
+  // An <li> right inside an <li> (a <td> in a <td>, …) would close its parent when parsed.
+  const group = Object.hasOwn(AUTO_CLOSE_GROUP, lower) ? AUTO_CLOSE_GROUP[lower] : undefined;
+  if (group && ctx.parent && Object.hasOwn(AUTO_CLOSE_GROUP, ctx.parent) && AUTO_CLOSE_GROUP[ctx.parent] === group) tag = group === 'ruby' ? 'span' : 'div';
+  // A table part outside a table is dropped by the parser. At a component's root (no parent) it
+  // may be meant for a table the component is used in, so it is kept there.
+  if (ctx.parent !== undefined && Object.hasOwn(TABLE_PARENTS, lower) && !TABLE_PARENTS[lower].test(ctx.parent)) tag = 'div';
+  const inner = { a: ctx.a || lower === 'a', form: ctx.form || lower === 'form', button: ctx.button || lower === 'button', parent: tag.toLowerCase() };
+  // An <option> in an <option> (an <optgroup> in an <optgroup>) can't be written: its content joins the parent.
+  let own: TreeNode[] = node.children;
+  if (lower === 'option' || lower === 'optgroup') {
+    while (own.some((c) => isBranch(c) && c.tag.toLowerCase() === lower)) own = own.flatMap((c) => (isBranch(c) && c.tag.toLowerCase() === lower ? c.children : [c]));
+  }
+  let children: TreeNode[] = own.map((c) => (isBranch(c) ? repairNesting(c, inner) : c));
+  const now = tag.toLowerCase();
+  if (/^(table|thead|tbody|tfoot|tr)$/.test(now)) {
+    children = children.filter((c) => isBranch(c) || c.type !== 'text' || c.value.trim() !== '');
+    // Anything that isn't a table part (text, an image, a <p>) is moved out of a table by the
+    // parser, so it goes in a cell; and stray cells go in a row.
+    const parts = now === 'table' ? /^(caption|colgroup|col|thead|tbody|tfoot|tr|td|th|template)$/ : now === 'tr' ? /^(td|th|template)$/ : /^(tr|td|th|template)$/;
+    children = wrapRuns(node, children, 'td', (c) => !tagIs(c, parts));
+    if (now !== 'tr') children = wrapRuns(node, children, 'tr', (c) => tagIs(c, /^t[dh]$/));
+  }
+  if (lower === 'table') {
+    children = wrapRuns(node, children, 'colgroup', (c) => tagIs(c, /^col$/));
+    children = wrapRuns(node, children, 'tbody', (c) => tagIs(c, /^tr$/));
   }
   const same = tag === node.tag && children.length === node.children.length && children.every((c, i) => c === node.children[i]);
   return same ? node : { ...node, tag, children };
@@ -408,11 +561,17 @@ function branchEl(branch: Branch, b: Build, inSvg: boolean, asTag?: string): El 
       continue;
     }
     if (name === 'class' || name === 'style' || !isExportAttr(name, value, b.defaults)) continue;
+    // HTML ignores `value` on these (the content or the selected option counts); frameworks don't.
+    if (name.toLowerCase() === 'value' && (tag === 'textarea' || tag === 'select') && !svg) continue;
     attrs.push([name, value]);
   }
   if (tag === 'svg' && !inSvg && !branch.attrs.xmlns) attrs.push(['xmlns', 'http://www.w3.org/2000/svg']);
   const children = branch.children.map((c: TreeNode) => (isBranch(c) ? branchEl(c, b, childSvg) : leafEl(c, childSvg, b.defaults)));
-  return cond ? { kind: 'el', tag, attrs, children, svg, cond } : { kind: 'el', tag, attrs, children, svg };
+  const el: El = cond ? { kind: 'el', tag, attrs, children, svg, cond } : { kind: 'el', tag, attrs, children, svg };
+  if (!svg && hasInlineDisplay(branch)) el.inlineDisplay = true;
+  // `white-space: pre` and the like show whitespace as written, as a <pre> does.
+  if (keepsWhitespace(branch, b.keepClasses) || (svg && branch.attrs['xml:space'] === 'preserve')) el.pre = true;
+  return el;
 }
 
 /* ------------------------------------------------------ props in markup */
@@ -429,15 +588,24 @@ function segments(value: string): { lit: string; prop?: string }[] {
   return out;
 }
 const hasProps = (value: string) => /\{\{\s*[A-Za-z][A-Za-z0-9_]*\s*\}\}/.test(value);
-/** A JS template literal for a value with placeholders: `card-${tone}`. */
-const templateLiteral = (value: string, extra = ''): string =>
-  `\`${segments(value)
-    .map((s) => s.lit.replace(/[`\\]/g, '\\$&').replace(/\$\{/g, '\\${') + (s.prop ? `\${${s.prop}}` : ''))
-    .join('')}${extra}\``;
-/** A JS expression for a value: the bare prop when the value is just `{{prop}}`. */
-const propExpr = (value: string): string => {
+/** A prop as the editor writes it into text: a boolean prop (in `bools`) is 'true', or nothing when off. */
+const propText = (prop: string, bools?: ReadonlySet<string>): string => (bools?.has(prop) ? `(${prop} ? 'true' : '')` : prop);
+/**
+ * A JS template literal for a value with `{{prop}}` placeholders. A backslash in it (Tailwind's
+ * `\\_`) is written as is through `String.raw`, so the source text, which Tailwind reads, matches
+ * the class the page gets. (`rawTag` is `String.raw` in Vue templates, which don't see `globalThis`.)
+ */
+const templateLiteral = (value: string, extra = '', bools?: ReadonlySet<string>, rawTag = 'globalThis.String.raw'): string => {
   const segs = segments(value);
-  return segs.length === 2 && !segs[0].lit && !segs[1].lit ? segs[0].prop! : templateLiteral(value);
+  // Raw works unless a literal holds a backtick or `${`, or ends in a backslash (which would escape what follows).
+  const raw = segs.some((s) => s.lit.includes('\\')) && segs.every((s) => !/`|\$\{|\\$/.test(s.lit));
+  const lit = (t: string) => (raw ? t : t.replace(/[`\\]/g, '\\$&').replace(/\$\{/g, '\\${'));
+  return `${raw ? rawTag : ''}\`${segs.map((s) => lit(s.lit) + (s.prop ? `\${${propText(s.prop, bools)}}` : '')).join('')}${extra}\``;
+};
+/** A JS expression for a value: the bare prop when the value is just `{{prop}}`. */
+const propExpr = (value: string, bools?: ReadonlySet<string>, rawTag?: string): string => {
+  const segs = segments(value);
+  return segs.length === 2 && !segs[0].lit && !segs[1].lit ? propText(segs[0].prop!, bools) : templateLiteral(value, '', bools, rawTag);
 };
 /** The `variant` prop's modifier classes, added to the root's class list. */
 const VARIANT_CALL = 'variantClasses(variant)';
@@ -445,13 +613,11 @@ const variantSuffix = `\${${VARIANT_CALL}}`;
 
 /* ------------------------------------------------------------- writers */
 
-const INLINE = new Set([
-  'a', 'abbr', 'audio', 'b', 'bdi', 'bdo', 'br', 'button', 'canvas', 'cite', 'code', 'data', 'dfn', 'em', 'i', 'iframe', 'img', 'input', 'kbd', 'label',
-  'mark', 'output', 'picture', 'q', 's', 'samp', 'select', 'small', 'span', 'strong', 'sub', 'sup', 'svg', 'textarea', 'time', 'u', 'var', 'video', 'wbr', 'tspan',
-]);
-const isInlineEl = (el: El): boolean => el.kind === 'text' || INLINE.has(el.tag);
-/** Keep children on one line when line breaks could change the text: any text, or only inline elements. */
-const oneLine = (children: El[]): boolean => children.some((c) => c.kind === 'text') || children.every(isInlineEl);
+const isInlineEl = (el: El): boolean => el.kind === 'text' || isInlineTag(el.tag);
+/** Keep children on one line when line breaks could change the text, or open gaps between inline-block siblings. */
+const keepTogether = (children: El[]): boolean => oneLine(children) || children.some((c) => c.kind === 'el' && c.inlineDisplay);
+/** Keep children on one line when line breaks could show as spaces: any text or inline element beside them (as the canvas renders). */
+const oneLine = (children: El[]): boolean => children.some((c) => c.kind === 'text' || isInlineEl(c));
 /**
  * Children on separate lines for HTML, Vue and Svelte. HTML keeps the line break between two
  * inline elements as a space, so runs of inline siblings stay together on one line.
@@ -468,39 +634,112 @@ function childLines(children: El[], pad: string, write: (c: El) => string): stri
   return lines.join('\n');
 }
 
+/**
+ * Children written on one line. Svelte drops whitespace at the start and end of an element,
+ * which shows inside inline elements (`<strong>Note: </strong>`), so it is written as `{' '}`.
+ */
+function inlineChildren(children: El[], mode: 'html' | 'vue' | 'svelte', write: (c: El) => string, pre = false): string {
+  const parts = children.map(write);
+  // Both keep whitespace inside a <pre> as written.
+  if (pre) return parts.join('');
+  if (mode === 'vue' && parts.length) {
+    // Vue drops a whitespace-only first or last child.
+    // Only HTML whitespace: Vue and Svelte keep a non-breaking space.
+    const blank = (i: number) => children[i].kind === 'text' && parts[i] !== '' && !/[^ \t\n\f\r]/.test(parts[i]);
+    if (blank(0)) parts[0] = `{{ ' ' }}`;
+    if (blank(parts.length - 1)) parts[parts.length - 1] = `{{ ' ' }}`;
+  }
+  if (mode === 'svelte' && parts.length) {
+    if (children[0].kind === 'text' && /^[ \t\n\f\r]/.test(parts[0])) parts[0] = `{' '}${parts[0].replace(/^[ \t\n\f\r]+/, '')}`;
+    const last = parts.length - 1;
+    if (children[last].kind === 'text' && /[ \t\n\f\r]$/.test(parts[last])) parts[last] = `${parts[last].replace(/[ \t\n\f\r]+$/, '')}{' '}`;
+  }
+  return parts.join('');
+}
+
 /** HTML (also Vue and Svelte templates). */
-function writeHtml(el: El, depth: number, mode: 'html' | 'vue' | 'svelte', props = false): string {
+/** `props` is false outside a component; in one, the names of its boolean props. */
+/** An `&` a parser would read as a character reference: `&#…` or `&name;` (`&fit=crop` is left alone). */
+const REF_AMP = /&(?=#|[A-Za-z][A-Za-z0-9]*;)/g;
+
+/**
+ * A class attribute, with `&` left as written unless it could start a character reference:
+ * Tailwind reads classes from the source text, so `[&&]:` written `[&amp;&amp;]:` would be missed.
+ */
+const escapeClassAttr = (v: string): string => v.replace(REF_AMP, '&amp;').replace(/"/g, '&quot;');
+
+/** HTML (and Vue and Svelte templates) drop one newline right after these tags, so a leading one is doubled. */
+const leadNewline = (tag: string, content: string): string => (/^(pre|textarea|listing)$/i.test(tag) && /^[\r\n]/.test(content) ? `\n${content}` : content);
+
+function writeHtml(el: El, depth: number, mode: 'html' | 'vue' | 'svelte', props: false | ReadonlySet<string> = false): string {
   if (el.kind === 'text' && props && mode !== 'html' && hasProps(el.value)) {
     // Vue: {{ title }}; Svelte: {title}. Literal parts are escaped as usual.
-    return segments(el.value)
-      .map((s) => writeHtml({ kind: 'text', value: s.lit }, depth, mode) + (s.prop ? (mode === 'vue' ? `{{ ${s.prop} }}` : `{${s.prop}}`) : ''))
+    const segs = segments(el.value);
+    return segs
+      .map((s, i) => {
+        // A boolean prop reads as the editor stores it: 'true', or nothing when off.
+        const expr = s.prop && props.has(s.prop) ? `${s.prop} ? 'true' : ''` : s.prop;
+        // Vue splits the text at each prop and drops a whitespace-only first or last piece, which
+        // shows at an inline element's edge (`<strong> {{ name }} </strong>`): write it as a space.
+        const edge = (i === 0 || i === segs.length - 1) && segs.length > 1;
+        const lit = mode === 'vue' && !el.pre && edge && /^[ \t\n\f\r]+$/.test(s.lit) ? `{{ ' ' }}` : writeHtml({ kind: 'text', value: s.lit, pre: el.pre }, depth, mode);
+        return lit + (expr ? (mode === 'vue' ? `{{ ${expr} }}` : `{${expr}}`) : '');
+      })
       .join('');
   }
   if (el.kind === 'el' && props && mode !== 'html') {
-    const inner = writePropsEl(el, depth, mode);
-    if (el.cond && mode === 'svelte') return `{#if ${el.cond.negate ? '!' : ''}${el.cond.prop}}${inner}{/if}`;
+    const inner = writePropsEl(el, depth, mode, props);
+    if (el.cond && mode === 'svelte') return `{#if ${condExpr(el.cond, props)}}${inner}{/if}`;
     return inner;
   }
   if (el.kind === 'text') {
+    // Vue condenses whitespace and Svelte collapses it between nodes, even where CSS shows it; a
+    // string expression keeps it. Escaped so neither template parser sees a tag or delimiter in it.
+    if (el.pre && mode !== 'html' && /[ \t\n\f\r]{2}|[\n\t\f\r]|^[ \t\n\f\r]|[ \t\n\f\r]$/.test(el.value)) {
+      const literal = JSON.stringify(el.value).replace(/[<>&{}]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
+      // Vue writes a constant subtree as an HTML string, and parsing that drops a newline right after
+      // `<pre>` or `<textarea>`. A call isn't a constant to Vue, so `String(…)` keeps it.
+      if (mode === 'vue') return /^[\r\n]/.test(el.value) ? `{{ String(${literal}) }}` : `{{ ${literal} }}`;
+      return `{${literal}}`;
+    }
     const text = escapeHtml(el.value);
     // `{` starts an expression in Svelte, `{{` in Vue. Every brace is escaped, so neither a run of
     // braces nor two text leaves side by side can form one.
     if (mode !== 'html') return text.replace(/[{}]/g, (c) => (c === '{' ? '&#123;' : '&#125;'));
     return text;
   }
-  // Escape for HTML first, then Svelte's braces, so the &#123; entities are not escaped again.
-  const esc = (v: string) => (mode === 'svelte' ? escapeAttr(v).replace(/[{}]/g, (c) => (c === '{' ? '&#123;' : '&#125;')) : escapeAttr(v));
-  const attrs = el.attrs.map(([n, v]) => (v === '' && !el.svg ? ` ${n}` : ` ${n}="${esc(v)}"`)).join('');
+  // Escape for HTML first, then braces, so the &#123; entities are not escaped again. Svelte reads
+  // `{…}` in any attribute; Vue reads `{{…}}` in an element inside a <textarea> or <title> (its
+  // content is text to Vue), so braces are escaped for both.
+  const esc = (v: string, n = '') => {
+    const out = n === 'class' ? escapeClassAttr(v) : escapeAttr(v);
+    return mode !== 'html' ? out.replace(/[{}]/g, (c) => (c === '{' ? '&#123;' : '&#125;')) : out;
+  };
+  const attrs = el.attrs.map(([n, v]) => (v === '' && !el.svg ? ` ${n}` : ` ${n}="${esc(v, n)}"`)).join('');
   if (!el.svg && VOID_TAGS.has(el.tag)) return `<${el.tag}${attrs}>`;
   if (!el.children.length) return el.svg ? `<${el.tag}${attrs} />` : `<${el.tag}${attrs}></${el.tag}>`;
-  if (oneLine(el.children)) return `<${el.tag}${attrs}>${el.children.map((c) => writeHtml(c, depth + 1, mode)).join('')}</${el.tag}>`;
+  if (el.pre || keepTogether(el.children)) return `<${el.tag}${attrs}>${leadNewline(el.tag, inlineChildren(el.children, mode, (c) => writeHtml(c, depth + 1, mode), el.pre))}</${el.tag}>`;
   const pad = '  '.repeat(depth + 1);
   return `<${el.tag}${attrs}>\n${childLines(el.children, pad, (c) => writeHtml(c, depth + 1, mode))}\n${'  '.repeat(depth)}</${el.tag}>`;
 }
 
+/** Boolean attributes React passes through only as strings, with the string that turns each on. */
+const REACT_STRING_BOOLEANS: Record<string, string> = { ismap: '', inert: 'true' };
+
 const JSX_ATTRS: Record<string, string> = {
   class: 'className',
   for: 'htmlFor',
+  autocapitalize: 'autoCapitalize',
+  autocorrect: 'autoCorrect',
+  autosave: 'autoSave',
+  controlslist: 'controlsList',
+  disablepictureinpicture: 'disablePictureInPicture',
+  disableremoteplayback: 'disableRemotePlayback',
+  imagesizes: 'imageSizes',
+  imagesrcset: 'imageSrcSet',
+  classid: 'classID',
+  contextmenu: 'contextMenu',
+  radiogroup: 'radioGroup',
   tabindex: 'tabIndex',
   colspan: 'colSpan',
   rowspan: 'rowSpan',
@@ -554,11 +793,6 @@ const JSX_ATTRS: Record<string, string> = {
   'xml:lang': 'xmlLang',
 };
 
-/** HTML attributes that are on when present; any other empty attribute is written as `=""` in JSX. */
-const BOOLEAN_ATTRS = new Set([
-  'allowfullscreen', 'async', 'autofocus', 'autoplay', 'checked', 'controls', 'default', 'defer', 'disabled', 'formnovalidate', 'hidden', 'inert',
-  'ismap', 'itemscope', 'loop', 'multiple', 'muted', 'nomodule', 'novalidate', 'open', 'playsinline', 'readonly', 'required', 'reversed', 'selected',
-]);
 
 /** HTML attributes React's types take as numbers. */
 const NUMERIC_ATTRS = new Set(['tabindex', 'colspan', 'rowspan', 'rows', 'cols', 'size', 'maxlength', 'minlength', 'start', 'span']);
@@ -580,36 +814,106 @@ export function jsxAttrName(name: string): string {
 }
 
 /** An element of a Vue or Svelte component template, with prop bindings. */
-function writePropsEl(el: El & { kind: 'el' }, depth: number, mode: 'vue' | 'svelte'): string {
-  // Escape for HTML first, then Svelte's braces, so the &#123; entities are not escaped again.
-  const esc = (v: string) => (mode === 'svelte' ? escapeAttr(v).replace(/[{}]/g, (c) => (c === '{' ? '&#123;' : '&#125;')) : escapeAttr(v));
+function writePropsEl(el: El & { kind: 'el' }, depth: number, mode: 'vue' | 'svelte', props: ReadonlySet<string>): string {
+  // Escape for HTML first, then braces, so the &#123; entities are not escaped again. Svelte reads
+  // `{…}` in any attribute; Vue reads `{{…}}` in an element inside a <textarea> or <title> (its
+  // content is text to Vue), so braces are escaped for both.
+  const esc = (v: string, n = '') => {
+    const out = n === 'class' ? escapeClassAttr(v) : escapeAttr(v);
+    return out.replace(/[{}]/g, (c) => (c === '{' ? '&#123;' : '&#125;'));
+  };
   const attrs = el.attrs
     .map(([n, v]) => {
       const variant = n === 'class' && el.variantClass;
-      if (!hasProps(v) && !variant) return v === '' && !el.svg ? ` ${n}` : ` ${n}="${esc(v)}"`;
-      if (mode === 'vue') return ` :${n}="${escapeAttr(variant ? templateLiteral(v, variantSuffix) : propExpr(v))}"`;
+      if (!hasProps(v) && !variant) return v === '' && !el.svg ? ` ${n}` : ` ${n}="${esc(v, n)}"`;
+      // A boolean attribute is on unless its prop is off (see `expandComponent` in core): a
+      // boolean prop as it is, any other value unless it is "false".
+      if (!variant && !el.svg && BOOLEAN_ATTRS.has(n.toLowerCase())) {
+        const expr = propExpr(v);
+        const on = props.has(expr) ? expr : `${expr} !== 'false'`;
+        return mode === 'vue' ? ` :${n}="${escapeAttr(on)}"` : ` ${n}={${on}}`;
+      }
+      if (mode === 'vue') return ` :${n}="${(n === 'class' ? escapeClassAttr : escapeAttr)(variant ? templateLiteral(v, variantSuffix, props, 'String.raw') : propExpr(v, props, 'String.raw'))}"`;
       // Svelte: attribute values can hold {expressions} between literal text.
       const body = segments(v)
-        .map((s) => esc(s.lit) + (s.prop ? `{${s.prop}}` : ''))
+        .map((s) => esc(s.lit, n) + (s.prop ? `{${props.has(s.prop) ? `${s.prop} ? 'true' : ''` : s.prop}}` : ''))
         .join('');
       return ` ${n}="${body}${variant ? `{${VARIANT_CALL}}` : ''}"`;
     })
     .join('');
-  const cond = mode === 'vue' && el.cond ? ` v-if="${el.cond.negate ? '!' : ''}${el.cond.prop}"` : '';
+  const cond = mode === 'vue' && el.cond ? ` v-if="${escapeAttr(condExpr(el.cond, props, true))}"` : '';
   if (!el.svg && VOID_TAGS.has(el.tag)) return `<${el.tag}${cond}${attrs}>`;
   if (!el.children.length) return el.svg ? `<${el.tag}${cond}${attrs} />` : `<${el.tag}${cond}${attrs}></${el.tag}>`;
-  if (oneLine(el.children)) return `<${el.tag}${cond}${attrs}>${el.children.map((c) => writeHtml(c, depth + 1, mode, true)).join('')}</${el.tag}>`;
+  if (el.pre || keepTogether(el.children)) return `<${el.tag}${cond}${attrs}>${leadNewline(el.tag, inlineChildren(el.children, mode, (c) => writeHtml(c, depth + 1, mode, props), el.pre))}</${el.tag}>`;
   const pad = '  '.repeat(depth + 1);
-  return `<${el.tag}${cond}${attrs}>\n${childLines(el.children, pad, (c) => writeHtml(c, depth + 1, mode, true))}\n${'  '.repeat(depth)}</${el.tag}>`;
+  return `<${el.tag}${cond}${attrs}>\n${childLines(el.children, pad, (c) => writeHtml(c, depth + 1, mode, props))}\n${'  '.repeat(depth)}</${el.tag}>`;
+}
+
+/**
+ * Vue reads an unknown tag (`<my-badge>`) as a component; without `isCustomElement` it warns, and
+ * server rendering drops the element. A note naming the custom elements, for the Vue file.
+ */
+function vueCustomElementNote(root: El): string {
+  const tags = new Set<string>();
+  const visit = (el: El) => {
+    if (el.kind !== 'el') return;
+    // Vue reads `<search>` (newer than its list of HTML tags) as a component too.
+    if ((el.tag.includes('-') || el.tag.toLowerCase() === 'search') && !el.svg) tags.add(el.tag);
+    el.children.forEach(visit);
+  };
+  visit(root);
+  if (!tags.size) return '';
+  const list = [...tags].map((t) => `'${t}'`).join(', ');
+  return `\n<!-- Custom elements: tell Vue they aren't components, or server rendering drops them:\n     compilerOptions: { isCustomElement: (tag) => [${list}].includes(tag) } -->`;
 }
 
 const jsxString = (value: string): string => JSON.stringify(value);
 
-function writeJsx(el: El, depth: number, props = false): string {
+const IMPORTANT = /!\s*important\s*$/i;
+/**
+ * A variant's declarations, made `!important` where the template's own rule is: an important
+ * template value would otherwise beat the variant (the editor replaces it outright).
+ */
+function beatImportant(own: StyleMap, template: StyleMap): StyleMap {
+  const out: StyleMap = {};
+  for (const [k, v] of Object.entries(own)) out[k] = IMPORTANT.test(template[k] ?? '') && !IMPORTANT.test(v) ? `${v} !important` : v;
+  return out;
+}
+
+/** The options a <select> starts on (`selected`), as a JSX expression for its defaultValue, or ''. */
+function selectedOptions(select: El & { kind: 'el' }, props: false | ReadonlySet<string>): string {
+  const picks: { value: string; cond?: string }[] = [];
+  const visit = (el: El) => {
+    if (el.kind !== 'el') return;
+    const selected = el.tag === 'option' ? el.attrs.find(([n]) => n.toLowerCase() === 'selected') : undefined;
+    if (selected) {
+      const raw = el.attrs.find(([n]) => n.toLowerCase() === 'value')?.[1] ?? el.children.map((c) => (c.kind === 'text' ? c.value : '')).join('').replace(/\s+/g, ' ').trim();
+      const value = props && hasProps(raw) ? templateLiteral(raw, '', props) : jsxString(raw);
+      // `selected="{{yearly}}"`: picked while the prop is on (a boolean prop as is, any other unless "false").
+      const bound = props && hasProps(selected[1]) ? propExpr(selected[1]) : '';
+      picks.push(bound ? { value, cond: props && props.has(bound) ? bound : `globalThis.String(${bound}) !== 'false'` } : { value });
+    } else if (el.tag === 'optgroup') el.children.forEach(visit);
+  };
+  select.children.forEach(visit);
+  if (!picks.length) return '';
+  if (select.attrs.some(([n]) => n.toLowerCase() === 'multiple')) {
+    if (picks.every((p) => !p.cond)) return `[${picks.map((p) => p.value).join(', ')}]`;
+    return `[${picks.map((p) => (p.cond ? `...(${p.cond} ? [${p.value}] : [])` : p.value)).join(', ')}]`;
+  }
+  // One pick: the last selected option wins, as in the browser.
+  return picks.reduce((acc, p) => (p.cond ? `(${p.cond} ? ${p.value} : ${acc})` : p.value), 'undefined');
+}
+
+/** `props` is false outside a component; in one, the names of its boolean props. */
+function writeJsx(el: El, depth: number, props: false | ReadonlySet<string> = false): string {
+  // React refuses children on a void element (`<img>x</img>`); HTML drops them anyway.
+  if (el.kind === 'el' && !el.svg && VOID_TAGS.has(el.tag.toLowerCase()) && el.children.length) return writeJsx({ ...el, children: [] }, depth, props);
   if (el.kind === 'text') {
     if (props && hasProps(el.value))
       return segments(el.value)
-        .map((s) => (s.lit ? writeJsx({ kind: 'text', value: s.lit }, depth) : '') + (s.prop ? `{${s.prop}}` : ''))
+        // React renders nothing for `true` and `false`, so a boolean prop is written as the editor
+        // stores it: 'true', or nothing when off.
+        .map((s) => (s.lit ? writeJsx({ kind: 'text', value: s.lit }, depth) : '') + (s.prop ? (props.has(s.prop) ? `{${s.prop} ? 'true' : ''}` : `{${s.prop}}`) : ''))
         .join('');
     // Plain text is fine unless it holds JSX syntax characters; then use a string expression.
     // Line breaks too: JSX text collapses them (and the indentation around them).
@@ -617,29 +921,66 @@ function writeJsx(el: El, depth: number, props = false): string {
   }
   if (props && el.cond) {
     const { cond, ...rest } = el;
-    return `{${cond.negate ? '!' : ''}${cond.prop} && (${writeJsx(rest, depth, props)})}`;
+    return `{${condExpr(cond, props)} && (${writeJsx(rest, depth, props)})}`;
   }
-  const attrs = el.attrs
+  let attrs = el.attrs
     // A `.` in a name is fine in HTML but not in JSX, and of the `xmlns:` names React knows only `xmlnsXlink`.
     .filter(([n]) => !n.includes('.') && !(/^xmlns:/i.test(n) && n.toLowerCase() !== 'xmlns:xlink'))
+    // React picks options through the <select>'s defaultValue (written below), not `selected`.
+    .filter(([n]) => !(el.tag === 'option' && n.toLowerCase() === 'selected'))
     .map(([n, v]) => {
       // Without onChange, React makes `value`/`checked` read-only; the default* props keep fields editable.
-      const formField = (el.tag === 'input' || el.tag === 'textarea' || el.tag === 'select') && (n === 'value' || n === 'checked');
-      const name = formField ? (n === 'value' ? 'defaultValue' : 'defaultChecked') : jsxAttrName(n);
-      if (props && n === 'class' && el.variantClass) return ` ${name}={${templateLiteral(v, variantSuffix)}}`;
+      // Not a button's label (`type="submit" value="Sign up"`): React ignores defaultValue there.
+      const inputType = el.attrs.find(([k]) => k.toLowerCase() === 'type')?.[1].trim().toLowerCase() ?? '';
+      const buttonValue = el.tag === 'input' && n === 'value' && /^(submit|reset|button|image|hidden)$/.test(inputType);
+      const formField = (el.tag === 'input' || el.tag === 'textarea' || el.tag === 'select') && (n === 'value' || n === 'checked') && !buttonValue;
+      // A custom element gets `class` and `for` as written: React 18 would write `classname=` there.
+      const custom = el.tag.includes('-') && /^(class|for)$/i.test(n);
+      const name = formField ? (n === 'value' ? 'defaultValue' : 'defaultChecked') : custom ? n.toLowerCase() : jsxAttrName(n);
+      if (props && n === 'class' && el.variantClass) return ` ${name}={${templateLiteral(v, variantSuffix, props)}}`;
       const numeric = !el.svg && NUMERIC_ATTRS.has(n.toLowerCase());
+      // `hidden="until-found"` too: React takes `hidden` as a boolean only and renders a string as `hidden=""`.
+      const boolAttr = !el.svg && BOOLEAN_ATTRS.has(n.toLowerCase());
+      // React has no prop for `ismap`, nor React 18 for `inert`, and drops `true` for them, so they
+      // are written as strings: '' for ismap; "true" for inert, which React 19 would read '' as off.
+      const asString = boolAttr ? REACT_STRING_BOOLEANS[n.toLowerCase()] : undefined;
+      if (asString !== undefined) {
+        if (!(props && hasProps(v))) return ` ${name}="${asString}"`;
+        const expr = propExpr(v);
+        return ` ${name}={${props.has(expr) ? expr : `globalThis.String(${expr}) !== 'false'`} ? '${asString}' : undefined}`;
+      }
       if (props && hasProps(v)) {
         const expr = propExpr(v);
+        // `globalThis.Number`: a component or prop may itself be called Number.
+        // A boolean prop in any other attribute reads as the editor writes it: 'true', or nothing when off.
+        if (props.has(expr)) return ` ${name}={${boolAttr ? expr : numeric ? `globalThis.Number(${expr})` : `${expr} ? 'true' : ''`}}`;
+        // A text prop turns a boolean attribute on as HTML does (any value), unless it is "false".
+        if (boolAttr) return ` ${name}={globalThis.String(${expr}) !== 'false'}`;
         // An empty prop leaves the attribute off, as the string form does, rather than giving 0.
-        return numeric ? ` ${name}={${expr} === '' ? undefined : Number(${expr})}` : ` ${name}={${expr}}`;
+        // A prop with no default is undefined, which would give NaN.
+        return numeric ? ` ${name}={${expr} == null || ${expr} === '' ? undefined : globalThis.Number(${expr})}` : ` ${name}={${propExpr(v, props)}}`;
       }
       // HTML turns a boolean attribute on whatever its value, and React (and its types) take `true`.
-      if (!el.svg && BOOLEAN_ATTRS.has(n.toLowerCase()) && !(n.toLowerCase() === 'hidden' && v.toLowerCase() === 'until-found')) return ` ${name}`;
+      if (boolAttr) return ` ${name}`;
       // React's types take numbers for these.
       if (numeric && /^-?\d{1,15}$/.test(v.trim())) return ` ${name}={${Number(v.trim())}}`;
-      return /["\\{}<>\n]/.test(v) ? ` ${name}={${jsxString(v)}}` : ` ${name}="${v.replace(/&/g, '&amp;')}"`;
+      // `&` only where it could start a reference: Tailwind reads `[&&]:` classes from the source text.
+      // JSX attribute strings are literal (backslashes and braces included), so a JS string is only
+      // needed for a value holding both quote kinds or a line break; Tailwind reads classes as written.
+      const amp = v.replace(REF_AMP, '&amp;');
+      if (/[\n\r]/.test(v) || (v.includes('"') && v.includes("'"))) return ` ${name}={${jsxString(v)}}`;
+      return v.includes('"') ? ` ${name}='${amp}'` : ` ${name}="${amp}"`;
     })
     .join('');
+  const selectDefault = el.tag === 'select' ? selectedOptions(el, props) : '';
+  if (selectDefault && !/ (defaultValue|value)=/.test(attrs)) attrs += ` defaultValue={${selectDefault}}`;
+  // React takes one child at most in a <textarea> (props split the text into several), and
+  // wants its text as defaultValue anyway.
+  if (el.tag === 'textarea' && el.children.length) {
+    const value = el.children.map((c) => (c.kind === 'text' ? c.value : '')).join('');
+    const expr = props && hasProps(value) ? templateLiteral(value, '', props) : jsxString(value);
+    return / defaultValue=/.test(attrs) ? `<${el.tag}${attrs} />` : `<${el.tag}${attrs} defaultValue={${expr}} />`;
+  }
   if (!el.children.length) return `<${el.tag}${attrs} />`;
   if (oneLine(el.children)) return `<${el.tag}${attrs}>${el.children.map((c) => writeJsx(c, depth + 1, props)).join('')}</${el.tag}>`;
   const pad = '  '.repeat(depth + 1);
@@ -653,16 +994,21 @@ function writeJsx(el: El, depth: number, props = false): string {
  * when a linked kit follows an inline one, or a later inline kit has its own `@import`, each
  * inline kit gets its own file under `kits/` and `kits.css` imports them all in order.
  */
-function kitFiles(kits: DesignKit[]): ComponentFile[] {
+function kitFiles(kits: DesignKit[], layered = false): ComponentFile[] {
   const enabled = kits.filter((k) => k.enabled && k.source !== 'env' && (k.href || k.css.trim()));
-  if (!enabled.length) return [];
-  const link = (href: string) => `@import url("${href.replace(/["\\\n\r]/g, '')}");`;
+  // With Tailwind there is always a kits.css: it brings back the browser defaults Preflight resets.
+  if (!enabled.length && !layered) return [];
+  // With Tailwind, kits go in the `components` layer. Tailwind v4's utilities are in a layer, and
+  // unlayered kit CSS would beat every one of them, so a branch couldn't override its kit classes.
+  const link = (href: string) => `@import url("${href.replace(/["\\\n\r]/g, '')}")${layered ? ' layer(components)' : ''};`;
   const inlineCss = (k: DesignKit) => `/* ${commentText(k.name)} */\n${k.css.trim()}`;
   const firstInline = enabled.findIndex((k) => !k.href);
   const together =
     firstInline < 0 || enabled.slice(firstInline).every((k, i) => !k.href && (i === 0 || !/@import/i.test(k.css)));
-  const head = '/* Design kits from Tree Weaver, in load order. */\n';
-  if (together) return [{ path: 'kits.css', contents: `${head}${enabled.map((k) => (k.href ? link(k.href) : inlineCss(k))).join('\n\n')}\n` }];
+  const head = layered
+    ? '/* Design kits from Tree Weaver, in load order, below Tailwind\'s utilities (the same layer order Tailwind v4 declares).\n   base.css, first in the components layer (after Preflight), brings back the browser\'s own heading, list, margin\n   and form styles, which Preflight resets and the editor shows. */\n@layer theme, base, components, utilities;\n@import url("./base.css") layer(components);\n'
+    : '/* Design kits from Tree Weaver, in load order. */\n';
+  if (together && !layered) return [{ path: 'kits.css', contents: `${head}${enabled.map((k) => (k.href ? link(k.href) : inlineCss(k))).join('\n\n')}\n` }];
   const used = new Set<string>();
   const files: ComponentFile[] = [];
   const lines = enabled.map((k) => {
@@ -674,8 +1020,41 @@ function kitFiles(kits: DesignKit[]): ComponentFile[] {
     files.push({ path: `kits/${slug}.css`, contents: `${inlineCss(k)}\n` });
     return link(`./kits/${slug}.css`);
   });
+  if (layered) files.push({ path: 'base.css', contents: `${PREFLIGHT_UNDO}\n${BASE_CSS}\n` });
   return [{ path: 'kits.css', contents: `${head}${lines.join('\n')}\n` }, ...files];
 }
+
+/**
+ * The browser's own styles for what Tailwind's Preflight resets, so a Tailwind export looks as
+ * the editor shows it (headings, block margins, lists, images, buttons and fields). `revert`
+ * goes back to the browser's value; Tailwind's utilities and the kits, in later layers, still win.
+ */
+const PREFLIGHT_UNDO = `/* The browser defaults Tailwind's Preflight resets, as the editor shows them. */
+*, ::before, ::after { border-width: revert; border-style: revert; border-color: revert; }
+html, :host { line-height: revert; font-family: revert; tab-size: revert; -webkit-tap-highlight-color: revert; }
+h1, h2, h3, h4, h5, h6, p, blockquote, figure, dl, dd, ol, ul, menu, hr, pre, listing, xmp, fieldset, legend { margin: revert; padding: revert; }
+h1, h2, h3, h4, h5, h6 { font-size: revert; font-weight: revert; }
+ol, ul, menu { list-style: revert; }
+img, svg, video, canvas, audio, iframe, embed, object { display: revert; vertical-align: revert; }
+video { max-width: revert; height: revert; }
+hr { height: revert; color: revert; border-width: revert; border-style: revert; }
+option { padding: revert; }
+/* Browsers give table cells 1px of padding through the table's own cellpadding default. */
+td, th { padding: 1px; }
+fieldset { border: revert; }
+dialog { margin: revert; padding: revert; border: revert; }
+a { color: revert; text-decoration: revert; }
+abbr:where([title]) { text-decoration: revert; }
+b, strong { font-weight: revert; }
+code, kbd, samp, pre { font-family: revert; font-size: revert; font-feature-settings: revert; font-variation-settings: revert; }
+small, sub, sup { font-size: revert; line-height: revert; }
+sub, sup { vertical-align: revert; position: revert; top: revert; bottom: revert; }
+table { text-indent: revert; border-color: revert; border-collapse: revert; }
+button, input, select, optgroup, textarea, ::file-selector-button { font: revert; letter-spacing: revert; color: revert; background-color: revert; border: revert; border-radius: revert; opacity: revert; padding: revert; margin: revert; }
+button, input:where([type='button'], [type='reset'], [type='submit']), ::file-selector-button { appearance: revert; }
+::placeholder { opacity: revert; color: revert; }
+textarea { resize: revert; }
+summary { display: revert; }`;
 
 /** Export a tree as a component (or a plain HTML page) with its styles. */
 export function exportComponent(tree: Tree, opts: ComponentOptions): ComponentExport {
@@ -696,23 +1075,25 @@ export function exportComponent(tree: Tree, opts: ComponentOptions): ComponentEx
   }
   const tokens = themeTokens((opts.kits ?? []).filter((k) => k.enabled));
   // Generated classes are namespaced (`home__hero`) so they never meet a design kit's own classes.
-  const build: Build = { styling, classOf: classNamer(`${cssIdent(slugify(tree.name, 'layout'))}__`), rules: [], tokenKinds: new Map(tokens.map((t) => [t.name, t.kind])) };
+  const build: Build = { styling, classOf: classNamer(`${cssIdent(slugify(tree.name, 'layout'))}__`), rules: [], tokenKinds: new Map(tokens.map((t) => [t.name, t.kind])), keepClasses: whitespaceClasses(opts.kits) };
   const svgTree = isSvgRoot(tree.root);
 
   // A page root is a <body>; in a component it becomes a wrapper <div>.
   const rootTag = svgTree ? undefined : framework === 'html' ? 'body' : 'div';
   const root = branchEl(repairNesting(tree.root), build, false, rootTag);
+  markPre(root);
   if (root.kind === 'el' && !svgTree && framework !== 'html' && !root.attrs.some(([n]) => n === 'class')) {
-    // Name the wrapper so it can be styled from outside.
-    root.attrs.unshift(['class', cssIdent(slugify(tree.name, 'layout'))]);
+    // Name the wrapper so it can be styled from outside: namespaced like every generated class,
+    // since a bare `card` or `hidden` would pick up a kit class or a Tailwind utility.
+    root.attrs.unshift(['class', build.classOf({ kind: 'branch', id: '', tag: 'div', name: 'root', classes: [], attrs: {}, styles: {}, children: [] })]);
   }
 
   const css = styling === 'css' ? renderDisplayCss(build.rules) : '';
-  const kitFileList = kitFiles(opts.kits ?? []);
+  const kitFileList = kitFiles(opts.kits ?? [], styling === 'tailwind');
   const kitCss = kitFileList.length > 0;
   const files: ComponentFile[] = [];
   const header = (comment: (s: string) => string) => comment(`Generated by Tree Weaver from the tree "${commentText(tree.name)}".`);
-  const cssFile = `${name}.css`;
+  const cssFile = styleFileName(name);
   const tailwindNote = styling === 'tailwind' ? ' Needs Tailwind CSS v3.4+ or v4 (it uses arbitrary values and max-* variants).' : '';
   let entry: string;
 
@@ -731,7 +1112,7 @@ export function exportComponent(tree: Tree, opts: ComponentOptions): ComponentEx
     case 'vue': {
       entry = `${name}.vue`;
       const style = [kitCss ? `<style src="./kits.css"></style>` : '', css ? `<style>\n${css}\n</style>` : ''].filter(Boolean).join('\n');
-      files.push({ path: entry, contents: `<!-- ${header((s) => s)}${tailwindNote} -->\n<template>\n  ${writeHtml(root, 1, 'vue')}\n</template>\n${style ? `\n${style}\n` : ''}` });
+      files.push({ path: entry, contents: `<!-- ${header((s) => s)}${tailwindNote} -->${vueCustomElementNote(root)}\n<template>\n  ${writeHtml(root, 1, 'vue')}\n</template>\n${style ? `\n${style}\n` : ''}` });
       break;
     }
     case 'svelte': {
@@ -762,14 +1143,28 @@ export function exportComponent(tree: Tree, opts: ComponentOptions): ComponentEx
   }
   if (css && framework !== 'vue' && framework !== 'svelte') files.push({ path: cssFile, contents: `/* ${header((s) => s)} */\n${css}\n` });
   files.push(...kitFileList);
-  if (tokens.length) {
-    files.push({ path: 'tokens.json', contents: `${JSON.stringify(tokensToDtcg(tokens), null, 2)}\n` });
-    if (styling === 'tailwind') {
-      const theme = tailwindThemeCss(tokens);
-      if (theme) files.push({ path: 'tailwind.theme.css', contents: theme }, { path: 'tailwind.tokens.cjs', contents: tailwindPreset(tokens) });
-    }
-  }
+  files.push(...tokenFiles(tokens, styling));
   return { name, framework, styling, entry, files };
+}
+
+/** Files every export may write beside the component's own CSS. */
+const SHARED_CSS = new Set(['kits.css', 'base.css', 'tailwind.theme.css']);
+
+/**
+ * The component's stylesheet: `Name.css`, or `Name.styles.css` when that would match a shared file
+ * on a case-insensitive file system (macOS, Windows), where one would overwrite the other.
+ */
+function styleFileName(name: string): string {
+  return SHARED_CSS.has(`${name}.css`.toLowerCase()) ? `${name}.styles.css` : `${name}.css`;
+}
+
+/** `tokens.json`, and with Tailwind the theme files its token utilities (`bg-color-brand`) need. */
+function tokenFiles(tokens: ThemeToken[], styling: string): { path: string; contents: string }[] {
+  if (!tokens.length) return [];
+  const files = [{ path: 'tokens.json', contents: `${JSON.stringify(tokensToDtcg(tokens), null, 2)}\n` }];
+  const theme = styling === 'tailwind' ? tailwindThemeCss(tokens) : '';
+  if (theme) files.push({ path: 'tailwind.theme.css', contents: theme }, { path: 'tailwind.tokens.cjs', contents: tailwindPreset(tokens) });
+  return files;
 }
 
 /* ------------------------------------------------- reusable components */
@@ -851,16 +1246,19 @@ function variantRules(def: ComponentDef, variants: ComponentVariant[], slugs: Ma
           // The base display only needs what differs from the template's own rules.
           const plain = full(d.id, undefined);
           const own = Object.fromEntries(Object.entries(full(d.id, shown)).filter(([k, v]) => plain[k] !== v));
-          if (shown && Object.keys(own).length) rules.push({ selector: target(`.${mod(d.id, shown)}`), styles: { [d.id]: own } });
+          if (shown && Object.keys(own).length) rules.push({ selector: target(`.${mod(d.id, shown)}`), styles: { [d.id]: beatImportant(own, plain) } });
           continue;
         }
         for (const inherited of options) {
           const from = full(parent, inherited);
           const to = full(d.id, shown);
           const own: StyleMap = {};
-          for (const [k, v] of Object.entries(to)) if (from[k] !== v) own[k] = v;
+          // Also where the template's own rule for this display sets it otherwise: that rule applies too,
+          // so a variant putting back the wider display's value has to say so.
+          const template = base.get(id)?.[d.id] ?? {};
+          for (const [k, v] of Object.entries(to)) if (from[k] !== v || (template[k] !== undefined && template[k] !== v)) own[k] = v;
           for (const k of Object.keys(from)) if (!(k in to)) own[k] = 'unset';
-          if (Object.keys(own).length) rules.push({ selector: target(`.${mod(parent, inherited)}.${mod(d.id, shown)}`), styles: { [d.id]: own } });
+          if (Object.keys(own).length) rules.push({ selector: target(`.${mod(parent, inherited)}.${mod(d.id, shown)}`), styles: { [d.id]: beatImportant(own, full(d.id, undefined)) } });
         }
       }
     }
@@ -871,7 +1269,7 @@ function variantRules(def: ComponentDef, variants: ComponentVariant[], slugs: Ma
 
 /** Words a prop can't be named in a JS, Vue or Svelte component (a variable of that name is a syntax error). */
 const RESERVED_WORDS = new Set(
-  'key ref variantClasses VARIANT_DISPLAYS arguments await break case catch class const continue debugger default delete do else enum eval export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield'.split(' '),
+  'key ref variantClasses VARIANT_DISPLAYS globalThis String Number arguments await break case catch class const continue debugger default delete do else enum eval export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield'.split(' '),
 );
 
 /** A prop's default as a JS literal. */
@@ -899,7 +1297,8 @@ export function exportComponentDef(def: ComponentDef, opts: ComponentOptions): C
   const name = pascalName(opts.name ?? def.name);
   if (framework === 'html' || framework === 'swiftui' || framework === 'flutter') {
     // No props in these targets: export the component as it looks by default.
-    const tree = createTree(def.name, { kind: 'branch', id: 'b_body', tag: 'body', type: 'root', classes: [], attrs: {}, styles: {}, children: [expandComponent(def, { component: def.id }, 'b_c')] });
+    // A template that only draws inside an SVG (a <g> of shapes) gets an <svg> around it, as in the editor.
+    const tree = createTree(def.name, { kind: 'branch', id: 'b_body', tag: drawsInSvg(def.root) ? 'svg' : 'body', type: 'root', classes: [], attrs: {}, styles: {}, children: [expandComponent(def, { component: def.id }, 'b_c')] });
     return exportComponent(tree, { ...opts, name });
   }
   const props = componentProps(def);
@@ -917,8 +1316,10 @@ export function exportComponentDef(def: ComponentDef, opts: ComponentOptions): C
     defaults: Object.fromEntries(props.map((p) => [p.name, p.default ?? ''])),
     forceClass: new Set([def.root.id, ...variants.flatMap((v) => Object.keys(v.styles))]),
     classes: new Map(),
+    keepClasses: whitespaceClasses(opts.kits),
   };
   const root = branchEl(repairNesting(def.root), build, false);
+  markPre(root);
   // The editor ignores `data-show-if` on a component's root (see expandComponent), and so does the export.
   if (root.kind === 'el') delete root.cond;
   const rootCls = build.classes!.get(def.root.id)!;
@@ -928,14 +1329,15 @@ export function exportComponentDef(def: ComponentDef, opts: ComponentOptions): C
   const options = variants.map((v) => slugs.get(v)!);
   // With variants, `variant` is the generated variant prop; a prop of the same name would be declared twice.
   const allProps = variants.length ? [...props.filter((p) => p.name !== 'variant'), { name: 'variant', type: 'enum' as const, default: '', options }] : props;
+  const booleanProps: ReadonlySet<string> = new Set(allProps.filter((p) => p.type === 'boolean').map((p) => p.name));
   const helper = variants.length ? variantHelper(rootCls, opts.typescript && framework === 'react' ? name : undefined) : '';
 
   const css = styling === 'css' ? renderDisplayCss(build.rules) : '';
-  const kitFileList = kitFiles(opts.kits ?? []);
+  const kitFileList = kitFiles(opts.kits ?? [], styling === 'tailwind');
   const kitCss = kitFileList.length > 0;
   const files: ComponentFile[] = [];
   const header = commentText(`Generated by Tree Weaver from the component "${def.name}".${variants.length ? ` Variants: ${options.join(', ')}.` : ''}`);
-  const cssFile = `${name}.css`;
+  const cssFile = styleFileName(name);
   const docs = allProps.map((p) => `${p.name}${p.name === 'variant' && !p.description ? `: ${VARIANT_DOC}` : p.description ? `: ${p.description}` : ''}`);
   let entry: string;
   switch (framework) {
@@ -949,7 +1351,7 @@ export function exportComponentDef(def: ComponentDef, opts: ComponentOptions): C
           : p.type === 'boolean'
             ? 'boolean'
             : p.type === 'enum' && p.options?.length
-              ? p.options.map((o) => JSON.stringify(o)).join(' | ') + " | ''"
+              ? [...new Set([...p.options, p.default ?? ''])].map((o) => JSON.stringify(o)).join(' | ') + " | ''"
               : 'string';
       const types =
         opts.typescript && variants.length
@@ -959,7 +1361,7 @@ export function exportComponentDef(def: ComponentDef, opts: ComponentOptions): C
       const params = allProps.length ? `{ ${allProps.map((p) => `${p.name} = ${jsDefault(p)}`).join(', ')} }${opts.typescript ? `: ${name}Props` : ''}` : '';
       files.push({
         path: entry,
-        contents: `// ${header}\n${imports ? `${imports}\n` : ''}${iface}${helper ? `\n${helper}\n` : ''}\nexport default function ${name}(${params}) {\n  return (\n    ${writeJsx(root, 2, true)}\n  );\n}\n`,
+        contents: `// ${header}\n${imports ? `${imports}\n` : ''}${iface}${helper ? `\n${helper}\n` : ''}\nexport default function ${name}(${params}) {\n  return (\n    ${writeJsx(root, 2, booleanProps)}\n  );\n}\n`,
       });
       break;
     }
@@ -970,7 +1372,7 @@ export function exportComponentDef(def: ComponentDef, opts: ComponentOptions): C
         ? `<script setup>\ndefineProps({\n${allProps.map((p) => `  ${p.name}: { type: ${vueType(p)}, default: ${jsDefault(p)} },`).join('\n')}\n});\n${helper ? `\n${helper}\n` : ''}</script>\n\n`
         : '';
       const style = [kitCss ? `<style src="./kits.css"></style>` : '', css ? `<style>\n${css}\n</style>` : ''].filter(Boolean).join('\n');
-      files.push({ path: entry, contents: `<!-- ${header} -->\n${script}<template>\n  ${writeHtml(root, 1, 'vue', true)}\n</template>\n${style ? `\n${style}\n` : ''}` });
+      files.push({ path: entry, contents: `<!-- ${header} -->${vueCustomElementNote(root)}\n${script}<template>\n  ${writeHtml(root, 1, 'vue', booleanProps)}\n</template>\n${style ? `\n${style}\n` : ''}` });
       break;
     }
     case 'svelte': {
@@ -978,7 +1380,7 @@ export function exportComponentDef(def: ComponentDef, opts: ComponentOptions): C
       const lines = [kitCss ? `  import './kits.css';` : '', ...allProps.map((p) => `  export let ${p.name} = ${jsDefault(p)};`), helper ? `\n${helper.replace(/^(?=.)/gm, '  ')}` : ''].filter(Boolean);
       const script = lines.length ? `<script>\n${lines.join('\n')}\n</script>\n\n` : '';
       const style = css ? `\n<style>\n  /* Global: the classes are generated, so scoping only gets in the way of overrides. */\n${css.replace(/^(\s*)(\.[^{}\n]*?)\s*\{/gm, '$1:global($2) {')}\n</style>\n` : '';
-      files.push({ path: entry, contents: `<!-- ${header} -->\n${script}${writeHtml(root, 0, 'svelte', true)}\n${style}` });
+      files.push({ path: entry, contents: `<!-- ${header} -->\n${script}${writeHtml(root, 0, 'svelte', booleanProps)}\n${style}` });
       break;
     }
     default:
@@ -987,6 +1389,6 @@ export function exportComponentDef(def: ComponentDef, opts: ComponentOptions): C
   if (docs.length) files[0].contents = files[0].contents.replace(header, () => commentText(`${header} Props: ${docs.join('; ')}.`));
   if (css && framework === 'react') files.push({ path: cssFile, contents: `/* ${header} */\n${css}\n` });
   files.push(...kitFileList);
-  if (tokens.length) files.push({ path: 'tokens.json', contents: `${JSON.stringify(tokensToDtcg(tokens), null, 2)}\n` });
+  files.push(...tokenFiles(tokens, styling));
   return { name, framework, styling, entry, files };
 }

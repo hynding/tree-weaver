@@ -11,6 +11,8 @@ import { isBranch } from './model';
 /** Tags that can never hold children. */
 export const VOID_TAGS = new Set([
   'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'source', 'track', 'wbr',
+  // Obsolete, but the HTML parser still closes them at once.
+  'param', 'keygen', 'basefont', 'bgsound',
 ]);
 
 export function canHaveChildren(node: TreeNode | null | undefined): node is Branch {

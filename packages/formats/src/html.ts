@@ -1,4 +1,6 @@
 import {
+  keepsWhitespace,
+  whitespaceClasses,
   BRANCH_ATTR,
   canonicalSvgAttr,
   canonicalTag,
@@ -7,12 +9,12 @@ import {
   TOKENS_KIT_SOURCE,
   createId,
   displayForMedia,
-  INLINE_TAGS,
   isShapeTag,
   isStylesheetUrl,
   LEAF_ATTR,
   parseCss,
   parseDeclarations,
+  stripCssComments,
   renderDocument,
   type CssNode,
   type DesignKit,
@@ -23,6 +25,7 @@ import {
 import type { ChildNode, Element } from 'domhandler';
 import { parseDocument } from 'htmlparser2';
 import { fromData } from './data';
+import { isInlineTag } from './inline';
 import type { TreeDocument } from './types';
 
 export interface HtmlExportOptions {
@@ -105,6 +108,12 @@ export function readTreeCss(css: string, into: Map<string, DisplayStyles>): void
 export interface Ctx {
   /** Responsive styles per branch id, read from exported CSS or Markdown front matter. */
   styles: Map<string, DisplayStyles>;
+  /** Parsed as XML (a standalone .svg), which keeps whitespace the HTML parser drops. */
+  xml?: boolean;
+  /** Classes the document's styles make keep their whitespace (see `whitespaceClasses`). */
+  keepClasses?: ReadonlySet<string>;
+  /** Markdown: the root keeps its whitespace, so everything in the body does, though Markdown's own line breaks between blocks don't count. */
+  keepRoot?: boolean;
 }
 
 export type RawNode = Record<string, unknown>;
@@ -131,7 +140,25 @@ function parseDirectiveJson(text: string): RawNode {
   }
 }
 
-const inlineish = (n: ChildNode | undefined): boolean => !!n && (n.type === 'text' || (isElement(n) && INLINE_TAGS.has(n.name)));
+/** Whether a node sits in a line: text, or an element whose display (its imported styles, its inline style, or its tag's default) is inline. */
+const inlineish = (n: ChildNode | undefined, ctx: Ctx): boolean => {
+  if (!n) return false;
+  if (n.type === 'text') return true;
+  if (!isElement(n)) return false;
+  const id = n.attribs[BRANCH_ATTR];
+  const inlineDisplay = n.attribs.style ? parseDeclarations(stripCssComments(n.attribs.style)).display : undefined;
+  const display = inlineDisplay ?? (id ? ctx.styles.get(id)?.lg?.display : undefined);
+  if (typeof display === 'string' && display.trim()) return /^inline\b|^inline-/.test(display.trim().toLowerCase());
+  return isInlineTag(n.name);
+};
+
+/** A browser drops one line break straight after `<pre>`, `<textarea>` or `<listing>`; so does the import. */
+function dropLeadingNewline(tag: string, children: RawNode[]): RawNode[] {
+  const first = children[0];
+  if (!['pre', 'textarea', 'listing'].includes(tag) || first?.kind !== 'leaf' || typeof first.value !== 'string' || !/^\r?\n/.test(first.value)) return children;
+  const value = first.value.replace(/^\r?\n/, '');
+  return value ? [{ ...first, value }, ...children.slice(1)] : children.slice(1);
+}
 
 function applyMeta(node: RawNode, meta: RawNode, ctx: Ctx): void {
   if (node.kind !== 'branch') return;
@@ -145,9 +172,16 @@ function applyMeta(node: RawNode, meta: RawNode, ctx: Ctx): void {
   }
 }
 
-function convertChildren(nodes: ChildNode[], ctx: Ctx, raw: boolean, svg = false): RawNode[] {
+/**
+ * `rawBelow`: the elements here keep their whitespace though this level's own text doesn't (a
+ * Markdown body whose root keeps it: Markdown's line breaks between blocks don't count).
+ */
+function convertChildren(nodes: ChildNode[], ctx: Ctx, raw: boolean, svg = false, inline = false, rawBelow = false): RawNode[] {
   // An SVG <title> is the drawing's accessible name, so it stays.
-  const kept = nodes.filter((n) => n.type === 'text' || n.type === 'comment' || (isElement(n) && (!SKIP_TAGS.has(n.name) || (svg && n.name === 'title'))));
+  // Plain comments are dropped here, so the text either side of one still sees its neighbours.
+  const kept = nodes.filter(
+    (n) => n.type === 'text' || (n.type === 'comment' && DIRECTIVE.test(n.data)) || (isElement(n) && (!SKIP_TAGS.has(n.name) || (svg && n.name === 'title'))),
+  );
   // Stack of open `tw:branch` directives; the bottom entry collects this level's output.
   const stack: { branch: RawNode | null; items: RawNode[] }[] = [{ branch: null, items: [] }];
   const close = () => {
@@ -178,23 +212,31 @@ function convertChildren(nodes: ChildNode[], ctx: Ctx, raw: boolean, svg = false
     if (node.type === 'text') {
       let value = node.data;
       if (!raw) {
-        value = value.replace(/\s+/g, ' ');
-        if (i === 0) value = value.trimStart();
-        if (i === kept.length - 1) value = value.trimEnd();
+        // HTML whitespace only: a non-breaking space (and other Unicode spaces) is content.
+        value = value.replace(/[ \t\n\f\r]+/g, ' ');
+        // A space at the edge of an inline element (`<strong>Note: </strong>`) shows, so only a
+        // block's edges are trimmed.
+        if (i === 0 && !inline) value = value.replace(/^ /, '');
+        if (i === kept.length - 1 && !inline) value = value.replace(/ $/, '');
         // Whitespace only matters between two pieces of inline content.
-        if (value.trim() === '') value = !svg && inlineish(kept[i - 1]) && inlineish(kept[i + 1]) ? ' ' : '';
+        // At an inline element's edge the other side is the text around the element.
+        const side = (n: ChildNode | undefined) => (n ? inlineish(n, ctx) : inline);
+        // In SVG only text content (`<text>`, `<tspan>`: passed as inline) shows a space between its parts.
+        if (!/[^ ]/.test(value)) value = (!svg || inline) && side(kept[i - 1]) && side(kept[i + 1]) ? ' ' : '';
       }
       if (value) items.push({ kind: 'leaf', type: 'text', value });
       return;
     }
     const el = node as Element;
+    // Inside a `tw:branch` that keeps whitespace, its elements do too.
+    const keepBelow = rawBelow || stack.some((e) => e.branch && keepsWhitespace({ tag: String(e.branch.tag), styles: e.branch.styles as DisplayStyles, classes: e.branch.classes as string[] }, ctx.keepClasses));
     if (unwrapNext && el.name === 'p') {
       unwrapNext = false;
-      items.push(...convertChildren(el.children, ctx, raw, svg));
+      items.push(...convertChildren(el.children, ctx, raw || keepBelow, svg));
       return;
     }
     unwrapNext = false;
-    const converted = convertElement(el, ctx, raw, svg);
+    const converted = convertElement(el, ctx, raw || keepBelow, svg);
     if (meta) applyMeta(converted, meta, ctx);
     meta = null;
     items.push(converted);
@@ -227,17 +269,35 @@ function svgAttrs(a: Record<string, string>): Record<string, string> {
  * A shape or image inside an SVG becomes a leaf. Leaves have no styles, so a shape's
  * inline `style` declarations become presentation attributes (`fill`, `stroke`, ...).
  */
+/** SVG presentation attributes: a shape's inline style for these can be written as the attribute. */
+const PRESENTATION = new Set(
+  'alignment-baseline baseline-shift clip-path clip-rule color color-interpolation color-interpolation-filters color-rendering cursor direction display dominant-baseline fill fill-opacity fill-rule filter flood-color flood-opacity font-family font-size font-size-adjust font-stretch font-style font-variant font-weight image-rendering letter-spacing lighting-color marker-end marker-mid marker-start mask opacity overflow paint-order pointer-events shape-rendering stop-color stop-opacity stroke stroke-dasharray stroke-dashoffset stroke-linecap stroke-linejoin stroke-miterlimit stroke-opacity stroke-width text-anchor text-decoration text-rendering transform unicode-bidi vector-effect visibility word-spacing writing-mode'.split(' '),
+);
+/** Whether a declaration reads the same as an attribute (a `transform` with CSS units doesn't). */
+const asAttribute = (prop: string, value: string): boolean =>
+  PRESENTATION.has(prop) && !/!\s*important/i.test(value) && !/\bvar\(/i.test(value) && (prop !== 'transform' || !/\d(deg|rad|grad|turn|px|em|rem|%)|\b(translate|scale|rotate|skew)[XYZ3]|\b(matrix3d|perspective)\(/i.test(value));
+
 function svgLeaf(tag: string, a: Record<string, string>): RawNode | null {
   if (!isShapeTag(tag) && tag !== 'image') return null;
   const attrs: Record<string, string> = {};
   for (const [k, v] of Object.entries(a)) if (!isHandlerOrStyle(k) && k !== LEAF_ATTR && !k.startsWith(`${BRANCH_ATTR}`)) attrs[k] = v;
-  if (a.style) for (const [prop, value] of Object.entries(parseDeclarations(a.style))) attrs[prop] ??= value;
+  // Inline style beats presentation attributes, as in the browser. What an attribute can't say
+  // (CSS-only properties, a transform in CSS units) goes on a <g> around the shape.
+  const outer: Record<string, string> = {};
+  if (a.style) for (const [prop, value] of Object.entries(parseDeclarations(stripCssComments(a.style)))) {
+    if (asAttribute(prop, value)) attrs[prop] = value;
+    else outer[prop] = value;
+  }
+  // A CSS transform replaces the attribute's, rather than adding to it.
+  if (outer.transform !== undefined) delete attrs.transform;
   const id = a[LEAF_ATTR] ?? a[BRANCH_ATTR];
+  let leaf: RawNode;
   if (tag === 'image') {
     const { href = '', ...rest } = attrs;
-    return { kind: 'leaf', id, type: 'image', value: href, attrs: rest };
-  }
-  return { kind: 'leaf', id, type: 'shape', value: tag, attrs };
+    leaf = { kind: 'leaf', id, type: 'image', value: href, attrs: rest };
+  } else leaf = { kind: 'leaf', id, type: 'shape', value: tag, attrs };
+  if (!Object.keys(outer).length) return leaf;
+  return { kind: 'branch', id: createId('b'), tag: 'g', classes: '', attrs: {}, styles: { lg: outer }, children: [leaf] };
 }
 
 export function convertParts(tag: string, attribs: Record<string, string>, children: ChildNode[], ctx: Ctx, raw: boolean, svg = false): RawNode {
@@ -249,7 +309,8 @@ export function convertParts(tag: string, attribs: Record<string, string>, child
     const leaf = svgLeaf(tag, a);
     if (leaf) return leaf;
   }
-  if (tag === 'img' && a[BRANCH_ATTR] === undefined) {
+  // An <img> with inline styles becomes an img branch, which keeps them (an image leaf has no styles).
+  if (tag === 'img' && a[BRANCH_ATTR] === undefined && !Object.keys(a.style ? parseDeclarations(stripCssComments(a.style)) : {}).length) {
     const attrs: Record<string, string> = {};
     for (const [k, v] of Object.entries(a)) if (k !== 'src' && k !== LEAF_ATTR && k !== 'style' && !k.startsWith('on')) attrs[k] = v;
     return { kind: 'leaf', id: a[LEAF_ATTR], type: 'image', value: a.src ?? '', attrs };
@@ -261,7 +322,7 @@ export function convertParts(tag: string, attribs: Record<string, string>, child
 
   const id = a[BRANCH_ATTR] || createId('b');
   const styles: DisplayStyles = { ...ctx.styles.get(id) };
-  if (a.style) styles.lg = { ...styles.lg, ...parseDeclarations(a.style) };
+  if (a.style) styles.lg = { ...styles.lg, ...parseDeclarations(stripCssComments(a.style)) };
   const attrs: Record<string, string> = {};
   for (const [k, v] of Object.entries(a)) {
     const n = k.toLowerCase();
@@ -277,7 +338,8 @@ export function convertParts(tag: string, attribs: Record<string, string>, child
     classes: a.class ?? '',
     attrs,
     styles,
-    children: impliedTbody(tag, convertChildren(children, ctx, raw || RAW_TEXT_TAGS.has(tag), childrenInSvg({ tag }, svg))),
+    // An XML parse (a standalone .svg) keeps the newline after `<pre>`; only the HTML parser drops it.
+    children: (ctx.xml ? (_: string, c: RawNode[]) => c : dropLeadingNewline)(tag, impliedTbody(tag, convertChildren(children, ctx, raw || RAW_TEXT_TAGS.has(tag) || keepsWhitespace({ tag, styles, classes: a.class ?? '' }, ctx.keepClasses) || (inSvg && a['xml:space'] === 'preserve'), childrenInSvg({ tag }, svg), childrenInSvg({ tag }, svg) ? /^(text|tspan|textPath)$/.test(tag) : !svg && isInlineTag(tag), tag === 'body' && !!ctx.keepRoot))),
   };
 }
 
@@ -319,16 +381,42 @@ const fileName = (href: string): string => href.split(/[?#]/)[0].split('/').pop(
  * and `<style>` / `<link rel="stylesheet">` become design kits. Documents exported
  * by Tree Weaver round-trip with their ids, names and responsive styles.
  */
+/** A `media` attribute as a condition, or '' when it always applies. Braces are dropped so it can't end a block. */
+export const mediaOf = (media: string | undefined): string => {
+  const m = (media ?? '').replace(/[{};]/g, '').trim();
+  return !m || /^(all|screen)$/i.test(m) ? '' : m;
+};
+
+/** A <style>'s CSS under its `media` attribute. */
+export const withMedia = (css: string, media: string | undefined): string => {
+  const m = mediaOf(media);
+  return m ? `@media ${m} {\n${css}\n}` : css;
+};
+
+/** Whether an element sits in a <noscript> or <template>, whose content doesn't apply. */
+function insideInert(el: Element): boolean {
+  for (let p = el.parent; p; p = p.parent) if (isElement(p as ChildNode) && /^(noscript|template)$/.test((p as Element).name)) return true;
+  return false;
+}
+
 export function importHtml(text: string): TreeDocument {
   const dom = parseDocument(text, { lowerCaseTags: true, lowerCaseAttributeNames: true, decodeEntities: true });
   const styles = new Map<string, DisplayStyles>();
   const kits: (DesignKit | Record<string, unknown>)[] = [];
-  const looseCss: string[] = [];
+  let looseCss: string[] = [];
   let title = '';
+  // Loose <style> blocks become one kit per run, in document order: a <link> between them, or an
+  // @import (which must come first in its sheet), starts a new one.
+  const flushCss = () => {
+    if (looseCss.length) kits.push({ id: createId('k'), name: 'Imported styles', css: looseCss.join('\n\n'), enabled: true, source: 'html' });
+    looseCss = [];
+  };
   let treeId = '';
   let body: Element | undefined;
 
   for (const el of allElements(dom.children)) {
+    // Styles in <noscript> or <template> don't apply, nor do alternate stylesheets.
+    if ((el.name === 'style' || el.name === 'link') && insideInert(el)) continue;
     if (el.name === 'title' && !title) title = textContent(el).trim();
     else if (el.name === 'meta' && el.attribs.name === 'tw-tree') treeId = el.attribs.content ?? '';
     else if (el.name === 'body' && !body) body = el;
@@ -342,21 +430,29 @@ export function importHtml(text: string): TreeDocument {
         if (el.attribs['data-tw-kit-editable'] !== undefined) Object.assign(kit, { editable: true, source: CUSTOM_KIT_SOURCE });
         if (el.attribs['data-tw-kit-tokens'] !== undefined) kit.source = TOKENS_KIT_SOURCE;
         kits.push(kit);
-      } else if (css.trim()) looseCss.push(css.trim());
-    } else if (el.name === 'link' && /\bstylesheet\b/i.test(el.attribs.rel ?? '') && el.attribs.href) {
+      } else if (css.trim()) {
+        if (/@import\b/i.test(css) && looseCss.length) flushCss();
+        looseCss.push(withMedia(css.trim(), el.attribs.media));
+      }
+    } else if (el.name === 'link' && /\bstylesheet\b/i.test(el.attribs.rel ?? '') && !/\balternate\b/i.test(el.attribs.rel ?? '') && el.attribs.href) {
+      flushCss();
       const href = el.attribs.href.trim();
       // A deployment's own stylesheet (`data-tw-env`) becomes an ordinary kit with a fresh id.
       const id = el.attribs['data-tw-env'] === undefined ? el.attribs['data-tw-kit'] : '';
       const kit: DesignKit = { id: id || createId('k'), name: el.attribs['data-tw-kit-name'] || fileName(href), css: '', enabled: true, source: href };
       // Absolute stylesheets stay linked; relative ones can't load from here, so keep them as an @import.
-      if (isStylesheetUrl(href)) kit.href = href;
-      else kit.css = `@import url("${href.replace(/"/g, '%22')}");`;
+      // A media condition (print) only an @import can carry.
+      const media = mediaOf(el.attribs.media);
+      if (isStylesheetUrl(href) && !media) kit.href = href;
+      else kit.css = `@import url("${href.replace(/"/g, '%22')}")${media ? ` ${media}` : ''};`;
       kits.push(kit);
     }
   }
-  if (looseCss.length) kits.push({ id: createId('k'), name: title ? `${title} styles` : 'Imported styles', css: looseCss.join('\n\n'), enabled: true, source: 'html' });
+  flushCss();
+  // Named after the page once the title is known.
+  for (const k of kits) if (title && (k as { source?: string; name?: string }).source === 'html' && (k as { name?: string }).name === 'Imported styles') (k as { name: string }).name = `${title} styles`;
 
-  const ctx: Ctx = { styles };
+  const ctx: Ctx = { styles, keepClasses: whitespaceClasses(kits as { css?: string }[]) };
   // An exported SVG tree: the body holds just the drawing, which is the tree's root.
   const drawing = body && body.attribs[BRANCH_ATTR] === undefined ? soleSvgRoot(body) : undefined;
   if (drawing) {

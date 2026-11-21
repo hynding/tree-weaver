@@ -98,3 +98,11 @@ describe('kitManifest', () => {
     expect(m.kits[3].href).toBe('https://cdn.example.com/kit.css');
   });
 });
+
+describe('pass 22 fixes', () => {
+  it('keeps commas inside a stylesheet URL and reads non-ASCII class names', () => {
+    const fonts = 'https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;1,700&display=swap';
+    expect(parseCssUrls(`${fonts}, https://cdn.example.com/a.css,https://cdn.example.com/b.css`)).toEqual([fonts, 'https://cdn.example.com/a.css', 'https://cdn.example.com/b.css']);
+    expect(analyzeKit('.café { color: red }').classes).toContain('café');
+  });
+});

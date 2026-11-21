@@ -168,6 +168,17 @@ export class Tools {
     return output ?? (this.ws.readOnly ? undefined : path);
   }
 
+  /**
+   * The format an edited document is written in: the output file's extension when it goes to a
+   * different file (`site.yaml` → `site.html`), else the format it was read in.
+   */
+  private async outputFormat(doc: TreeDocument, output: string | undefined, loaded: Loaded): Promise<FormatId> {
+    const other = output && !(loaded.path && (await this.samePath(output, loaded.path)));
+    const format = (other ? formatFromFileName(output) : null) ?? loaded.format;
+    if (doc.kind === 'forest' && !getFormat(format).forest) throw new ToolError(`${getFormat(format).label} holds one tree; write a forest as json, yaml or xml.\nNothing was written.`);
+    return format;
+  }
+
   /** Whether two paths name the same workspace file (`t.json` and `./t.json`). */
   private async samePath(a: string, b: string): Promise<boolean> {
     return (await this.ws.resolve(a)) === (await this.ws.resolve(b));
@@ -296,8 +307,8 @@ export class Tools {
     const data = { changes: result.changes, warnings: result.warnings, tree: { id: tree.id, name: tree.name } };
     if (args.dryRun) return { text: `${summary}\n\nNothing was written.\n\n${outlineText(updated)}`, data: { ...data, dryRun: true } };
 
-    const serialized = this.serialize(next, loaded.format);
     const output = this.outputFor(args.output, loaded.path);
+    const serialized = this.serialize(next, await this.outputFormat(next, output, loaded));
     if (output) {
       // Editing the file in place: keep what it was, so the change can be reviewed (diff_versions) and rolled back (restore_version).
       let versionNote = '';
@@ -549,9 +560,9 @@ export class Tools {
       throw new ToolError(`${(err as Error).message}\nNothing was changed.`);
     }
     const next: TreeDocument = loaded.doc.kind === 'forest' ? { kind: 'forest', forest: { ...loaded.doc.forest, kits, updatedAt: new Date().toISOString() } } : { ...loaded.doc, kits };
-    const serialized = this.serialize(next, loaded.format);
-    const tokens = themeTokens(kits);
     const output = this.outputFor(args.output, loaded.path);
+    const serialized = this.serialize(next, await this.outputFormat(next, output, loaded));
+    const tokens = themeTokens(kits);
     const list = tokens.map((t) => `  ${t.name}: ${t.value}  [${t.kind}${t.edited ? ', edited' : ''}]`).join('\n');
     if (!output) return { text: `${serialized}`, data: { tokens, document: serialized } };
     let versionNote = '';
@@ -633,8 +644,9 @@ export class Tools {
 
   /** Write a changed forest back (in place unless `output`), saving a version first. */
   private async writeForest(loaded: Loaded, forest: Forest, args: { output?: string; keepVersion?: boolean }, versionName: string, summary: string, extra: Record<string, unknown>): Promise<ToolOutput> {
-    const serialized = this.serialize({ kind: 'forest', forest }, loaded.format);
     const output = this.outputFor(args.output, loaded.path);
+    const doc: TreeDocument = { kind: 'forest', forest };
+    const serialized = this.serialize(doc, await this.outputFormat(doc, output, loaded));
     if (!output) return { text: `${summary}\n\n${serialized}`, data: { ...extra, document: serialized } };
     let versionNote = '';
     if (loaded.path && (await this.samePath(output, loaded.path)) && args.keepVersion !== false && serialized !== loaded.text) {

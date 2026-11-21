@@ -317,3 +317,32 @@ export function inheritedStyles(styles: DisplayStyles, display: DisplayId): Styl
 export function resolveStyles(styles: DisplayStyles, display: DisplayId): StyleMap {
   return { ...inheritedStyles(styles, display), ...styles[display] };
 }
+
+/**
+ * Display sizes that keep a display's own styles from showing in its preview: a preview wider
+ * than its `max-width` breakpoint (or narrower than a `min-width` one), the base preview inside
+ * another display's range, or phone and tablet breakpoints out of order. Empty when all is well.
+ */
+export function displayProblems(displays: readonly DisplayDef[] = DISPLAYS): string[] {
+  const out: string[] = [];
+  const byId = new Map(displays.map((d) => [d.id, d]));
+  for (const d of displays) {
+    if (d.breakpoint === null || !d.media) continue;
+    const min = /min-width/.test(d.media);
+    if (min ? d.width < d.breakpoint : d.width > d.breakpoint) {
+      out.push(`${d.label}: the preview (${d.width}px) is ${min ? 'narrower' : 'wider'} than its breakpoint (${d.breakpoint}px), so its styles won't show in it`);
+    }
+  }
+  const base = byId.get(BASE_DISPLAY);
+  if (base) {
+    const inOther = displays.find((d) => d.id !== BASE_DISPLAY && d.breakpoint !== null && d.media && (/min-width/.test(d.media) ? base.width >= d.breakpoint : base.width <= d.breakpoint) && !/orientation/.test(d.media));
+    if (inOther) out.push(`${base.label}: the preview (${base.width}px) falls in ${inOther.label}'s range, so it shows ${inOther.label} styles`);
+  }
+  const narrowing = displays.filter((d) => d.breakpoint !== null && d.media && /max-width/.test(d.media));
+  for (let i = 1; i < narrowing.length; i++) {
+    const [wider, narrower] = [narrowing[i - 1], narrowing[i]];
+    if (narrower.breakpoint! > wider.breakpoint!) out.push(`${narrower.label}'s breakpoint (${narrower.breakpoint}px) is above ${wider.label}'s (${wider.breakpoint}px), so ${wider.label} styles win there`);
+  }
+  return out;
+}
+

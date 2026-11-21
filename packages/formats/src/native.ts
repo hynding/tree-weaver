@@ -3,6 +3,7 @@ import {
   isBranch,
   isSafeAttr,
   isSvgRoot,
+  keepsWhitespace,
   parseAutoColumns,
   parseColor,
   parseRulesCss,
@@ -178,9 +179,10 @@ type NView =
   | { kind: 'text'; text: string; role: TextRole; look: Tiered<Look>; link?: string; button?: boolean }
   | { kind: 'image'; src: string; alt: string; look: Tiered<Look> }
   | { kind: 'divider' }
-  | { kind: 'field'; placeholder: string; multiline: boolean; look: Tiered<Look> }
+  | { kind: 'field'; placeholder: string; multiline: boolean; look: Tiered<Look>; /** `type="password"`: typed text is hidden. */ secure?: boolean }
+  | { kind: 'toggle'; label: string; on: boolean; look: Tiered<Look> }
   | { kind: 'box'; layout: Tiered<Layout>; children: NView[]; look: Tiered<Look>; note?: string }
-  | { kind: 'list'; ordered: boolean; items: NView[]; look: Tiered<Look> }
+  | { kind: 'list'; ordered: boolean; items: NView[]; look: Tiered<Look>; /** The first number, and +1 or -1 (`reversed`). */ start: number; step: number }
   | { kind: 'table'; rows: { header: boolean; cells: NView[] }[]; look: Tiered<Look> }
   | { kind: 'placeholder'; note: string };
 
@@ -452,7 +454,14 @@ function toView(node: TreeNode, ctx: Ctx): NView | null {
       return { kind: 'divider' };
     case 'img':
       return { kind: 'image', src: safeUrl(b.attrs.src), alt: b.attrs.alt ?? '', look };
-    case 'input':
+    case 'input': {
+      // The input's type decides the control: a checkbox isn't a text box, a password is hidden.
+      const type = (b.attrs.type ?? 'text').trim().toLowerCase();
+      if (type === 'hidden') return null;
+      if (type === 'checkbox' || type === 'radio') return { kind: 'toggle', label: b.attrs['aria-label'] ?? '', on: b.attrs.checked !== undefined && b.attrs.checked !== 'false', look };
+      if (type === 'submit' || type === 'button' || type === 'reset') return { kind: 'text', text: b.attrs.value ?? (type === 'reset' ? 'Reset' : type === 'submit' ? 'Submit' : ''), role: 'body', look, button: true };
+      return { kind: 'field', placeholder: b.attrs.placeholder ?? b.attrs['aria-label'] ?? b.attrs.name ?? '', multiline: false, look, ...(type === 'password' ? { secure: true } : {}) };
+    }
     case 'textarea':
       return { kind: 'field', placeholder: b.attrs.placeholder ?? b.attrs['aria-label'] ?? b.attrs.name ?? '', multiline: b.tag === 'textarea', look };
     case 'script':
@@ -462,7 +471,10 @@ function toView(node: TreeNode, ctx: Ctx): NView | null {
     case 'ul':
     case 'ol': {
       const items = b.children.map((c) => toView(c, ctx)).filter((v): v is NView => !!v);
-      return { kind: 'list', ordered: b.tag === 'ol', items, look };
+      // `<ol start="5">` counts from 5, and `reversed` counts down (from the item count unless `start` is set).
+      const reversed = b.attrs.reversed !== undefined;
+      const given = /^\s*-?\d{1,9}\s*$/.test(b.attrs.start ?? '') ? Number(b.attrs.start) : null;
+      return { kind: 'list', ordered: b.tag === 'ol', items, look, start: given ?? (reversed ? items.length : 1), step: reversed ? -1 : 1 };
     }
     case 'table': {
       const rows: { header: boolean; cells: NView[] }[] = [];
@@ -480,7 +492,8 @@ function toView(node: TreeNode, ctx: Ctx): NView | null {
   const text = TEXT_BLOCKS.has(b.tag) || !b.children.some(isBranch) ? inlineText(b) : null;
   if (text !== null && (b.children.length > 0 || b.tag === 'button' || b.tag === 'a')) {
     const role: TextRole = (Object.hasOwn(HEADING, b.tag) && HEADING[b.tag]) || 'body';
-    const label = tidy(text) || b.attrs['aria-label'] || '';
+    // A code block (`<pre>`, `white-space: pre`) keeps its indentation; only a trailing newline goes.
+    const label = (keepsWhitespace(b) ? text.replace(/\r\n?/g, '\n').replace(/\n$/, '') : tidy(text)) || b.attrs['aria-label'] || '';
     if (!label && b.tag !== 'button' && b.tag !== 'a') return null;
     if (b.tag === 'a') return { kind: 'text', text: label, role, look, link: safeUrl(b.attrs.href) };
     if (b.tag === 'button') return { kind: 'text', text: label, role, look, button: true };
@@ -523,8 +536,12 @@ const comment = commentText;
 const swiftString = (s: string) =>
   `"${s.replace(/[\\"\n\r\t]|[\u0000-\u001f\u007f]/g, (c) => ({ '\\': '\\\\', '"': '\\"', '\n': '\\n', '\r': '\\r', '\t': '\\t' })[c] ?? `\\u{${c.charCodeAt(0).toString(16)}}`)}"`;
 
-/** A URL with anything outside the URL character set percent-encoded (existing escapes kept). */
-const encodeUrl = (url: string) => url.replace(/%(?![0-9a-f]{2})|[^A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=%]/giu, (c) => encodeURIComponent(c));
+/**
+ * A URL with anything outside the URL character set percent-encoded (existing escapes kept).
+ * A lone surrogate can't be percent-encoded (encodeURIComponent throws), so it becomes U+FFFD first.
+ */
+const encodeUrl = (url: string) =>
+  url.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '\uFFFD').replace(/%(?![0-9a-f]{2})|[^A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=%]/giu, (c) => encodeURIComponent(c));
 const swiftColor = (c: Rgba) => {
   const ch = (v: number) => num(v / 255);
   return `Color(red: ${ch(c.r)}, green: ${ch(c.g)}, blue: ${ch(c.b)}${c.a < 1 ? `, opacity: ${num(c.a)}` : ''})`;
@@ -579,6 +596,16 @@ function swiftModifiers(look: Tiered<Look>, opts: { text?: TextRole; fill?: bool
 
 const DEFAULT_SIZE: Record<TextRole, number> = { h1: 34, h2: 28, h3: 22, h4: 20, h5: 17, h6: 15, body: 17, small: 13, code: 15 };
 
+/** Each item's number on each tier: hidden items don't count, as a `display: none` <li> doesn't. */
+function listNumbers(v: Extract<NView, { kind: 'list' }>): Tiered<number>[] {
+  const seen = tiered(() => 0);
+  return v.items.map((item) => {
+    const n = tiered((t) => v.start + v.step * seen[t]);
+    for (const t of TIERS) if (!('look' in item && item.look[t].hidden)) seen[t]++;
+    return n;
+  });
+}
+
 function swiftView(v: NView, o: Out, d: number, fill: boolean): void {
   const look = 'look' in v ? v.look : undefined;
   // Hidden on some widths.
@@ -626,8 +653,13 @@ function swiftBody(v: NView, o: Out, d: number, fill: boolean): void {
       o.line(d, 'Divider()');
       return;
     case 'field':
-      o.line(d, v.multiline ? `TextField(${swiftString(v.placeholder)}, text: .constant(""), axis: .vertical)` : `TextField(${swiftString(v.placeholder)}, text: .constant(""))`);
+      o.line(d, v.secure ? `SecureField(${swiftString(v.placeholder)}, text: .constant(""))` : v.multiline ? `TextField(${swiftString(v.placeholder)}, text: .constant(""), axis: .vertical)` : `TextField(${swiftString(v.placeholder)}, text: .constant(""))`);
       o.line(d + 1, '.textFieldStyle(.roundedBorder)');
+      mods(v.look, {});
+      return;
+    case 'toggle':
+      o.line(d, `Toggle(${swiftString(v.label)}, isOn: .constant(${v.on}))`);
+      if (!v.label) o.line(d + 1, '.labelsHidden()');
       mods(v.look, {});
       return;
     case 'placeholder':
@@ -636,11 +668,18 @@ function swiftBody(v: NView, o: Out, d: number, fill: boolean): void {
       return;
     case 'list':
       o.line(d, 'VStack(alignment: .leading, spacing: 4) {');
+      const nums = listNumbers(v);
       v.items.forEach((item, i) => {
-        o.line(d + 1, 'HStack(alignment: .firstTextBaseline, spacing: 8) {');
-        o.line(d + 2, `Text(verbatim: ${swiftString(v.ordered ? `${i + 1}.` : '•')})`);
-        swiftView(item, o, d + 2, false);
-        o.line(d + 1, '}');
+        // A hidden item takes its marker with it, and doesn't count (as a `display: none` <li>).
+        const look = 'look' in item ? item.look : undefined;
+        if (look?.lg.hidden && look.phone.hidden) return;
+        let dd = d + 1;
+        if (look && (look.lg.hidden || look.phone.hidden)) o.line(dd++, `if ${look.phone.hidden ? '!compact' : 'compact'} {`);
+        o.line(dd, 'HStack(alignment: .firstTextBaseline, spacing: 8) {');
+        o.line(dd + 1, `Text(verbatim: ${v.ordered ? swiftPick(nums[i], (n) => swiftString(`${n}.`)) : swiftString('•')})`);
+        swiftBody(item, o, dd + 1, false);
+        o.line(dd, '}');
+        if (dd > d + 1) o.line(d + 1, '}');
       });
       o.line(d, '}');
       mods(v.look, { fill });
@@ -699,8 +738,8 @@ function swiftBody(v: NView, o: Out, d: number, fill: boolean): void {
 }
 
 /** Types the generated code uses, which the view's own name must not shadow. */
-const SWIFT_TAKEN = new Set(['DesignTokens', 'View', 'Text', 'Image', 'Link', 'Button', 'Grid', 'GridRow', 'GridItem', 'Divider', 'TextField', 'Color', 'Group', 'Spacer', 'ScrollView', 'VStack', 'HStack', 'LazyVGrid', 'AnyLayout', 'VStackLayout', 'HStackLayout', 'AsyncImage', 'RoundedRectangle', 'EdgeInsets', 'URL', 'Bool', 'String', 'Font', 'Array', 'Environment', 'EmptyView', 'ForEach', 'Alignment', 'HorizontalAlignment', 'VerticalAlignment']);
-const DART_TAKEN = new Set(['DesignTokens', 'Widget', 'StatelessWidget', 'BuildContext', 'Text', 'Image', 'Table', 'TableRow', 'TableBorder', 'Container', 'Wrap', 'Flex', 'Flexible', 'Expanded', 'Row', 'Column', 'Center', 'Opacity', 'Padding', 'Visibility', 'SizedBox', 'Divider', 'TextField', 'TextButton', 'FilledButton', 'Theme', 'Color', 'Colors', 'BoxDecoration', 'BoxConstraints', 'BorderRadius', 'Border', 'EdgeInsets', 'MediaQuery', 'SingleChildScrollView', 'LayoutBuilder', 'InputDecoration', 'OutlineInputBorder', 'Axis', 'List', 'Map', 'String', 'Object', 'MainAxisAlignment', 'MainAxisSize', 'CrossAxisAlignment', 'WrapCrossAlignment', 'WrapAlignment', 'TableCellVerticalAlignment', 'FontWeight', 'TextAlign', 'TextStyle', 'BoxFit', 'Alignment', 'Radius']);
+const SWIFT_TAKEN = new Set(['Self', 'Any', 'Type', 'Protocol', 'DesignTokens', 'View', 'Text', 'Image', 'Link', 'Button', 'Grid', 'GridRow', 'GridItem', 'Divider', 'TextField', 'SecureField', 'Toggle', 'Color', 'Group', 'Spacer', 'ScrollView', 'VStack', 'HStack', 'LazyVGrid', 'AnyLayout', 'VStackLayout', 'HStackLayout', 'AsyncImage', 'RoundedRectangle', 'EdgeInsets', 'URL', 'Bool', 'String', 'Font', 'Array', 'Environment', 'EmptyView', 'ForEach', 'Alignment', 'HorizontalAlignment', 'VerticalAlignment']);
+const DART_TAKEN = new Set(['FontStyle', 'Function', 'Never', 'Record', 'DesignTokens', 'Widget', 'StatelessWidget', 'BuildContext', 'Text', 'Image', 'Table', 'TableRow', 'TableBorder', 'Container', 'Wrap', 'Flex', 'Flexible', 'Expanded', 'Row', 'Column', 'Center', 'Opacity', 'Padding', 'Visibility', 'SizedBox', 'Divider', 'TextField', 'Checkbox', 'TextButton', 'FilledButton', 'Theme', 'Color', 'Colors', 'BoxDecoration', 'BoxConstraints', 'BorderRadius', 'Border', 'EdgeInsets', 'MediaQuery', 'SingleChildScrollView', 'LayoutBuilder', 'InputDecoration', 'OutlineInputBorder', 'Axis', 'List', 'Map', 'String', 'Object', 'MainAxisAlignment', 'MainAxisSize', 'CrossAxisAlignment', 'WrapCrossAlignment', 'WrapAlignment', 'TableCellVerticalAlignment', 'FontWeight', 'TextAlign', 'TextStyle', 'BoxFit', 'Alignment', 'Radius']);
 
 /** The type name to write: the given name, with a suffix when it would shadow a framework type. */
 export function nativeTypeName(name: string, framework: NativeFramework): string {
@@ -909,8 +948,11 @@ function dartView(v: NView, o: Out, d: number): void {
       return;
     case 'field':
       dartDecorate(v.look, o, d, (dd) =>
-        o.line(dd, `TextField(${v.multiline ? 'maxLines: null, ' : ''}decoration: InputDecoration(hintText: ${dartString(v.placeholder)}, border: const OutlineInputBorder()))`),
+        o.line(dd, `TextField(${v.multiline ? 'maxLines: null, ' : ''}${v.secure ? 'obscureText: true, ' : ''}decoration: InputDecoration(hintText: ${dartString(v.placeholder)}, border: const OutlineInputBorder()))`),
       );
+      return;
+    case 'toggle':
+      dartDecorate(v.look, o, d, (dd) => o.line(dd, `Checkbox(value: ${v.on}, onChanged: (_) {}${v.label ? `, semanticLabel: ${dartString(v.label)}` : ''})`));
       return;
     case 'placeholder':
       o.line(d, `const SizedBox.shrink() /* ${comment(v.note)} */`);
@@ -920,11 +962,12 @@ function dartView(v: NView, o: Out, d: number): void {
         o.line(dd, 'Column(');
         o.line(dd + 1, 'crossAxisAlignment: CrossAxisAlignment.start,');
         o.line(dd + 1, 'children: [');
+        const nums = listNumbers(v);
         v.items.forEach((item, i) => {
           const cond = dartShown(item);
           if (cond === 'false') return;
           o.line(dd + 2, `${cond ? `if (${cond}) ` : ''}Row(crossAxisAlignment: CrossAxisAlignment.start, children: [`);
-          o.line(dd + 3, `Text(${dartString(v.ordered ? `${i + 1}. ` : '•  ')}),`);
+          o.line(dd + 3, `Text(${v.ordered ? dartPick(nums[i], (n) => dartString(`${n}. `)) : dartString('•  ')}),`);
           o.line(dd + 3, 'Expanded(child:');
           dartView(item, o, dd + 4);
           o.line(dd + 3, '),');

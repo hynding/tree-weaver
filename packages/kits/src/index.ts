@@ -1,4 +1,4 @@
-import { createKit, isStylesheetUrl, parseCss, type CssNode, type DesignKit } from '@tree-weaver/core';
+import { createKit, isStylesheetUrl, parseCss, rootTokens, type CssNode, type DesignKit } from '@tree-weaver/core';
 
 export interface KitToken {
   name: string;
@@ -17,32 +17,41 @@ export interface KitAnalysis {
   ruleCount: number;
 }
 
-const CLASS = /\.(-?[_a-zA-Z][_a-zA-Z0-9-]*(?:\\.[_a-zA-Z0-9-]*)*)/g;
+// Non-ASCII characters are name characters in CSS (`.café`).
+// Escapes may come anywhere, the first character too (`.\\!p-2`, `.\\32 xl\\:flex`, `.w-\\[200px\\]`).
+const ESC = String.raw`\\(?:[0-9a-fA-F]{1,6} ?|[^0-9a-fA-F\n])`;
+const CLASS = new RegExp(String.raw`\.(-?(?:[_a-zA-Z\u0080-\uFFFF]|${ESC})(?:[_a-zA-Z0-9\u0080-\uFFFF-]|${ESC})*)`, 'g');
+/** A class name as written in HTML, from its escaped form in a selector. */
+const unescapeClass = (name: string): string =>
+  name.replace(/\\(?:([0-9a-fA-F]{1,6}) ?|([^0-9a-fA-F\n]))/g, (_, hex: string | undefined, ch: string | undefined) => (hex ? String.fromCodePoint(((cp) => (cp > 0 && cp <= 0x10ffff ? cp : 0xfffd))(Number.parseInt(hex, 16))) : ch!));
 const IMPORT_URL = /^(?:url\(\s*)?["']?([^"')\s]+)["']?\s*\)?/;
 
 /** List what a design kit offers: classes, tokens, imports and breakpoints. */
 export function analyzeKit(css: string): KitAnalysis {
   const classes = new Set<string>();
-  const tokens = new Map<string, string>();
   const imports: string[] = [];
   const media = new Set<string>();
   let ruleCount = 0;
 
-  const visit = (nodes: CssNode[]) => {
+  const visit = (nodes: CssNode[], depth = 0, nested = false) => {
     for (const node of nodes) {
       if (node.type === 'rule') {
         ruleCount++;
+        // In a nested rule body the declarations before the nested selector parse as part of it.
+        const raw = nested ? (node.selector.split(';').pop() ?? '') : node.selector;
         // Ignore attribute selectors and strings so `[href$=".pdf"]` doesn't yield a class.
-        const selector = node.selector.replace(/\[[^\]]*\]/g, '').replace(/(["'])(?:\\.|(?!\1).)*\1/g, '');
-        for (const m of selector.matchAll(CLASS)) classes.add(m[1].replace(/\\/g, ''));
-        for (const [prop, value] of Object.entries(node.declarations)) if (prop.startsWith('--')) tokens.set(prop, value);
+        // Only unescaped brackets open an attribute selector (`.w-\[2px\]` is a class).
+        const selector = raw.replace(/(?<!\\)\[(?:\\.|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\]\\"'])*\]/g, '').replace(/(["'])(?:\\.|(?!\1).)*\1/g, '');
+        for (const m of selector.matchAll(CLASS)) classes.add(unescapeClass(m[1]));
+        // CSS nesting: rules inside a rule's body (`.card { & .title { … } }`).
+        if (node.body.includes('{') && depth < 32) visit(parseCss(node.body), depth + 1, true);
       } else {
         if (node.name === 'import') {
           const m = IMPORT_URL.exec(node.prelude);
           if (m) imports.push(m[1]);
         }
         if (node.name === 'media' && node.prelude) media.add(node.prelude);
-        if (node.children) visit(node.children);
+        if (node.children) visit(node.children, depth + 1, nested);
       }
     }
   };
@@ -50,7 +59,9 @@ export function analyzeKit(css: string): KitAnalysis {
 
   return {
     classes: [...classes].sort((a, b) => a.localeCompare(b)),
-    tokens: [...tokens].map(([name, value]) => ({ name, value })),
+    // The kit's tokens as the exports read them: set on :root or html, outside media queries (a
+    // dark-mode override or a component's own custom property isn't the token's value).
+    tokens: rootTokens(css),
     imports,
     media: [...media],
     ruleCount,
@@ -147,7 +158,8 @@ export async function kitFromUrl(url: string, fetchImpl: typeof fetch = globalTh
  */
 export function parseCssUrls(value: string | undefined | null): string[] {
   const urls: string[] = [];
-  for (const part of (value ?? '').split(/[\s,]+/)) if (part && isStylesheetUrl(part) && !urls.includes(part)) urls.push(part);
+  // A comma separates only before a space, the next URL or the end: Google Fonts URLs hold commas (`ital,wght@0,400`).
+  for (const part of (value ?? '').split(/\s+|,(?=\s|https?:\/\/|,|$)/i)) if (part && isStylesheetUrl(part) && !urls.includes(part)) urls.push(part);
   return urls;
 }
 

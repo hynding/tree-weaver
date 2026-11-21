@@ -62,6 +62,10 @@ export const tailwindTokenKey = (name: string): string => name.replace(/^--/, ''
 /** Tokens Tailwind can name: those with a kind that has a theme namespace. */
 export const tailwindTokens = (tokens: ThemeToken[]): ThemeToken[] => tokens.filter((t) => TAILWIND_NAMESPACE[t.kind]);
 
+/** Keywords Tailwind's spacing and sizing utilities read as their own values. */
+const SPACE_KEYWORDS = new Set(['auto', 'px', 'full', 'screen', 'min', 'max', 'fit', 'none', 'svw', 'lvw', 'dvw', 'svh', 'lvh', 'dvh', 'lh', 'dvi', 'svi', 'lvi']);
+const SIZING = new Set(['w', 'h', 'min-w', 'max-w', 'min-h', 'max-h', 'size']);
+
 /**
  * The theme utility for a declaration whose whole value is `var(--token)`, when the token's kind
  * fits the property: `bg-brand` for `background: var(--brand)`. Undefined otherwise.
@@ -70,12 +74,24 @@ export function tailwindTokenClass(prop: string, value: string, kinds: ReadonlyM
   const m = /^var\(\s*(--[\w-]+)\s*\)$/.exec(value.trim());
   const use = Object.hasOwn(TOKEN_UTILITIES, prop) ? TOKEN_UTILITIES[prop] : undefined;
   if (!m || !use) return undefined;
-  return kinds.get(m[1]) === use.kind && TAILWIND_NAMESPACE[use.kind] ? `${use.prefix}-${tailwindTokenKey(m[1])}` : undefined;
+  if (kinds.get(m[1]) !== use.kind || !TAILWIND_NAMESPACE[use.kind]) return undefined;
+  // Tailwind's own keywords win over a token of that name (`max-w-lg` is 32rem, `w-screen` 100vw):
+  // those take the arbitrary-value form instead.
+  const key = tailwindTokenKey(m[1]);
+  if (use.kind === 'space' && (SPACE_KEYWORDS.has(key) || (SIZING.has(use.prefix) && /^(\d?xs|sm|md|lg|\d?xl|prose)$/.test(key)))) return undefined;
+  // Tailwind v3's `text-lg` sets the font size as well as a colour named `lg`.
+  if (use.kind === 'color' && use.prefix === 'text' && /^(xs|sm|base|lg|\d?xl)$/.test(key)) return undefined;
+  // `background` is a shorthand that also clears any background image; `bg-x` sets only the colour.
+  return `${prop === 'background' ? 'bg-none ' : ''}${use.prefix}-${tailwindTokenKey(m[1])}`;
 }
 
 /** Tailwind v4: `@theme inline { --color-brand: var(--brand); }`. Empty when no token fits. */
 export function tailwindThemeCss(tokens: ThemeToken[]): string {
-  const lines = tailwindTokens(tokens).map((t) => `  --${TAILWIND_NAMESPACE[t.kind]!.v4}-${tailwindTokenKey(t.name)}: var(${t.name});`);
+  const lines = tailwindTokens(tokens).flatMap((t) => {
+    const name = `--${TAILWIND_NAMESPACE[t.kind]!.v4}-${tailwindTokenKey(t.name)}`;
+    // Tailwind's default sizes (`text-lg`) carry a line height too; a token's size doesn't.
+    return name.startsWith('--text-') ? [`  ${name}: var(${t.name});`, `  ${name}--line-height: initial;`] : [`  ${name}: var(${t.name});`];
+  });
   if (!lines.length) return '';
   return `/* Design tokens from Tree Weaver as Tailwind v4 theme values. Import after tailwindcss:\n   @import "tailwindcss"; @import "./tailwind.theme.css";\n   The values come from kits.css, so edit them there (or in the editor's Tokens tab). */\n@theme inline {\n${lines.join('\n')}\n}\n`;
 }

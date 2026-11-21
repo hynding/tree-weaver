@@ -153,7 +153,62 @@ function indexForest(forest: Forest | null): Map<string, Placed> {
   return out;
 }
 
-function writeNode(nodes: Y.Map<YNode>, p: Placed, order: string | undefined): void {
+/**
+ * Write a record as one key per entry (`<prefix><name>`), so two peers changing different entries
+ * both keep their change. Entries `old` held that `next` doesn't are removed; without `old` (a full
+ * write), every stored entry `next` doesn't hold is.
+ */
+function writeEntries(m: YNode, prefix: string, next: Record<string, string> | undefined, old: Record<string, string> | undefined | null): void {
+  // An empty value is kept: `disabled=""`, `checked=""` and `alt=""` are attributes that are set.
+  for (const [k, v] of Object.entries(next ?? {})) if (m.get(`${prefix}${k}`) !== v) m.set(`${prefix}${k}`, v);
+  const gone = old === null ? [...m.keys()].filter((k) => k.startsWith(prefix)).map((k) => k.slice(prefix.length)) : Object.keys(old ?? {});
+  for (const k of gone) if ((!next || !Object.hasOwn(next, k)) && m.has(`${prefix}${k}`)) m.delete(`${prefix}${k}`);
+}
+
+/**
+ * A kit's rules (`r:<rule id>`) and tokens (`t:<name>`) are entries of their own, each with an
+ * order key, so two peers editing different classes or tokens of one kit both keep their edit.
+ * The rest of the kit is one JSON string (`data`); its CSS is rebuilt from the entries when read.
+ */
+function writeKit(k: YNode, kit: DesignKit, old: DesignKit | undefined): void {
+  const { rules, tokens, ...rest } = kit;
+  const split = !!(rules || tokens);
+  setIfChanged(k, 'data', json({ ...rest, ...(split ? { css: '' } : {}), ...(rules ? { rules: [] } : {}), ...(tokens ? { tokens: [] } : {}) }));
+  const entries = <T>(prefix: string, list: T[] | undefined, oldList: T[] | undefined, key: (x: T) => string) => {
+    const stored = (id: string) => parse<{ order?: string } | null>(k.get(`${prefix}${id}`), null)?.order;
+    const orders = orderKeys((list ?? []).map(key), stored);
+    for (const x of list ?? []) setIfChanged(k, `${prefix}${key(x)}`, json({ order: orders.get(key(x)), value: x }));
+    const ids = new Set((list ?? []).map(key));
+    const gone = old ? (oldList ?? []).map(key) : [...k.keys()].filter((x) => x.startsWith(prefix)).map((x) => x.slice(prefix.length));
+    for (const id of gone) if (!ids.has(id)) setIfChanged(k, `${prefix}${id}`, undefined);
+  };
+  entries('r:', rules, old?.rules, (r) => r.id);
+  entries('t:', tokens, old?.tokens, (t) => t.name);
+}
+
+/** A kit as `writeKit` stored it (or as one `data` string, in older documents). */
+function readKit(k: YNode): DesignKit | null {
+  const kit = parse<DesignKit | null>(k.get('data'), null);
+  if (!isObj(kit)) return null;
+  const list = (prefix: string) =>
+    [...k.entries()]
+      .filter(([key]) => key.startsWith(prefix))
+      .map(([key, v]) => ({ id: key.slice(prefix.length), entry: parse<unknown>(v, null) }))
+      .map(({ id, entry }) => ({ id, order: isObj(entry) && typeof entry.order === 'string' ? entry.order : '', value: isObj(entry) ? entry.value : undefined }))
+      .sort(byOrder)
+      .map((e) => e.value)
+      .filter(isObj);
+  // Empty lists in `data` mean the entries hold them; older documents kept them in `data`.
+  // normalizeKit checks the entries afterwards and builds the CSS from them.
+  if (Array.isArray(kit.rules) && !kit.rules.length) return { ...kit, rules: list('r:') as never };
+  if (Array.isArray(kit.tokens) && !kit.tokens.length) return { ...kit, tokens: list('t:') as never };
+  return kit;
+}
+
+/** Style keys: `sp:<display>:<property>`. (Older documents held one `s:<display>` JSON string.) */
+const STYLE_KEY = /^sp:([^:]+):(.+)$/;
+
+function writeNode(nodes: Y.Map<YNode>, p: Placed, order: string | undefined, old: TreeNode | undefined): void {
   let m = asMap(nodes.get(p.node.id));
   if (!m) {
     m = new Y.Map<unknown>();
@@ -169,17 +224,32 @@ function writeNode(nodes: Y.Map<YNode>, p: Placed, order: string | undefined): v
     setIfChanged(m, 'type', n.type);
     setIfChanged(m, 'name', n.name);
     setIfChanged(m, 'classes', n.classes.length ? json(n.classes) : undefined);
-    setIfChanged(m, 'attrs', Object.keys(n.attrs).length ? json(n.attrs) : undefined);
     setIfChanged(m, 'instance', n.instance ? json(n.instance) : undefined);
-    const displays = new Set([...Object.keys(n.styles), ...[...m.keys()].filter((k) => k.startsWith('s:')).map((k) => k.slice(2))]);
+    // One key per attribute and per style property, so concurrent edits to different ones merge.
+    const prior = old && isBranch(old) ? old : null;
+    const legacy = [...m.keys()].some((k) => k === 'attrs' || k.startsWith('s:'));
+    writeEntries(m, 'a:', n.attrs, legacy ? null : prior?.attrs ?? null);
+    setIfChanged(m, 'attrs', undefined);
+    const displays = new Set([...Object.keys(n.styles), ...Object.keys(prior?.styles ?? {}), ...[...m.keys()].flatMap((k) => STYLE_KEY.exec(k)?.[1] ?? (k.startsWith('s:') ? k.slice(2) : []))]);
     for (const d of displays) {
-      const s = n.styles[d as keyof DisplayStyles];
-      setIfChanged(m, `s:${d}`, s && Object.keys(s).length ? json(s) : undefined);
+      setIfChanged(m, `s:${d}`, undefined);
+      const next = n.styles[d as keyof DisplayStyles];
+      writeEntries(m, `sp:${d}:`, next, legacy || !prior ? null : prior.styles[d as keyof DisplayStyles] ?? {});
+      // Declaration order matters (`padding` then `padding-left`), so each property has an order
+      // key (`so:<display>:<prop>`) too; every peer, and a fresh load, reads the same order.
+      const props = Object.keys(next ?? {});
+      const orders = orderKeys(props, (p) => m.get(`so:${d}:${p}`) as string | undefined);
+      for (const p of props) setIfChanged(m, `so:${d}:${p}`, orders.get(p));
+      // An order key goes with its property (a peer's property this write didn't touch keeps its own).
+      for (const k of [...m.keys()]) if (k.startsWith(`so:${d}:`) && !m.has(`sp:${d}:${k.slice(`so:${d}:`.length)}`)) m.delete(k);
     }
   } else {
     setIfChanged(m, 'leaf', n.type);
     setIfChanged(m, 'value', n.value);
-    setIfChanged(m, 'attrs', n.attrs && Object.keys(n.attrs).length ? json(n.attrs) : undefined);
+    const prior = old && !isBranch(old) ? old : null;
+    const legacy = m.has('attrs');
+    writeEntries(m, 'a:', n.attrs, legacy || !prior ? null : prior.attrs ?? {});
+    setIfChanged(m, 'attrs', undefined);
   }
 }
 
@@ -222,6 +292,7 @@ export function writeForest(doc: Y.Doc, prev: Forest | null, next: Forest, origi
     for (const t of prev?.trees ?? []) if (!treeIds.has(t.id)) m.trees.delete(t.id);
 
     // Kits.
+    const prevKits = new Map((prev?.kits ?? []).map((k) => [k.id, k]));
     const kitKeys = orderKeys(
       next.kits.map((k) => k.id),
       (id) => asMap(m.kits.get(id))?.get('order') as string | undefined,
@@ -233,7 +304,7 @@ export function writeForest(doc: Y.Doc, prev: Forest | null, next: Forest, origi
         m.kits.set(kit.id, k);
       }
       setIfChanged(k, 'order', kitKeys.get(kit.id));
-      setIfChanged(k, 'data', json(kit));
+      writeKit(k, kit, prevKits.get(kit.id));
     }
     const kitIds = new Set(next.kits.map((k) => k.id));
     for (const k of prev?.kits ?? []) if (!kitIds.has(k.id)) m.kits.delete(k.id);
@@ -263,7 +334,13 @@ export function writeForest(doc: Y.Doc, prev: Forest | null, next: Forest, origi
       if (!isBranch(p.node)) continue;
       const ids = childIds(p.node);
       const old = before.get(id);
-      if (prev && old && sameList(ids, childIds(old.node)) && ids.every((c) => asMap(m.nodes.get(c))?.get('order') !== undefined)) continue;
+      // Kept only when every child is stored under this branch already: a child re-attached here
+      // after its parent was deleted elsewhere still names that parent and needs a new key.
+      const stored = (c: string) => {
+        const n = asMap(m.nodes.get(c));
+        return n?.get('order') !== undefined && n.get('parent') === id;
+      };
+      if (prev && old && sameList(ids, childIds(old.node)) && ids.every(stored)) continue;
       const keys = orderKeys(ids, (c) => (asMap(m.nodes.get(c))?.get('parent') === id ? (asMap(m.nodes.get(c))?.get('order') as string | undefined) : undefined));
       for (const [c, k] of keys) orders.set(c, k);
     }
@@ -274,7 +351,7 @@ export function writeForest(doc: Y.Doc, prev: Forest | null, next: Forest, origi
       const old = before.get(id);
       // Unchanged nodes (same object, same place) need no writes.
       if (prev && old && old.node === p.node && old.parent === p.parent && old.tree === p.tree && !orders.has(id)) continue;
-      writeNode(m.nodes, p, orders.get(id));
+      writeNode(m.nodes, p, orders.get(id), prev && old?.tree === p.tree ? old.node : undefined);
     }
     for (const id of before.keys()) if (!after.has(id)) m.nodes.delete(id);
     // Nodes of removed trees.
@@ -315,9 +392,16 @@ const stringMap = (v: unknown): Record<string, string> | undefined =>
   isObj(v) ? Object.fromEntries(Object.entries(v).filter((e): e is [string, string] => typeof e[1] === 'string')) : undefined;
 const stringList = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 
+/** Set an own property, even one named `__proto__` (a peer chooses the names). Returns the value. */
+function put<T>(obj: object, key: string, value: T): T {
+  Object.defineProperty(obj, key, { value, enumerable: true, writable: true, configurable: true });
+  return value;
+}
+
 function readNode(id: string, m: YNode): TreeNode {
   if (m.get('kind') === 'leaf') {
-    const attrs = stringMap(parse<unknown>(m.get('attrs'), undefined));
+    let attrs = stringMap(parse<unknown>(m.get('attrs'), undefined));
+    for (const [k, v] of m) if (k.startsWith('a:') && typeof v === 'string') put((attrs ??= {}), k.slice(2), v);
     const type = m.get('leaf');
     const value = m.get('value');
     const leaf: Leaf = { kind: 'leaf', id, type: type === 'image' || type === 'shape' ? type : 'text', value: typeof value === 'string' ? value : '' };
@@ -325,13 +409,27 @@ function readNode(id: string, m: YNode): TreeNode {
     return leaf;
   }
   const styles: DisplayStyles = {};
+  const attrs: Record<string, string> = stringMap(parse<unknown>(m.get('attrs'), {})) ?? {};
   for (const [k, v] of m) if (k.startsWith('s:')) styles[k.slice(2) as keyof DisplayStyles] = stringMap(parse<unknown>(v, {})) ?? {};
+  const declared: { display: string; prop: string; value: string; order: string; at: number }[] = [];
+  for (const [k, v] of m) {
+    if (typeof v !== 'string') continue;
+    const style = STYLE_KEY.exec(k);
+    if (style) {
+      const order = m.get(`so:${style[1]}:${style[2]}`);
+      declared.push({ display: style[1], prop: style[2], value: v, order: typeof order === 'string' ? order : '', at: declared.length });
+    } else if (k.startsWith('a:')) put(attrs, k.slice(2), v);
+  }
+  // By order key, ties (two peers adding at once) by name, so every peer agrees; entries from
+  // before order keys keep the order they are stored in.
+  declared.sort((a, b) => (a.order && b.order ? (a.order < b.order ? -1 : a.order > b.order ? 1 : a.prop < b.prop ? -1 : a.prop > b.prop ? 1 : 0) : !a.order && !b.order ? a.at - b.at : a.order ? 1 : -1));
+  for (const { display, prop, value } of declared) put(Object.hasOwn(styles, display) ? styles[display as keyof DisplayStyles]! : put(styles, display, {}), prop, value);
   const branch: Branch = {
     kind: 'branch',
     id,
     tag: typeof m.get('tag') === 'string' ? (m.get('tag') as string) : 'div',
     classes: stringList(parse<unknown>(m.get('classes'), [])),
-    attrs: stringMap(parse<unknown>(m.get('attrs'), {})) ?? {},
+    attrs,
     styles,
     children: [],
   };
@@ -430,7 +528,7 @@ export function readForest(doc: Y.Doc): Forest | null {
   }
   trees.sort(byOrder);
   const kits = [...yMaps(m.kits)]
-    .map(([id, k]) => ({ id, order: (k.get('order') as string) ?? '', kit: parse<DesignKit | null>(k.get('data'), null) }))
+    .map(([id, k]) => ({ id, order: (k.get('order') as string) ?? '', kit: readKit(k) }))
     .filter((k): k is { id: string; order: string; kit: DesignKit } => !!k.kit)
     .sort(byOrder)
     .filter((k) => isObj(k.kit) && typeof k.kit.css === 'string')

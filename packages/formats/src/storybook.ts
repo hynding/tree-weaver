@@ -6,6 +6,7 @@ import {
   inSvgContext,
   isBranch,
   renderNodeHtml,
+  safeTag,
   renderTreeBody,
   renderTreeCss,
   rootAttrs,
@@ -83,15 +84,27 @@ function camelCase(value: string, fallback: string): string {
 }
 
 /** Hands out unique names: `card`, `card2`, `card3`. */
-function uniqueNames(taken: Iterable<string> = []) {
-  const used = new Set(taken);
+function uniqueNames(taken: Iterable<string> = [], key: (name: string) => string = (name) => name) {
+  const used = new Set([...taken].map(key));
   return (base: string): string => {
     let name = base;
-    for (let n = 2; used.has(name); n++) name = `${base}${n}`;
-    used.add(name);
+    for (let n = 2; used.has(key(name)); n++) name = `${base}${n}`;
+    used.add(key(name));
     return name;
   };
 }
+
+/**
+ * The part of a story id Storybook makes from an export name: it splits words at case and digit
+ * changes and lowercases them, so `Step1a` and `Step1A` would get the same id.
+ */
+const storyIdKey = (name: string): string =>
+  name
+    .replace(/([a-z\d])([A-Z])/g, '$1-$2')
+    .replace(/([A-Z])([A-Z][a-z])/g, '$1-$2')
+    .replace(/([A-Za-z])(\d)/g, '$1-$2')
+    .replace(/(\d)([A-Za-z])/g, '$1-$2')
+    .toLowerCase();
 
 /** Storybook titles use `/` for hierarchy, so it cannot appear inside a name. */
 const titlePart = (value: string): string => value.replace(/\//g, '-').trim() || 'Untitled';
@@ -106,8 +119,9 @@ function collectLeaves(node: TreeNode): { args: Record<string, string>; leaves: 
       current.children.forEach((child) => visit(child, current));
       return;
     }
-    // Shapes are drawing, not content an arg would fill.
-    if (current.type === 'shape') return;
+    // Shapes are drawing, not content an arg would fill. Text in a <textarea> or <title> is written
+    // raw, without the leaf marker the render helper fills, so a control for it would do nothing.
+    if (current.type === 'shape' || (parent && /^(textarea|title)$/i.test(parent.tag))) return;
     const owner = parent ? (parent.name ?? parent.type ?? parent.tag) : 'content';
     const base = camelCase(owner, 'content') + (current.type === 'image' ? 'Image' : 'Text');
     const key = unique(base);
@@ -122,14 +136,21 @@ function collectLeaves(node: TreeNode): { args: Record<string, string>; leaves: 
 function branchHtml(root: Branch, node: Branch): string {
   const chain = ancestorsOf(root, node.id);
   const parent = chain[chain.length - 1];
-  if (!parent || !inSvgContext(root, parent.id)) return renderNodeHtml(node, { designer: true });
+  if (!parent) return renderNodeHtml(node, { designer: true });
+  // A table part outside a table is dropped by the HTML parser, so it keeps its table ancestors.
+  const tableAt = chain.map((b) => b.tag.toLowerCase()).lastIndexOf('table');
+  if (/^(caption|colgroup|col|thead|tbody|tfoot|tr|td|th)$/i.test(node.tag) && tableAt >= 0) {
+    const wrap = chain.slice(tableAt).map((b) => safeTag(b.tag));
+    return `${wrap.map((t) => `<${t}>`).join('')}${renderNodeHtml(node, { designer: true })}${[...wrap].reverse().map((t) => `</${t}>`).join('')}`;
+  }
+  if (!inSvgContext(root, parent.id)) return renderNodeHtml(node, { designer: true });
   const svg = [...chain].reverse().find((b) => b.tag === 'svg');
   const viewBox = svg?.attrs.viewBox ? ` viewBox="${escapeAttr(svg.attrs.viewBox)}"` : '';
   return `<svg xmlns="${SVG_NAMESPACE}"${viewBox}>${renderNodeHtml(node, { designer: true, inSvg: true })}</svg>`;
 }
 
 function treeStories(tree: Tree): StoryDef[] {
-  const exportName = uniqueNames(['default']);
+  const exportName = uniqueNames(['default'], storyIdKey);
   const storyName = uniqueNames();
   const stories: StoryDef[] = [];
 

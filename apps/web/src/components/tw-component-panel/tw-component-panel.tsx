@@ -6,6 +6,7 @@ import {
   findNode,
   isBranch,
   isPropName,
+  isPropOn,
   type Branch,
   type ComponentDef,
   type ComponentInstance,
@@ -64,7 +65,7 @@ export class TwComponentPanel {
 
   private addVariant(def: ComponentDef) {
     const name = this.newVariant.trim();
-    if (!name || def.variants.some((v) => v.name === name)) return;
+    if (!name || name === '-' || def.variants.some((v) => v.name === name)) return;
     editComponentDef(def.id, (d) => ({ ...d, variants: [...d.variants, { name, styles: {} }] }), `Added variant “${name}”`);
     this.newVariant = '';
     setComponentVariant(name);
@@ -127,7 +128,7 @@ export class TwComponentPanel {
             </select>
             {p.type === 'boolean' ? (
               <label class="check">
-                <input type="checkbox" checked={!!p.default} onChange={(e) => this.setProp(def, p.name, { default: (e.target as HTMLInputElement).checked ? 'true' : '' })} /> on
+                <input type="checkbox" checked={isPropOn(p.default)} onChange={(e) => this.setProp(def, p.name, { default: (e.target as HTMLInputElement).checked ? 'true' : '' })} /> on
               </label>
             ) : (
               <input class="input grow" placeholder="Default" aria-label={`Default ${p.name}`} value={p.default} onChange={(e) => this.setProp(def, p.name, { default: (e.target as HTMLInputElement).value })} />
@@ -251,7 +252,7 @@ export class TwComponentPanel {
             <div class="field" key={p.name}>
               <label htmlFor={id}>{p.name}</label>
               {p.type === 'boolean' ? (
-                <input id={id} type="checkbox" checked={!!value && value !== 'false'} onChange={(e) => this.setValue(inst, p.name, (e.target as HTMLInputElement).checked ? 'true' : '')} />
+                <input id={id} type="checkbox" checked={isPropOn(value)} onChange={(e) => this.setValue(inst, p.name, (e.target as HTMLInputElement).checked ? 'true' : '')} />
               ) : p.type === 'enum' && p.options?.length ? (
                 <select id={id} class="input" onChange={(e) => this.setValue(inst, p.name, (e.target as HTMLSelectElement).value)}>
                   {(p.options.includes(value) ? p.options : [value, ...p.options]).map((o) => (

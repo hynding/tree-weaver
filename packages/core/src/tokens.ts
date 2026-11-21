@@ -2,7 +2,7 @@ import { parseColor } from './checks';
 import { createId } from './create';
 import { parseCss, type CssNode } from './css';
 import type { DesignKit } from './model';
-import { bracketsBalance, untilStable } from './render';
+import { bracketsBalance, semicolonsOutsideStrings, untilStable } from './render';
 
 /**
  * Design tokens: the named colours, spacing and type sizes a forest's design kits define as
@@ -64,11 +64,12 @@ export const isTokenName = (name: string): boolean => TOKEN_NAME.test(name);
 
 /** A token value that can't end its declaration or rule early. */
 export function sanitizeTokenValue(value: string): string {
-  const out = untilStable(value, (v) =>
+  // `;` only outside strings and `url()`: a data URL (`data:image/svg+xml;charset=…`) needs its own.
+  const out = untilStable(semicolonsOutsideStrings(value.replace(/[{}]/g, '').replace(/[\s;]+$/, '')), (v) =>
     v
       .replace(/\/\*[\s\S]*?(\*\/|$)/g, '')
       .replace(/<\/?(style|script)/gi, '')
-      .replace(/[{};]/g, ''),
+      .replace(/[{}]/g, ''),
   )
     .replace(/\s+/g, ' ')
     .trim();
@@ -204,7 +205,19 @@ export function setToken(kits: DesignKit[], token: DesignToken): DesignKit[] {
   const kit = kits[i] as DesignKit & { tokens: DesignToken[] };
   const exists = kit.tokens.some((t) => t.name === token.name);
   const tokens = exists ? kit.tokens.map((t) => (t.name === token.name ? { ...t, ...clean } : t)) : [...kit.tokens, clean];
-  return kits.map((k, j) => (j === i ? withTokens(k, tokens) : k));
+  // An edit is meant to show: a token kit that was turned off is turned back on.
+  return kits.map((k, j) => (j === i ? { ...withTokens(k, tokens), enabled: true } : k));
+}
+
+/**
+ * Whether a kit loading after the token kit sets `name` too, so a token edit doesn't show
+ * (the token kit was moved earlier). Compared with the token kit moved last.
+ */
+export function tokenShadowed(kits: DesignKit[], name: string): boolean {
+  const i = kits.findIndex(isTokenKit);
+  if (i < 0) return false;
+  const last = [...kits.slice(0, i), ...kits.slice(i + 1), kits[i]];
+  return tokenValues(kits).get(name) !== tokenValues(last).get(name);
 }
 
 /** Add kits before the token kit, so token edits keep winning over newly added kits. */
@@ -235,7 +248,8 @@ export function tokensToDtcg(tokens: ThemeToken[]): Record<string, unknown> {
     const type = TYPE[t.kind];
     if (type) entry.$type = type;
     if (t.description) entry.$description = t.description;
-    out[t.name.replace(/^--/, '')] = entry;
+    // As an own key even for `--__proto__`, which plain assignment would make the prototype.
+    Object.defineProperty(out, t.name.replace(/^--/, ''), { value: entry, enumerable: true, writable: true, configurable: true });
   }
   return out;
 }

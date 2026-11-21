@@ -88,21 +88,24 @@ export function addVersion(
 }
 
 /**
- * Find a version by id, by name (case-insensitive, newest match), or by position:
+ * Find a version by id, by name (case-insensitive, newest match), or else by position:
  * `latest`/`-1` is the newest, `-2` the one before, `1` the oldest.
  */
 export function findVersion(log: VersionLog, ref: string): DocumentVersion | undefined {
   const list = log.versions;
   const r = ref.trim();
   if (r === 'latest') return list[list.length - 1];
+  // An exact id or name first, so a version named "2024" or "1" can be found by it.
+  const byId = list.find((v) => v.id === r);
+  if (byId) return byId;
+  const lower = r.toLowerCase();
+  const byName = [...list].reverse().find((v) => v.name.toLowerCase() === lower);
+  if (byName) return byName;
   if (/^-?\d+$/.test(r)) {
     const n = Number(r);
     return n < 0 ? list[list.length + n] : list[n - 1];
   }
-  const byId = list.find((v) => v.id === r);
-  if (byId) return byId;
-  const lower = r.toLowerCase();
-  return [...list].reverse().find((v) => v.name.toLowerCase() === lower);
+  return undefined;
 }
 
 export function removeVersion(log: VersionLog, id: string): VersionLog {

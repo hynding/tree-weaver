@@ -38,7 +38,7 @@ describe('exportComponent', () => {
     expect(jsx).toContain(`import './kits.css';`);
     expect(jsx).toContain(`import './LandingPage.css';`);
     expect(jsx).toContain('export default function LandingPage()');
-    expect(jsx).toContain('<div className="landing-page">');
+    expect(jsx).toContain('<div className="landing-page__root">');
     expect(jsx).toContain('className="landing-page__hero"');
     expect(jsx).toContain('className="landing-page__card-2"');
     expect(jsx).toContain('htmlFor="email"');
@@ -87,19 +87,19 @@ describe('exportComponent', () => {
 
   it('writes Tailwind classes with display variants instead of a CSS file', () => {
     const out = exportComponent(page(), { framework: 'react', styling: 'tailwind' });
-    expect(out.files.map((f) => f.path)).toEqual(['LandingPage.jsx']);
+    expect(out.files.map((f) => f.path)).toEqual(['LandingPage.jsx', 'kits.css', 'base.css']);
     const jsx = file(out, 'LandingPage.jsx');
     expect(jsx).toContain('Needs Tailwind CSS');
     expect(jsx).toContain('grid');
-    expect(jsx).toContain('[grid-template-columns:repeat(3,minmax(0,1fr))]');
-    expect(jsx).toContain('max-[1024px]:[grid-template-columns:repeat(2,minmax(0,1fr))]');
+    expect(jsx).toContain('grid-cols-[repeat(3,minmax(0,1fr))]');
+    expect(jsx).toContain('max-[1024.02px]:grid-cols-[repeat(2,minmax(0,1fr))]');
   });
 
   it('keeps class names valid when the tree name starts with a digit', () => {
     const tree = pageTree('3 columns', [createBranch({ tag: 'div', styles: { lg: { gap: '1rem' } } })]);
     const out = exportComponent(tree, { framework: 'react' });
     expect(out.name).toBe('Layout3Columns');
-    expect(file(out, 'Layout3Columns.jsx')).toContain('className="layout-3-columns"');
+    expect(file(out, 'Layout3Columns.jsx')).toContain('className="layout-3-columns__root"');
     expect(file(out, 'Layout3Columns.css')).toContain('.layout-3-columns__div {');
   });
 
@@ -129,8 +129,8 @@ describe('Tailwind helpers', () => {
   it('maps displays to variants', () => {
     const byId = (id: string) => DISPLAYS.find((d) => d.id === id) as DisplayDef;
     expect(tailwindVariant(byId('lg'))).toBe('');
-    expect(tailwindVariant(byId('tablet'))).toBe('max-[1024px]:');
-    expect(tailwindVariant(byId('mobile-portrait'))).toMatch(/^max-\[\d+px\]:portrait:$/);
+    expect(tailwindVariant(byId('tablet'))).toBe('max-[1024.02px]:');
+    expect(tailwindVariant(byId('mobile-portrait'))).toMatch(/^max-\[\d+\.02px\]:portrait:$/);
     expect(tailwindVariant(byId('xl'))).toBe('min-[1440px]:');
   });
 
@@ -138,8 +138,8 @@ describe('Tailwind helpers', () => {
     expect(tailwindClass('display', 'flex')).toBe('flex');
     expect(tailwindClass('text-align', 'center')).toBe('text-center');
     expect(tailwindClass('padding', '1rem')).toBe('p-[1rem]');
-    expect(tailwindClass('padding', '1rem 2rem')).toBe('[padding:1rem_2rem]');
-    expect(tailwindClass('font-family', '"Open Sans", serif')).toBe('[font-family:"Open_Sans",serif]');
+    expect(tailwindClass('padding', '1rem 2rem')).toBe('p-[1rem_2rem]');
+    expect(tailwindClass('font-family', '"Open Sans", serif')).toBe("[font-family:'Open_Sans',serif]");
   });
 
   it('renames attributes for JSX', () => {
@@ -183,7 +183,7 @@ describe('design tokens in web exports', () => {
     expect(jsx).toContain('rounded-radius');
     // A length token used as a colour, and a shorthand, keep arbitrary values.
     expect(jsx).toContain('[color:var(--space-3)]');
-    expect(jsx).toContain('[margin:var(--space-3)_0]');
+    expect(jsx).toContain('m-[var(--space-3)_0]');
     const theme = out.files.find((f) => f.path === 'tailwind.theme.css')!.contents;
     expect(theme).toContain('@theme inline {');
     expect(theme).toContain('--color-brand: var(--brand);');
@@ -196,7 +196,7 @@ describe('design tokens in web exports', () => {
 
   it('writes no token files without tokens', () => {
     const out = exportComponent(themed(), { framework: 'react', styling: 'tailwind' });
-    expect(out.files.map((f) => f.path)).toEqual(['Themed.jsx']);
+    expect(out.files.map((f) => f.path)).toEqual(['Themed.jsx', 'kits.css', 'base.css']);
   });
 
   it('maps a token declaration to its theme class only for matching kinds', () => {
